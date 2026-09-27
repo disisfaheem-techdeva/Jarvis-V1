@@ -30,6 +30,7 @@ from .brain import make_brain_router
 from .operations import make_operations_router
 from .brand import make_brand_router
 from .console import make_console_router
+from .social import make_social_router
 from .founder import router as founder_router
 from .policy import make_policy_router
 from .whatsapp import make_whatsapp_router
@@ -67,6 +68,7 @@ app.include_router(make_whatsapp_router())
 app.include_router(make_policy_router())
 app.include_router(make_brand_router())
 app.include_router(make_console_router())
+app.include_router(make_social_router())
 app.include_router(founder_router)
 
 # The two client-facing pages. The API image is built from ./app, so web/ is
@@ -338,8 +340,8 @@ URL_RE = re.compile(r"^https?://[^\s/$.?#][^\s]*$", re.I)
 WEAK_PASSWORDS = {"password", "password1", "12345678", "123456789", "qwertyui",
                   "letmein1", "changeme", "admin123", "techdeva", "passw0rd"}
 
-SIGNUP_MAX_PER_IP = 3
-SIGNUP_MAX_PER_EMAIL = 1
+SIGNUP_MAX_PER_IP = 10
+SIGNUP_MAX_PER_EMAIL = 5
 SIGNUP_WINDOW = 3600
 _signup_hits: dict = {}
 

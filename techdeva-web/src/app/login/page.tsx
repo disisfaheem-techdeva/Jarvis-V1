@@ -2,11 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { API_BASE } from "@/lib/api";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -16,9 +14,10 @@ export default function LoginPage() {
     setError(null);
     const form = new FormData(e.currentTarget);
     try {
-      const res = await fetch(`${API_BASE}/login`, {
+      const res = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           email: form.get("email"),
           password: form.get("password"),
@@ -29,7 +28,7 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
-      router.push("/portal");
+      window.location.href = "https://api.techdeva.net/dashboard";
     } catch {
       setError("Could not reach the server.");
       setLoading(false);

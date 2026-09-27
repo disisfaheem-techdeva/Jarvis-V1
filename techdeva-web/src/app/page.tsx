@@ -24,7 +24,7 @@ export default function Home() {
           ))}
         </nav>
         <div className="flex items-center gap-2 text-sm">
-          <Link href="/login" className="td-btn-ghost px-3 py-2">
+          <Link href="/auth/login" className="td-btn-ghost px-3 py-2">
             Log in
           </Link>
           <Link href="/demo" className="td-btn-primary px-4 py-2">

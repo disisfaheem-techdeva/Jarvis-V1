@@ -112,7 +112,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 let TOKEN = null, D = {};
 const NAV = [
   ['RUNNING THE BUSINESS', [
-    ['overview','Overview'], ['clients','Clients'], ['pipeline','Pipeline & trials']]],
+    ['jarvis','Jarvis'], ['overview','Overview'], ['clients','Clients'], ['pipeline','Pipeline & trials']]],
   ['WHAT THE AI DELIVERS', [
     ['bookings','Bookings'], ['workforce','AI workforce'], ['approvals','Waiting on you']]],
   ['MONEY', [
@@ -120,7 +120,8 @@ const NAV = [
   ['PLATFORM', [
     ['health','Health'], ['incidents','Incidents']]]
 ];
-const TITLES = {overview:['Overview','The whole business on one screen.'],
+const TITLES = {jarvis:['Jarvis','Pick a client, then say or type what to change for them.'],
+  overview:['Overview','The whole business on one screen.'],
   clients:['Clients','Everyone onboard, what they pay, and what they are getting.'],
   pipeline:['Pipeline & trials','Who signed up and who is still on a trial.'],
   bookings:['Bookings','Appointments the AI has put in your clients diaries.'],
@@ -222,6 +223,95 @@ function paint(){
   el.innerHTML = fn();
   if (v === 'clients') wireClients();
   if (v === 'invoices') wireInvoices();
+  if (v === 'jarvis') wireJarvis();
+}
+
+let JV_CLIENT = '';
+async function jvLoadPosts(){
+  const el = document.getElementById('jv-posts');
+  if (!el || !JV_CLIENT) return;
+  const q = '?tenant=' + encodeURIComponent(JV_CLIENT);
+  el.innerHTML = '<div class="empty">Loading...</div>';
+  let acc, ps;
+  try { [acc, ps] = await Promise.all([api('/social/accounts' + q), api('/social/posts' + q)]); }
+  catch (e) { el.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; return; }
+  const head = acc.connected
+    ? '<div class="sub">Posting to: ' + esc(acc.pages.map(p => p.name + (p.instagram ? ' + Instagram' : '')).join(', ')) + '</div>'
+    : '<div class="sub">This client has not connected Facebook yet. They connect it from their own dashboard (Jarvis, Connect Facebook).</div>';
+  const rows = (ps.posts || []).map(p => {
+    const res = p.results || {};
+    const errs = Object.keys(res).filter(k => res[k] && !res[k].ok).map(k => k + ': ' + (res[k].error || 'failed'));
+    const waiting = p.status === 'draft' || p.status === 'failed';
+    return '<div class="card" style="padding:10px 12px;margin-top:8px"><div class="k-note">' +
+      esc((p.platforms || []).join(' + ')) + ' · ' + esc(p.status) + ' · ' + when(p.created_at) + '</div>' +
+      (p.image_url ? '<img src="' + esc(p.image_url) + '" alt="" style="max-width:200px;border-radius:8px;margin:6px 0;display:block">' : '') +
+      '<div style="white-space:pre-wrap">' + esc(p.caption) + '</div>' +
+      (errs.length ? '<div class="sub warn">' + esc(errs.join(' | ')) + '</div>' : '') +
+      (waiting ? '<div class="k-note" style="margin-top:6px">Waiting for the client to approve.</div>' : '') +
+      '</div>';
+  });
+  el.innerHTML = head + (rows.length ? rows.join('') : '<div class="empty">No posts yet for this client.</div>') +
+    '<div id="jv-pmsg" class="sub" style="margin-top:6px"></div>';
+  const msg = t => { const m = document.getElementById('jv-pmsg'); if (m) m.textContent = t; };
+  el.querySelectorAll('[data-jpub]').forEach(b => b.onclick = async () => {
+    if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Tap again to post publicly'; return; }
+    b.disabled = true; b.textContent = 'Posting...';
+    try { const r = await api('/social/posts/' + b.dataset.jpub + '/publish' + q, {method: 'POST'});
+          await jvLoadPosts(); msg('Result: ' + r.status); }
+    catch (e) { await jvLoadPosts(); msg(e.message); }
+  });
+  el.querySelectorAll('[data-jdis]').forEach(b => b.onclick = async () => {
+    try { await api('/social/posts/' + b.dataset.jdis + q, {method: 'DELETE'}); await jvLoadPosts(); msg('Discarded.'); }
+    catch (e) { msg(e.message); }
+  });
+}
+function wireJarvis(){
+  const sel = document.getElementById('jv-client'), box = document.getElementById('jv-in');
+  const go = document.getElementById('jv-go'), mic = document.getElementById('jv-mic');
+  const out = document.getElementById('jv-out'), note = document.getElementById('jv-note');
+  if (!sel) return;
+  if (JV_CLIENT) sel.value = JV_CLIENT;
+  sel.onchange = () => { JV_CLIENT = sel.value; out.innerHTML = ''; jvLoadPosts(); };
+  if (sel.value) jvLoadPosts();
+  const send = async () => {
+    const msg = box.value.trim();
+    if (!msg) return;
+    if (!sel.value) { note.textContent = 'Pick a client first.'; return; }
+    JV_CLIENT = sel.value;
+    note.textContent = 'Thinking... (can take up to a minute)'; go.disabled = true;
+    try {
+      const d = await api('/console', {method:'POST', body: JSON.stringify({message: msg, tenant_id: sel.value})});
+      box.value = '';
+      let extra = '';
+      if (d.kind === 'business') extra = (d.action === 'create' ? 'Added to ' : 'Updated in ') + (d.resource || '');
+      if (d.kind === 'teach') extra = 'Their WhatsApp agent will now follow: ' + (d.lesson || '');
+      if (d.kind === 'dashboard') extra = 'Dashboard changed: ' + JSON.stringify(d.changed || {});
+      if (d.kind === 'post') { extra = 'Drafted. The client decides whether it goes out.'; jvLoadPosts(); }
+      const name = sel.options[sel.selectedIndex].text;
+      out.innerHTML = '<div class="card" style="padding:12px 14px"><div class="k-note">' + esc(name) +
+        '</div><div>' + esc(d.reply || 'Done.') + '</div>' +
+        (extra ? '<div class="sub" style="margin-top:6px">' + esc(extra) + '</div>' : '') + '</div>';
+      note.textContent = '';
+    } catch (e) { note.textContent = e.message || 'Jarvis could not do that.'; }
+    go.disabled = false;
+  };
+  go.onclick = send;
+  box.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const label = String.fromCodePoint(127908) + ' Speak';
+  if (!SR) { mic.style.display = 'none'; return; }
+  mic.textContent = label;
+  let rec = null, on = false;
+  mic.onclick = () => {
+    if (on) { rec && rec.stop(); return; }
+    try { rec = new SR(); } catch (e) { mic.style.display = 'none'; return; }
+    rec.lang = 'en-US'; rec.interimResults = false; rec.maxAlternatives = 1;
+    on = true; mic.textContent = '... Listening';
+    rec.onresult = ev => { const t = ev.results[0][0].transcript;
+      if (t) box.value = (box.value ? box.value.trim() + ' ' : '') + t; };
+    rec.onerror = rec.onend = () => { on = false; mic.textContent = label; };
+    try { rec.start(); } catch (e) { on = false; mic.textContent = label; }
+  };
 }
 
 function chart(months){
@@ -255,6 +345,22 @@ function clientRows(rows){
 }
 
 const VIEWS = {
+  jarvis(){
+    const cs = ((D.book && D.book.clients) || []);
+    return '<section><div class="card" style="padding:16px">' +
+      '<label class="k-label">Client</label><br><select id="jv-client" style="margin:6px 0 12px;padding:8px;min-width:260px">' +
+      '<option value="">Choose a client...</option>' +
+      cs.map(c => '<option value="' + esc(c.id) + '">' + esc(c.name || 'Unnamed') + '</option>').join('') +
+      '</select>' +
+      '<textarea id="jv-in" rows="3" style="width:100%;padding:12px;border-radius:10px;font:inherit" ' +
+      'placeholder="Add a service called HydraFacial at 8,000. / Close on Fridays. / Teach their agent: consultations are free. / Make their brand colour #C9A227."></textarea>' +
+      '<div class="row" style="margin-top:10px;gap:8px;align-items:center"><button id="jv-go" class="tiny primary">Send</button>' +
+      '<button id="jv-mic" class="tiny" type="button">Speak</button><span id="jv-note" class="sub"></span></div>' +
+      '<div id="jv-out" style="margin-top:14px"></div>' +
+      '<div class="k-label" style="margin-top:18px">Social posts for this client</div>' +
+      '<div id="jv-posts" style="margin-top:8px"><div class="empty">Pick a client to see their posts.</div></div></div>' +
+      '<div class="sub" style="margin-top:8px">Changes apply to the chosen client only, instantly, and are recorded in the audit log.</div></section>';
+  },
   overview(){
     const b = D.book, h = D.health || {}, o = (D.ops || {}).client_business || {};
     const unpaid = Number(b.unpaid_this_month) || 0;

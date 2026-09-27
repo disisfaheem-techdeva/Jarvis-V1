@@ -126,7 +126,7 @@ def set_account(tenant_id: str, body: dict = Body(...),
         if not cur.fetchone():
             raise HTTPException(404, "no such client")
         record(cur, action="techdeva.account.set", resource="client_accounts",
-               resource_id=tenant_id, actor=uid)
+               resource_id=tenant_id, actor=uid, tenant_id=tenant_id)
     return {"ok": True}
 
 
@@ -154,7 +154,8 @@ def add_payment(tenant_id: str, body: dict = Body(...),
                      (body.get("notes") or "")[:1000]))
         pid = cur.fetchone()["id"]
         record(cur, action="techdeva.payment.add", resource="client_payments",
-               resource_id=str(pid), actor=uid, detail={"amount": amount})
+               resource_id=str(pid), actor=uid, detail={"amount": amount},
+               tenant_id=tenant_id)
     return {"ok": True, "id": str(pid)}
 
 
@@ -183,7 +184,8 @@ def add_invoice(tenant_id: str, body: dict = Body(...),
             raise HTTPException(404, "no such client")
         iid = row["id"]
         record(cur, action="techdeva.invoice.create", resource="client_invoices",
-               resource_id=str(iid), actor=uid, detail={"amount": amount})
+               resource_id=str(iid), actor=uid, detail={"amount": amount},
+               tenant_id=tenant_id)
     return {"ok": True, "id": str(iid)}
  
  
@@ -197,12 +199,12 @@ def send_invoice(invoice_id: str,
     with tenant_session(None, "techdeva_admin") as cur:
         cur.execute("""UPDATE client_invoices SET status='sent', sent_at=now(), updated_at=now()
                         WHERE id=%s AND status='draft'
-                        RETURNING id""", (invoice_id,))
+                        RETURNING id, tenant_id""", (invoice_id,))
         row = cur.fetchone()
         if not row:
             raise HTTPException(404, "no draft invoice with that id")
         record(cur, action="techdeva.invoice.send", resource="client_invoices",
-               resource_id=invoice_id, actor=uid)
+               resource_id=invoice_id, actor=uid, tenant_id=row["tenant_id"])
     return {"ok": True}
  
  
@@ -240,7 +242,8 @@ def hide(tenant_id: str, body: dict = Body(default={}),
         if not cur.fetchone():
             raise HTTPException(404, "no such client")
         record(cur, action="techdeva.client.hide", resource="tenants",
-               resource_id=tenant_id, actor=uid, detail={"hidden": hidden})
+               resource_id=tenant_id, actor=uid, detail={"hidden": hidden},
+               tenant_id=tenant_id)
     return {"ok": True, "hidden": hidden}
 
 

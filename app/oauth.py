@@ -26,7 +26,8 @@ GOOGLE_SECRET = os.environ.get("GOOGLE_SECRET", "")
 OAUTH_REDIRECT_BASE = os.environ.get("OAUTH_REDIRECT_BASE", "http://localhost:8000")
 
 # Meta permissions needed for ads + publishing + insights
-META_SCOPES = "ads_management,pages_manage_posts,pages_read_engagement,instagram_basic,business_management"
+META_SCOPES = ("ads_management,pages_manage_posts,pages_read_engagement,pages_show_list,"
+               "instagram_basic,instagram_content_publish,business_management")
 # Google scopes for Ads API + Business Profile
 GOOGLE_SCOPES = "https://www.googleapis.com/auth/adwords https://www.googleapis.com/auth/business.manage"
 
@@ -79,11 +80,30 @@ def meta_exchange_code(code: str) -> dict:
     except Exception:
         pass  # non-fatal; the client may not have an ad account yet
 
+    # the pages this person manages, each with its own page token (page tokens
+    # made from a long-lived user token do not expire) and any Instagram
+    # business account linked to it -- this is what posting uses.
+    pages = []
+    try:
+        with urllib.request.urlopen(
+            "https://graph.facebook.com/v21.0/me/accounts?limit=50&fields="
+            "id,name,access_token,instagram_business_account%7Bid,username%7D"
+            f"&access_token={long['access_token']}", timeout=20
+        ) as r:
+            for pg in json.loads(r.read()).get("data", []):
+                ig = pg.get("instagram_business_account") or {}
+                pages.append({"id": pg.get("id"), "name": pg.get("name", ""),
+                              "access_token": pg.get("access_token", ""),
+                              "ig_id": ig.get("id"), "ig_username": ig.get("username")})
+    except Exception:
+        pass  # non-fatal; posting will say "connect Facebook" until pages exist
+
     return {
         "access_token": long["access_token"],
         "token_type": "long_lived",
         "expires_in": long.get("expires_in"),
         "ad_accounts": ad_accounts,
+        "pages": pages,
     }
 
 

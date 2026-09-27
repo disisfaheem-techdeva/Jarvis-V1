@@ -61,7 +61,7 @@ export default function GrowthPage() {
     return (
       <p className="text-sm text-[var(--muted)]">
         You are signed out.{" "}
-        <Link className="underline" href="/login">
+        <Link className="underline" href="/auth/login">
           Sign in
         </Link>{" "}
         to see your growth plan.

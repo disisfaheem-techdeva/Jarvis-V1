@@ -100,7 +100,7 @@ export default function ApprovalsPage() {
     return (
       <p className="text-sm text-[var(--muted)]">
         You are signed out.{" "}
-        <Link className="underline" href="/login">
+        <Link className="underline" href="/auth/login">
           Sign in
         </Link>{" "}
         to review what is waiting.

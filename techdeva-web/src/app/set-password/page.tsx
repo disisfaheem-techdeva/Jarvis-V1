@@ -46,7 +46,7 @@ function Form() {
         <h1 className="text-xl font-semibold text-white">Password set</h1>
         <p className="mt-3 text-sm text-[var(--muted)]">
           You can now{" "}
-          <Link className="underline" href="/login">
+          <Link className="underline" href="/auth/login">
             sign in
           </Link>
           . This link will not work again.

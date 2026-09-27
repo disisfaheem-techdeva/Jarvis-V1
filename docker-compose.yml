@@ -73,6 +73,7 @@ services:
       # Ordered fallback. One model being rate limited upstream is normal,
       # so the workforce walks the list rather than stopping.
       AI_MODEL_CHAIN: ${AI_MODEL_CHAIN:-}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -111,6 +112,7 @@ services:
       # Ordered fallback. One model being rate limited upstream is normal,
       # so the workforce walks the list rather than stopping.
       AI_MODEL_CHAIN: ${AI_MODEL_CHAIN:-}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

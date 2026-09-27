@@ -116,7 +116,7 @@ export default function OnboardingPage() {
         <h1 className="text-xl font-semibold text-white">Onboarding</h1>
         <p className="mt-4 text-sm text-[var(--muted)]">
           You are signed out.{" "}
-          <Link className="underline" href="/login">
+          <Link className="underline" href="/auth/login">
             Sign in
           </Link>{" "}
           to set up your business.

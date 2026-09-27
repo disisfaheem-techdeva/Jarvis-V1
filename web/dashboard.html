@@ -232,7 +232,7 @@ var NAV = [
   ]},
   { label:'Business', items:[
       {id:'integrations', name:'Integrations'},
-      {id:'console',      name:'AI Console'},
+      {id:'console',      name:'Jarvis'},
       {id:'reports', name:'Reports'},
       {id:'settings', name:'Business Settings'}
   ]}
@@ -559,15 +559,18 @@ VIEWS.integrations = function(){
 };
 
 VIEWS.console = function(){
-  var out = '<h1>AI Console</h1><p class="sub">Tell the platform what to change, in your own words. ' +
-            'Two things live here: how your dashboard looks, and what your WhatsApp agent knows.</p>';
+  var out = '<h1>Jarvis</h1><p class="sub">Tell the platform what to change, in your own words. ' +
+            'Change how your dashboard looks, update prices, services, staff and hours, or teach your WhatsApp agent something new.</p>';
   out += panel('Say it plainly',
     '<div style="padding:16px">' +
-    '<textarea id="con-in" rows="3" placeholder="Teach my WhatsApp agent: hair PRP is 12,000 per session, three for 30,000.&#10;Or: hide the inventory section and make my brand colour #C9A227." ' +
+    '<textarea id="con-in" rows="3" placeholder="Teach my WhatsApp agent: hair PRP is 12,000 per session, three for 30,000.&#10;Or: hide the inventory section and make my brand colour #C9A227.&#10;Or: add a new service called HydraFacial at 8,000." ' +
     'style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit"></textarea>' +
     '<div style="margin-top:10px"><button id="con-go" class="btn">Send</button> ' +
+    '<button id="con-mic" class="btn" type="button" style="display:none" title="Speak instead of typing">&#127908; Speak</button> ' +
     '<span id="con-note" class="sub"></span></div>' +
     '<div id="con-out" style="margin-top:14px"></div></div>');
+  out += '<h2>Social posts</h2>';
+  out += panel('Waiting for your approval', actbar() + '<div id="con-posts">' + loading('Loading posts...') + '</div>');
   out += '<h2>What your WhatsApp agent has been taught</h2>';
   out += panel('Lessons', '<div id="con-les">' + loading('Loading...') + '</div>');
   setTimeout(function(){
@@ -577,10 +580,47 @@ VIEWS.console = function(){
     if (box) box.onkeydown = function(e){
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); consoleSend(); }
     };
+    wireConsoleMic();
+    loadPosts();
     loadLessons();
   }, 0);
   return out;
 };
+
+function wireConsoleMic(){
+  var mic = document.getElementById('con-mic');
+  var box = document.getElementById('con-in');
+  if (!mic || !box) return;
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { mic.style.display = 'none'; return; }
+  mic.style.display = '';
+  var rec = null;
+  var listening = false;
+  mic.onclick = function(){
+    if (listening) { if (rec) rec.stop(); return; }
+    try { rec = new SR(); } catch (e) { mic.style.display = 'none'; return; }
+    rec.lang = 'en-US';
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    listening = true;
+    mic.textContent = '... Listening';
+    rec.onresult = function(ev){
+      var text = ev.results && ev.results[0] && ev.results[0][0] && ev.results[0][0].transcript;
+      if (text) {
+        box.value = (box.value ? box.value.trim() + ' ' : '') + text;
+      }
+    };
+    rec.onerror = function(){
+      listening = false;
+      mic.textContent = String.fromCodePoint(127908) + ' Speak';
+    };
+    rec.onend = function(){
+      listening = false;
+      mic.textContent = String.fromCodePoint(127908) + ' Speak';
+    };
+    try { rec.start(); } catch (e) { listening = false; mic.textContent = String.fromCodePoint(127908) + ' Speak'; }
+  };
+}
 
 function consoleSend(){
   var box = document.getElementById('con-in');
@@ -609,9 +649,73 @@ function consoleSend(){
       extra = '<div class="sub" style="margin-top:8px">Applied: ' +
               esc(JSON.stringify(d.changed || {})) + '</div>';
     }
+    if (d.kind === 'post') {
+      extra = '<div class="sub" style="margin-top:8px">Nothing is public yet. Review it under Social posts below.</div>';
+      loadPosts();
+    }
+    if (d.kind === 'business') {
+      need('biz_' + d.resource, '/business/' + d.resource, true);
+      extra = '<div class="sub" style="margin-top:8px">' +
+              (d.action === 'create' ? 'Added to ' : 'Updated in ') +
+              esc(d.resource || 'your business details') + '.</div>';
+    }
     if (out) out.innerHTML =
       '<div style="padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--card)">' +
       esc(d.reply || 'Done.') + extra + '</div>';
+  });
+}
+
+function loadPosts(){
+  var el = document.getElementById('con-posts');
+  if (!el) return;
+  Promise.all([api('/social/accounts'), api('/social/posts')]).then(function(rs){
+    var acc = rs[0], ps = rs[1];
+    if (!ps.ok) { el.innerHTML = errState('Could not read your posts.'); return; }
+    var conn = acc.ok && acc.data && acc.data.connected;
+    var head = conn
+      ? '<div class="sub" style="margin-bottom:10px">Posting to: ' +
+        esc((acc.data.pages || []).map(function(p){
+          return p.name + (p.instagram ? ' + Instagram' + (typeof p.instagram === 'string' ? ' @' + p.instagram : '') : '');
+        }).join(', ')) + '</div>'
+      : '<div class="sub" style="margin-bottom:10px">Facebook is not connected yet, so posts can be drafted but not published. ' +
+        '<a class="btn" href="/connect/meta">Connect Facebook &amp; Instagram</a></div>';
+    var items = (ps.data && ps.data.posts) || [];
+    if (!items.length) {
+      el.innerHTML = head + empty('No posts yet', 'Ask Jarvis: "post on Facebook and Instagram that HydraFacial is 20% off this weekend".');
+      return;
+    }
+    el.innerHTML = head + items.map(function(p){
+      var res = p.results || {};
+      var errs = Object.keys(res).filter(function(k){ return res[k] && !res[k].ok; })
+        .map(function(k){ return k + ': ' + (res[k].error || 'failed'); });
+      var waiting = p.status === 'draft' || p.status === 'failed';
+      return '<div style="padding:12px 14px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:var(--card)">' +
+        '<div class="sub">' + esc((p.platforms || []).join(' + ')) + ' &middot; ' + esc(p.status) +
+        ' &middot; ' + esc(String(p.created_at).slice(0,16).replace('T',' ')) + '</div>' +
+        (p.image_url ? '<img src="' + esc(p.image_url) + '" alt="" style="max-width:220px;border-radius:8px;margin:8px 0;display:block">' : '') +
+        '<div style="white-space:pre-wrap;margin:6px 0">' + esc(p.caption) + '</div>' +
+        (errs.length ? '<div class="sub" style="color:var(--danger)">' + esc(errs.join(' | ')) + '</div>' : '') +
+        (waiting ? '<div style="margin-top:8px"><button class="btn" data-pub="' + esc(p.id) + '">Approve &amp; post</button> ' +
+          '<button class="btn" data-dis="' + esc(p.id) + '">Discard</button></div>' : '') +
+        '</div>';
+    }).join('');
+    Array.prototype.forEach.call(el.querySelectorAll('[data-pub]'), function(b){
+      b.onclick = function(){
+        if (!b.getAttribute('data-armed')) {
+          b.setAttribute('data-armed', '1');
+          b.textContent = 'Tap again to post publicly';
+          return;
+        }
+        b.disabled = true; b.textContent = 'Posting...';
+        act('/social/posts/' + b.getAttribute('data-pub') + '/publish', { method: 'POST' }, 'Posted.')
+          .then(loadPosts);
+      };
+    });
+    Array.prototype.forEach.call(el.querySelectorAll('[data-dis]'), function(b){
+      b.onclick = function(){
+        act('/social/posts/' + b.getAttribute('data-dis'), { method: 'DELETE' }, 'Discarded.').then(loadPosts);
+      };
+    });
   });
 }
 
