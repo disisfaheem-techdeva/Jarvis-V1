@@ -210,10 +210,17 @@ def make_whatsapp_router():
                td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
         """TechDeva assigns a tenant to an agent. Admin only, by design: this is
         the mapping the rest of the module refuses to take from a client."""
-        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        # Not _identity(): that insists on a current tenant, and the founder
+        # has none -- so the one person allowed to assign never could.
+        try:
+            tid, role, uid = resolve_scope(x_tenant_id, x_role, authorization, td_session)
+        except AuthError as e:
+            raise HTTPException(e.status, e.message)
         if role != "techdeva_admin":
             raise HTTPException(403, "Assigning an agent is a TechDeva action.")
         target = body.get("tenant_id") or tid
+        if not target:
+            raise HTTPException(400, "tenant_id is required")
         agent_key = (body.get("agent_key") or "").strip()
         pairctl_url = (body.get("pairctl_url") or "").strip()
         if not agent_key or not pairctl_url:
@@ -227,6 +234,9 @@ def make_whatsapp_router():
                                  updated_at = now()
                            RETURNING id""", (target, agent_key, pairctl_url))
             new_id = cur.fetchone()["id"]
+            record(cur, action="whatsapp.assign", resource="whatsapp_connections",
+                   resource_id=str(new_id), actor=str(uid), actor_type="human",
+                   status="ok", detail={"agent": agent_key}, error=None, tenant_id=target)
         return {"ok": True, "id": str(new_id), "tenant_id": str(target), "agent_key": agent_key}
 
     return router
