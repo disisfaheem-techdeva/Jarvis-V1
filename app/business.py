@@ -217,6 +217,9 @@ def _onboarding_fallback(resource, cfg):
             return None
         price_list = cfg.get("price_list") or []
         price_by_name = {}
+        # Stored two ways: [{"service": .., "price": ..}] or {"Service": price}.
+        if isinstance(price_list, dict):
+            price_list = [{"service": k, "price": v} for k, v in price_list.items()]
         for p in price_list:
             if isinstance(p, dict) and p.get("service"):
                 price_by_name[str(p["service"]).strip().lower()] = p
