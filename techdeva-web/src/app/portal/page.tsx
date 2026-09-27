@@ -1,41 +1,46 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { StatCard } from "@/components/StatCard";
-import { useTenant } from "@/lib/useTenant";
-import { getAttributionReport, getLeads, type AttributionReport, type Lead } from "@/lib/api";
+// The website's "Login" button lands here. The full client dashboard lives at
+// api.techdeva.net/dashboard, so this page only decides where to send people:
+// signed in -> their dashboard, not signed in -> the login page. It used to
+// show a developer message ("No tenant selected ...") to every visitor.
 
-export default function PortalOverview() {
-  const tenantId = useTenant();
-  const [report, setReport] = useState<AttributionReport | null>(null);
-  const [leads, setLeads] = useState<Lead[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+import { useEffect, useState } from "react";
+import { API_BASE } from "@/lib/api";
+
+const DASHBOARD = "https://api.techdeva.net/dashboard";
+
+export default function PortalEntry() {
+  const [msg, setMsg] = useState("Opening your dashboard…");
 
   useEffect(() => {
-    if (!tenantId) return;
-    getAttributionReport(tenantId).then((r) => (r.ok ? setReport(r.data) : setError(r.error)));
-    getLeads(tenantId).then((r) => (r.ok ? setLeads(r.data) : setError(r.error)));
-  }, [tenantId]);
-
-  if (!tenantId) {
-    return (
-      <p className="text-sm text-[var(--muted)]">
-        No tenant selected — open this portal with <code>?tenant=&lt;your-tenant-id&gt;</code> once,
-        or sign in once the login flow is wired to the platform&apos;s real auth.
-      </p>
-    );
-  }
+    let done = false;
+    fetch(`${API_BASE}/me`, { credentials: "include", cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((me) => {
+        done = true;
+        if (me && me.authenticated) {
+          window.location.replace(DASHBOARD);
+        } else {
+          window.location.replace("/login");
+        }
+      })
+      .catch(() => {
+        done = true;
+        window.location.replace("/login");
+      });
+    const t = setTimeout(() => {
+      if (!done) setMsg("Still connecting… if nothing happens, go to the login page.");
+    }, 6000);
+    return () => clearTimeout(t);
+  }, []);
 
   return (
-    <div>
-      <h1 className="text-xl font-semibold text-white">Overview</h1>
-      {error ? <p className="mt-2 text-sm text-[var(--danger)]">Could not load live data: {error}</p> : null}
-      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Open leads" value={leads ? leads.filter((l) => l.status !== "lost").length : null} />
-        <StatCard label="ROAS" value={report?.roas ?? null} suffix="×" />
-        <StatCard label="CPL" value={report?.cpl ?? null} />
-        <StatCard label="Spend" value={report?.spend ?? null} />
-      </div>
+    <div className="mx-auto mt-24 max-w-md text-center">
+      <p className="text-sm text-[var(--muted)]">{msg}</p>
+      <p className="mt-4 text-sm">
+        <a className="underline" href="/login">Go to login</a>
+      </p>
     </div>
   );
 }
