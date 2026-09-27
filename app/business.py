@@ -222,6 +222,11 @@ def _onboarding_fallback(resource, cfg):
                 price_by_name[str(p["service"]).strip().lower()] = p
         items = []
         for i, s in enumerate(services):
+            # Onboarding stores services either as {"name": ...} objects or as
+            # plain names ("Rhinoplasty"). Plain names were silently dropped,
+            # so a client who listed ten services saw none.
+            if isinstance(s, str) and s.strip():
+                s = {"name": s.strip()}
             if not isinstance(s, dict) or not s.get("name"):
                 continue
             price_row = price_by_name.get(str(s["name"]).strip().lower(), {})
