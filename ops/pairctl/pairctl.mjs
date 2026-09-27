@@ -58,7 +58,7 @@ function stopBridge(why) {
 
 function bridgeSession() {
   return new Promise((resolve) => {
-    const req = http.get({ host: '127.0.0.1', port: BRIDGE_PORT, path: '/session', timeout: 3000 }, (res) => {
+    const req = http.get({ host: '127.0.0.1', port: BRIDGE_PORT, path: '/session', timeout: 3000, headers: { 'x-internal-key': KEY } }, (res) => {
       let body = '';
       res.on('data', c => body += c);
       res.on('end', () => { try { resolve(JSON.parse(body)); } catch (e) { resolve(null); } });
