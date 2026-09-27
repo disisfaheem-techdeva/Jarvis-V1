@@ -315,9 +315,19 @@ VIEWS.overview = function(){
   out += metric('Integrations connected', connected, integ ? Object.keys(integ).length + ' configured' : null);
   out += '</div>';
 
-  out += '<h2>Not measured yet</h2>';
-  out += panel('Revenue, customers and appointments',
-    soon('', 'These need the business and money tables, which arrive in a later module. Nothing is estimated here in the meantime.'));
+  out += '<h2>This month</h2>';
+  var gP = need('ov_pnl', '/operations/pnl'),
+      gA = need('ov_appts', '/operations/appointments?when=upcoming'),
+      gC = need('ov_cust', '/business/customers');
+  if (!(gP && gA && gC)) return out + panel('Money and bookings', loading('Loading your figures...'));
+  var P = S.ov_pnl, AP = S.ov_appts, CU = S.ov_cust;
+  out += '<div class="grid">';
+  out += metric('Collected', P ? money(P.collected) : null, P ? (P.payment_count + ' payment(s) this month') : 'Could not load');
+  out += metric('Invoiced', P ? money(P.invoiced) : null, P ? (P.invoice_count + ' invoice(s) this month') : null);
+  out += metric('Outstanding', P ? money(P.outstanding_all_time) : null, 'Owed to you, all time');
+  out += metric('Upcoming appointments', AP ? AP.count : null);
+  out += metric('Customers', CU ? CU.count : null);
+  out += '</div>';
   return out;
 };
 
@@ -881,13 +891,24 @@ VIEWS.customers = function(){
 };
 
 VIEWS.revenue = function(){
-  var out = '<h1>Sales / Revenue</h1><p class="sub">Recorded revenue for this business, last 90 days.</p>';
-  if (!need('revenue', '/revenue')) return out + panel('Revenue', loading('Loading revenue...'));
-  if (S.revenue === null) return out + panel('Revenue', errState('The revenue service did not respond.'));
-  var d = S.revenue;
+  var out = '<h1>Sales / Revenue</h1><p class="sub">Money this business has taken, last 90 days.</p>';
+  var since = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+  var gR = need('revenue', '/revenue'), gP = need('rev_pnl', '/operations/pnl?start=' + since);
+  if (!(gR && gP)) return out + panel('Revenue', loading('Loading revenue...'));
+  var P = S.rev_pnl;
   out += '<div class="grid">';
-  out += metric('Total recorded', d.total === null || d.total === undefined ? null : money(d.total), 'Last ' + esc(d.window_days) + ' days');
-  out += metric('Revenue events', d.count);
+  out += metric('Collected', P ? money(P.collected) : null, P ? (P.payment_count + ' payment(s)') : 'Could not load');
+  out += metric('Invoiced', P ? money(P.invoiced) : null, P ? (P.invoice_count + ' invoice(s)') : null);
+  out += metric('Expenses', P ? money(P.expenses) : null);
+  out += metric('Net', P ? money(P.net) : null, 'Collected minus expenses');
+  out += metric('Outstanding', P ? money(P.outstanding_all_time) : null, 'Owed to you, all time');
+  out += '</div>';
+  if (S.revenue === null) return out + panel('Revenue the AI brought in', errState('The revenue service did not respond.'));
+  var d = S.revenue;
+  out += '<h2>Revenue the AI brought in</h2>';
+  out += '<div class="grid">';
+  out += metric('Attributed to AI', d.total === null || d.total === undefined ? null : money(d.total), 'Last ' + esc(d.window_days) + ' days');
+  out += metric('Attributed sales', d.count);
   out += '</div>';
   var src = d.by_source || [];
   if (src.length) {
@@ -910,9 +931,7 @@ VIEWS.revenue = function(){
           '<td>' + esc(e.attributed_source || '—') + '</td></tr>';
       }).join('') + '</tbody></table></div>');
   }
-  out += '<h2>Not built yet</h2>';
-  out += panel('Invoices, payments and expenses',
-    soon('', 'Revenue can be recorded and read. Invoices, payments, expenses and profit/loss are a later module, and nothing here is estimated in the meantime.'));
+  out += '<div class="sub" style="margin-top:10px">Line-by-line detail is under Invoices, Expenses and Profit &amp; Loss.</div>';
   return out;
 };
 
