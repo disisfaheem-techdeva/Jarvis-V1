@@ -38,7 +38,7 @@ Re-run any time: `python3 ops/verify/live_check.py phase1 phase2 phase3 phase4 p
 | #13 | Team → Pin to Dashboard per role | **PASS** | saved in `dashboard_prefs.pinned_by_role`, shown per role, operator 403 on change |
 | #14 | Jarvis LISTEN/STOP + states | **PASS** | Idle → Listening → Processing → Responding/Error; mic-blocked message; live AI answer + server voice audio (phase5) |
 | #15 | Jarvis UI polish | **PASS** | orb + state label + single toggle, reuses existing voice helpers |
-| #16 | Facebook "Failed token exchange — 400" | **FAIL — config (Faheem)** | root cause proven, see §3 |
+| #16 | Facebook "Failed token exchange — 400" | **PASS** | root cause: wrong `META_APP_SECRET` (34 chars; Meta refused with code 1 / 190). Replaced 28 Sep → diagnose `app_check: ok` (app "TechDeva AIBOS") → real connect succeeded: "✓ Facebook & Instagram connected!", ad account 180347302012051 |
 | #17 | Sidebar jumping | **PASS** | scrollTop 400 → 400 across navigation and data redraws |
 | #18 | Sidebar groups | **PASS** | Dashboard · CRM · Business · Finance · Operations · AI/Automation · Administration (only existing sections; no Payments or Rights page exists — Payments live inside Invoices) |
 | #19 | Responsive | **PASS** | 28 sections × 1366/1440/1920/320/360/375/390/400/430 + appointment modal + drawer: 0 horizontal overflow |
@@ -96,7 +96,7 @@ The stored `META_APP_SECRET` is 34 characters; Meta issues 32 lowercase hex. It 
 
 ## 5. Remaining blockers and decisions
 
-1. **Facebook** — replace `META_APP_SECRET` (§3). Faheem.
+1. **Facebook** — secret replaced and a real connect succeeded (Faheem's admin account, for testing). Before a client relies on it: remove the test connection on Facebook (Settings → Business integrations → TechDeva AIBOS) and let the client connect with their own account; submit App Review and switch the app to Live so non-role users can connect.
 2. **WhatsApp Send for Irfan** — needs `pairctl-irfan` to share `hermes-agent-irfan`'s network (a planned re-create of both, or moving Irfan onto the template). Also brings T3 into an image so it survives. Faheem schedules; nothing was touched tonight.
 3. **Irfan's services** — press "Save them as services" on his Services page (6 onboarding services; his existing row is "botox in", 5,000, 15 min).
 4. **"sohail gandu"** customer and the ₨5,000 bill `INV-0001` with no customer — Faheem decides keep/void.
