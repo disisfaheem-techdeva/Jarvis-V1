@@ -37,8 +37,11 @@ export function SiteFooter() {
           <Link href="/login" className="hover:text-white">Log in</Link>
         </nav>
       </div>
-      <div className="border-t border-white/5 py-4 text-center text-xs text-[var(--muted)]">
-        © {new Date().getFullYear()} TechDeva
+      <div className="flex flex-wrap justify-center gap-x-5 gap-y-1 border-t border-white/5 py-4 text-center text-xs text-[var(--muted)]">
+        <span>© {new Date().getFullYear()} TechDeva</span>
+        <Link href="/privacy" className="hover:text-white">Privacy Policy</Link>
+        <Link href="/terms" className="hover:text-white">Terms of Service</Link>
+        <Link href="/data-deletion" className="hover:text-white">Delete your data</Link>
       </div>
     </footer>
   );

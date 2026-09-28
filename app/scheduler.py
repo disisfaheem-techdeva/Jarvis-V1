@@ -54,6 +54,13 @@ class Scheduler:
                 self.p.mark_trial_flagged(t["tenant_id"])       # dedupe: don't re-fire
                 emitted += 1
 
+        # Posts the owner approved for a later time.
+        try:
+            from .social import publish_due
+            emitted += publish_due()
+        except Exception as e:
+            print(f"[scheduler] scheduled posts skipped: {e}", flush=True)
+
         # Oversight: ask the Optimizer (13) to review performance on a cadence.
         # It only ever PROPOSES; the human approval gate is unchanged. Guarded by
         # hasattr so a persistence layer without the helper simply skips this.

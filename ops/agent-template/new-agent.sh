@@ -35,6 +35,12 @@ case "$KEY" in irfan|clinic|salon|workspace*) die "'$KEY' is a hand-built live a
 [[ "$TENANT" =~ ^[0-9a-f-]{36}$ ]] || die "--tenant must be the tenant uuid"
 PHONE="${PHONE//[^0-9]/}"; [[ ${#PHONE} -ge 10 && ${#PHONE} -le 15 ]] || die "--owner-phone must be the owner's number in international digits (92...)"
 [ -n "$HOME_NAME" ] && [ -n "$BUSINESS" ] || die "--home-name and --business are required"
+# These end up inside a YAML string (via sed) and a shell argument: allow only
+# plain name characters, never quotes, backslashes, & or newlines.
+SAFE_NAME="^[A-Za-z0-9][A-Za-z0-9 .'-]{1,59}$"
+[[ "$HOME_NAME" =~ $SAFE_NAME ]] || die "--home-name may use letters, digits, space . ' - only"
+[[ "$BUSINESS" =~ $SAFE_NAME ]] || die "--business may use letters, digits, space . ' - only"
+[[ "$ASSISTANT" =~ ^[A-Za-z]{2,20}$ ]] || die "--assistant must be a single name of letters"
 [ -f "$SHARED_ENV" ] || die "shared agent env $SHARED_ENV not found"
 [ -f "$PLATFORM/.env" ] || die "platform .env not found at $PLATFORM/.env"
 

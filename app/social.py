@@ -41,7 +41,8 @@ def is_our_media(url):
     return url.startswith(pre) and bool(_TOKEN.match(url[len(pre):].replace(".jpg", "", 1)))
 PLATFORMS = ("facebook", "instagram")
 COLS = ("id, platforms, caption, image_url, status, results, source, created_by, "
-        "approved_by, created_at, updated_at, published_at")
+        "approved_by, created_at, updated_at, published_at, scheduled_at")
+SCHEDULE_MAX_DAYS = 90
 
 
 def _ident(x_tenant_id, x_role, authorization, session, target=None):
@@ -155,6 +156,71 @@ def _publish_instagram(page, caption, image_url):
     if err:
         return {"ok": False, "error": err}
     return {"ok": True, "id": body2.get("id"), "account": page.get("ig_username")}
+
+
+def publish_post(tid, role, post_id, actor, claim_from):
+    """Claim the post first so a double click (or the worker and a person at
+    once) can never post twice, then talk to Meta outside any transaction."""
+    with tenant_session(tid, role) as cur:
+        pages = _meta_pages(cur, tid)
+        if not pages:
+            raise HTTPException(409, "Connect Facebook first (Integrations, "
+                                     "Connect Facebook), then approve again.")
+        cur.execute("UPDATE social_posts SET status = 'publishing', "
+                    "approved_by = COALESCE(approved_by, %s), updated_at = now() "
+                    "WHERE id = %s AND (status = ANY(%s) "
+                    "OR (status = 'publishing' AND updated_at < now() - interval '10 minutes')) "
+                    "RETURNING " + COLS, (actor, post_id, list(claim_from)))
+        post = cur.fetchone()
+        if not post:
+            raise HTTPException(409, "That post is not waiting for approval.")
+        post = dict(post)
+    page = pages[0]
+    results = {}
+    if "facebook" in post["platforms"]:
+        results["facebook"] = _publish_facebook(page, post["caption"], post["image_url"])
+    if "instagram" in post["platforms"]:
+        results["instagram"] = _publish_instagram(page, post["caption"], post["image_url"])
+    oks = [r["ok"] for r in results.values()]
+    status = "published" if all(oks) else ("partial" if any(oks) else "failed")
+    with tenant_session(tid, role) as cur:
+        cur.execute("UPDATE social_posts SET status = %s, results = %s::jsonb, "
+                    "updated_at = now(), published_at = CASE WHEN %s THEN now() END "
+                    "WHERE id = %s RETURNING " + COLS,
+                    (status, __import__("json").dumps(results), any(oks), post_id))
+        row = dict(cur.fetchone())
+        record(cur, action="social.publish", resource="social_posts", resource_id=post_id,
+               actor=actor, actor_type="human" if actor != "scheduler" else "system",
+               status="ok" if status == "published" else "error",
+               detail=results, error=None if all(oks) else "not every platform posted")
+    return {"post": row, "status": status, "results": results}
+
+
+def publish_due(limit=10):
+    """Called by the worker's scheduler: post what the owner scheduled.
+
+    Each post is published in its OWN tenant's session (role owner), never an
+    admin session -- _meta_pages reads the tenant's connection through RLS, and
+    an admin session would see every tenant's."""
+    with tenant_session(None, "techdeva_admin") as cur:
+        cur.execute("SELECT id, tenant_id FROM social_posts WHERE status = 'scheduled' "
+                    "AND scheduled_at <= now() ORDER BY scheduled_at LIMIT %s", (limit,))
+        due = [(str(r["tenant_id"]), str(r["id"])) for r in cur.fetchall()]
+    done = 0
+    for tid, pid in due:
+        try:
+            publish_post(tid, "owner", pid, "scheduler", ("scheduled",))
+        except HTTPException as e:
+            # e.g. Facebook was disconnected after scheduling: say so on the post
+            with tenant_session(tid, "owner") as cur:
+                cur.execute("UPDATE social_posts SET status = 'failed', results = %s::jsonb, "
+                            "updated_at = now() WHERE id = %s AND status = 'scheduled'",
+                            (__import__("json").dumps({"error": e.detail}), pid))
+                record(cur, action="social.publish", resource="social_posts", resource_id=pid,
+                       actor="scheduler", actor_type="system", status="error",
+                       detail={}, error=str(e.detail)[:300])
+        done += 1
+    return done
 
 
 def make_social_router():
@@ -286,38 +352,61 @@ def make_social_router():
         tid, role, uid = _ident(x_tenant_id, x_role, authorization, td_session, tenant)
         _owner_only(role)
         _client_decides(x_tenant_id, x_role, authorization, td_session)
+        return publish_post(tid, role, post_id, str(uid), ("draft", "failed"))
+
+    @router.post("/posts/{post_id}/schedule")
+    def schedule(post_id: str, body: dict = Body(...), tenant: str | None = None,
+                 x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                 authorization: str | None = Header(None),
+                 td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Approve a draft for a later time. Approving is still the client's
+        decision; the worker only carries it out when the time comes."""
+        tid, role, uid = _ident(x_tenant_id, x_role, authorization, td_session, tenant)
+        _owner_only(role)
+        _client_decides(x_tenant_id, x_role, authorization, td_session)
+        at = str(body.get("at") or "").strip()
         with tenant_session(tid, role) as cur:
-            pages = _meta_pages(cur, tid)
-            if not pages:
+            if not _meta_pages(cur, tid):
                 raise HTTPException(409, "Connect Facebook first (Integrations, "
-                                         "Connect Facebook), then approve again.")
-            cur.execute("UPDATE social_posts SET status = 'publishing', approved_by = %s, "
-                        "updated_at = now() WHERE id = %s AND (status IN ('draft','failed') "
-                        "OR (status = 'publishing' AND updated_at < now() - interval '10 minutes')) "
-                        "RETURNING " + COLS, (str(uid), post_id))
-            post = cur.fetchone()
-            if not post:
-                raise HTTPException(409, "That post is not waiting for approval.")
-            post = dict(post)
-        page = pages[0]
-        results = {}
-        if "facebook" in post["platforms"]:
-            results["facebook"] = _publish_facebook(page, post["caption"], post["image_url"])
-        if "instagram" in post["platforms"]:
-            results["instagram"] = _publish_instagram(page, post["caption"], post["image_url"])
-        oks = [r["ok"] for r in results.values()]
-        status = "published" if all(oks) else ("partial" if any(oks) else "failed")
+                                         "Connect Facebook), then schedule again.")
+            try:
+                cur.execute("SELECT %s::timestamptz AS at, %s::timestamptz > now() + interval '1 minute' AS future, "
+                            "%s::timestamptz < now() + make_interval(days => %s) AS near",
+                            (at, at, at, SCHEDULE_MAX_DAYS))
+            except Exception:
+                raise HTTPException(400, "Pick a date and time for the post.")
+            chk = cur.fetchone()
+            if not chk["future"]:
+                raise HTTPException(400, "Pick a time in the future.")
+            if not chk["near"]:
+                raise HTTPException(400, "A post can be scheduled up to %d days ahead." % SCHEDULE_MAX_DAYS)
+            cur.execute("UPDATE social_posts SET status = 'scheduled', scheduled_at = %s, approved_by = %s, "
+                        "updated_at = now() WHERE id = %s AND status IN ('draft','failed') RETURNING " + COLS,
+                        (chk["at"], str(uid), post_id))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(409, "Only a draft can be scheduled.")
+            record(cur, action="social.schedule", resource="social_posts", resource_id=post_id,
+                   actor=str(uid), actor_type="human", status="ok",
+                   detail={"at": chk["at"].isoformat()}, error=None)
+        return {"post": dict(row)}
+
+    @router.post("/posts/{post_id}/unschedule")
+    def unschedule(post_id: str, tenant: str | None = None,
+                   x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                   authorization: str | None = Header(None),
+                   td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        tid, role, uid = _ident(x_tenant_id, x_role, authorization, td_session, tenant)
+        _owner_only(role)
         with tenant_session(tid, role) as cur:
-            cur.execute("UPDATE social_posts SET status = %s, results = %s::jsonb, "
-                        "updated_at = now(), published_at = CASE WHEN %s THEN now() END "
-                        "WHERE id = %s RETURNING " + COLS,
-                        (status, __import__("json").dumps(results), any(oks), post_id))
-            row = dict(cur.fetchone())
-            record(cur, action="social.publish", resource="social_posts", resource_id=post_id,
-                   actor=str(uid), actor_type="human",
-                   status="ok" if status == "published" else "error",
-                   detail=results, error=None if all(oks) else "not every platform posted")
-        return {"post": row, "status": status, "results": results}
+            cur.execute("UPDATE social_posts SET status = 'draft', scheduled_at = NULL, updated_at = now() "
+                        "WHERE id = %s AND status = 'scheduled' RETURNING " + COLS, (post_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(409, "That post is not scheduled (it may already be posting).")
+            record(cur, action="social.unschedule", resource="social_posts", resource_id=post_id,
+                   actor=str(uid), actor_type="human", status="ok", detail={}, error=None)
+        return {"post": dict(row)}
 
     return router
 

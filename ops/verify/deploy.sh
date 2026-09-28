@@ -1,7 +1,8 @@
 #!/bin/bash
-# Deploy the techdeva-platform api (+ web when asked) after a database backup.
-# Touches ONLY this compose project's api/web services (--no-deps): never db,
-# redis, worker, and never any hermes-* container.
+# Deploy the techdeva-platform api + worker (+ web when asked) after a database
+# backup. Touches ONLY this compose project's api/worker/web services
+# (--no-deps): never db or redis, and never any hermes-* container. The worker
+# is rebuilt because it runs the same app code (it publishes scheduled posts).
 #   bash ops/verify/deploy.sh          # api only
 #   bash ops/verify/deploy.sh web      # api + Next.js portal
 set -euo pipefail
@@ -34,13 +35,14 @@ build() {  # show the tail of the build log, and stop if it failed
   echo "$1 built ($(grep -c '' "$BK/build-$1.log") log lines)"
 }
 build api
+build worker
 [ "${1:-}" = "web" ] && build web
-docker compose up -d --no-deps api
+docker compose up -d --no-deps api worker
 [ "${1:-}" = "web" ] && docker compose up -d --no-deps web
 for i in $(seq 1 30); do
   code=$(curl -s -o /dev/null -w '%{http_code}' https://api.techdeva.net/health || true)
   [ "$code" = "200" ] && break; sleep 2
 done
 echo "api /health: $code"
-echo "rollback code: git reset --hard $(cat "$BK/code-commit.txt") && docker compose build api web && docker compose up -d --no-deps api web"
+echo "rollback code: git reset --hard $(cat "$BK/code-commit.txt") && docker compose build api worker web && docker compose up -d --no-deps api worker web"
 echo "rollback data: docker compose exec -T db pg_restore -U postgres -d techdeva --clean < $BK/techdeva.dump   (only if a migration went wrong)"

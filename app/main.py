@@ -36,6 +36,9 @@ from .policy import make_policy_router
 from .whatsapp import make_whatsapp_router
 from .team import make_team_router
 from .booking import make_booking_router
+from .account import make_account_router
+from .billing import make_billing_router
+from .provisioning import make_provisioning_router
 
 # API docs (/docs, /redoc, /openapi.json) hand anyone on the internet the
 # full route surface and request/response schema. Off by default; set
@@ -75,6 +78,9 @@ app.include_router(make_media_router())
 app.include_router(make_team_router())
 app.include_router(make_booking_router())
 app.include_router(founder_router)
+app.include_router(make_account_router())
+app.include_router(make_billing_router())
+app.include_router(make_provisioning_router())
 
 # The two client-facing pages. The API image is built from ./app, so web/ is
 # mounted in (see docker-compose.yml) rather than baked into the image; WEB_DIR
@@ -503,6 +509,7 @@ class DemoRequestIn(BaseModel):
     email: str | None = None
     message: str | None = None
     website: str | None = None      # honeypot: a hidden field people never fill
+    topic: str | None = None        # "data_deletion" from the website's deletion page
 
 
 @app.post("/public/demo-request")
@@ -528,11 +535,12 @@ def public_demo_request(body: DemoRequestIn, request: Request):
     if phone and len(re.sub(r"\D", "", phone)) < 7:
         raise HTTPException(400, "That phone number looks too short.")
     note = (body.message or "").strip()[:1000] or None
+    kind = "data deletion request" if body.topic == "data_deletion" else "demo request"
     with tenant_session(None, "techdeva_admin") as cur:
         cur.execute("""INSERT INTO signups (business_name, industry, contact_email, contact_phone,
                                             contact_name, note, status)
-                       VALUES (%s, 'demo request', %s, %s, %s, %s, 'demo_requested') RETURNING id""",
-                    (business, email, phone, name, note))
+                       VALUES (%s, %s, %s, %s, %s, %s, 'demo_requested') RETURNING id""",
+                    (business, kind, email, phone, name, note))
         sid = cur.fetchone()["id"]
     print("[demo] request from %s (%s)" % (business, "phone" if phone else "email"), flush=True)
     return {"ok": True, "id": str(sid)}
@@ -549,6 +557,12 @@ def signup_page():
 def onboarding_page():
     """Where a client describes their business. The agents already read this."""
     return _page("onboarding.html")
+
+
+@app.get("/reset", include_in_schema=False)
+def reset_page():
+    """Forgot password: ask for a link, or choose a new password from one."""
+    return _page("reset.html")
 
 
 @app.get("/portal", include_in_schema=False)

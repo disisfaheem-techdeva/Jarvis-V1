@@ -112,7 +112,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 let TOKEN = null, D = {};
 const NAV = [
   ['RUNNING THE BUSINESS', [
-    ['jarvis','Jarvis'], ['overview','Overview'], ['clients','Clients'], ['pipeline','Pipeline & trials']]],
+    ['jarvis','Jarvis'], ['overview','Overview'], ['requests','Requests'], ['clients','Clients'], ['pipeline','Pipeline & trials']]],
   ['WHAT THE AI DELIVERS', [
     ['bookings','Bookings'], ['workforce','AI workforce'], ['approvals','Waiting on you']]],
   ['MONEY', [
@@ -124,6 +124,7 @@ const TITLES = {jarvis:['Jarvis','Pick a client, then say or type what to change
   overview:['Overview','The whole business on one screen.'],
   clients:['Clients','Everyone onboard, what they pay, and what they are getting.'],
   pipeline:['Pipeline & trials','Who signed up and who is still on a trial.'],
+  requests:['Requests','Things clients asked for that need you: agents, payments, password resets.'],
   bookings:['Bookings','Appointments the AI has put in your clients diaries.'],
   workforce:['AI workforce','What each client’s agents are doing right now.'],
   approvals:['Waiting on you','Work the platform stopped on and cannot finish alone.'],
@@ -187,16 +188,19 @@ function show(){
 function current(){ return (location.hash.replace('#/','') || 'overview'); }
 
 async function load(){
-  const [book, health, ops, ai, inc, over, invoices] = await Promise.all([
+  const [book, health, ops, ai, inc, over, invoices, agents, claims, resets] = await Promise.all([
     api('/techdeva/book'),
     api('/techdeva/health').catch(() => null),
     api('/techdeva/operations').catch(() => null),
     api('/ai/health').catch(() => null),
     api('/incidents').catch(() => null),
     api('/techdeva/overview').catch(() => null),
-    api('/techdeva/invoices').catch(() => null)
+    api('/techdeva/invoices').catch(() => null),
+    api('/techdeva/agent-requests').catch(() => null),
+    api('/techdeva/payment-claims').catch(() => null),
+    api('/techdeva/password-resets').catch(() => null)
   ]);
-  D = {book, health, ops, ai, inc, over, invoices};
+  D = {book, health, ops, ai, inc, over, invoices, agents, claims, resets};
   renderNav(); paint();
 }
 
@@ -204,7 +208,8 @@ function renderNav(){
   const b = D.book || {}, cur = current();
   const badge = {clients: b.clients ? b.clients.length : 0,
                  approvals: b.awaiting_approval || 0,
-                 incidents: (D.inc && D.inc.open) || 0};
+                 incidents: (D.inc && D.inc.open) || 0,
+                 requests: openRequests()};
   document.getElementById('nav').innerHTML = NAV.map(g =>
     '<div class="navgrp">' + g[0] + '</div>' + g[1].map(it =>
       '<a href="#/' + it[0] + '" class="' + (cur === it[0] ? 'on' : '') + '">' +
@@ -224,6 +229,7 @@ function paint(){
   if (v === 'clients') wireClients();
   if (v === 'invoices') wireInvoices();
   if (v === 'jarvis') wireJarvis();
+  if (v === 'requests') wireRequests();
 }
 
 /* ---- Jarvis voice helpers ----
@@ -456,6 +462,48 @@ const VIEWS = {
       '<div class="sub" style="margin-top:8px">Type a fee and press Tab to save it. Hide removes a ' +
       'client from this book without deleting anything.</div></section>';
   },
+  requests(){
+    const ag = (D.agents && D.agents.requests) || [], cl = (D.claims && D.claims.claims) || [],
+          rs = (D.resets && D.resets.requests) || [];
+    const how = (D.claims && D.claims.payment_instructions) || '';
+    const agState = {requested:'waiting for you', approved:'queued to build', building:'building', ready:'ready', failed:'build failed', rejected:'rejected'};
+    return '<div class="grid">' +
+      kpi('Agents to approve', ag.filter(a => a.status === 'requested' || a.status === 'failed').length, 'WhatsApp agents clients asked for') +
+      kpi('Payments to check', cl.filter(c => c.status === 'pending').length, 'clients say they paid') +
+      kpi('Password resets', rs.filter(r => r.delivered === 'pending').length, (D.resets && D.resets.email_configured) ? 'email is on' : 'no email set up: send links by WhatsApp') +
+      '</div>' +
+      '<section><h2>WhatsApp agents</h2><div class="card" style="padding:6px 8px">' +
+      tbl('<th>Business</th><th>Owner number</th><th>Assistant</th><th>Status</th><th>When</th><th></th>',
+        ag.map(a => '<tr><td class="name">' + esc(a.business_name) + '<div class="dim">calls owner: ' + esc(a.home_name) + (a.agent_key ? ' · key ' + esc(a.agent_key) : '') + '</div>' +
+          (a.error ? '<div class="dim" style="color:var(--bad,#F87171)">' + esc(a.error) + '</div>' : '') + '</td>' +
+          '<td class="dim">+' + esc(a.owner_phone) + '</td><td class="dim">' + esc(a.assistant) + '</td>' +
+          '<td><span class="pill">' + esc(agState[a.status] || a.status) + '</span></td><td class="dim">' + when(a.created_at) + '</td>' +
+          '<td>' + (a.status === 'requested' || a.status === 'failed'
+            ? '<button class="tiny primary" data-agok="' + esc(a.id) + '">' + (a.status === 'failed' ? 'Retry' : 'Approve') + '</button> ' +
+              '<button class="tiny" data-agno="' + esc(a.id) + '">Reject</button>' : '') + '</td></tr>')) +
+      '<div class="sub" style="margin-top:6px">Approve starts the build on the server within a minute (provision-queue.sh). ' +
+      'It waits by itself if the server is short of memory.</div></div></section>' +
+      '<section><h2>Payments clients reported</h2><div class="card" style="padding:6px 8px">' +
+      tbl('<th>Business</th><th class="num">Amount</th><th>Method</th><th>Reference</th><th>Status</th><th>When</th><th></th>',
+        cl.map(c => '<tr><td class="name">' + esc(c.business) + (c.invoice ? '<div class="dim">' + esc(c.invoice) + '</div>' : '') + '</td>' +
+          '<td class="num">' + money(c.amount) + '</td><td class="dim">' + esc(c.method) + '</td><td class="dim">' + esc(c.reference || '-') + '</td>' +
+          '<td><span class="pill">' + esc(c.status) + '</span>' + (c.reason ? '<div class="dim">' + esc(c.reason) + '</div>' : '') + '</td><td class="dim">' + when(c.created_at) + '</td>' +
+          '<td>' + (c.status === 'pending' ? '<button class="tiny primary" data-clok="' + esc(c.id) + '">Money arrived</button> ' +
+            '<button class="tiny" data-clno="' + esc(c.id) + '">Not found</button>' : '') + '</td></tr>')) +
+      '<div class="sub" style="margin-top:6px">Check your bank / JazzCash / Easypaisa first. "Money arrived" records the payment, marks the bill paid, and moves a trial client to active.</div></div></section>' +
+      '<section><h2>How clients pay you</h2><div class="card" style="padding:12px">' +
+      '<textarea id="pay-how" rows="4" style="width:100%;padding:10px;border-radius:10px;font:inherit" placeholder="e.g. Bank: ... Account title: ... IBAN: ...  JazzCash: 03xx...">' + esc(how) + '</textarea>' +
+      '<div class="row" style="margin-top:8px"><button class="tiny primary" id="pay-how-save">Save</button><span class="sub" id="pay-how-msg"></span></div>' +
+      '<div class="sub" style="margin-top:6px">Every client sees this on their Plan &amp; Billing page.</div></div></section>' +
+      '<section><h2>Password resets</h2><div class="card" style="padding:6px 8px">' +
+      tbl('<th>Person</th><th>Business</th><th>Delivered</th><th>When</th><th></th>',
+        rs.map(r => '<tr><td class="name">' + esc(r.name || '') + '<div class="dim">' + esc(r.email) + '</div></td><td class="dim">' + esc(r.business || '-') + '</td>' +
+          '<td><span class="pill">' + esc(r.delivered === 'email' ? 'emailed' : r.delivered === 'handled' ? 'link made' : 'waiting for you') + '</span></td>' +
+          '<td class="dim">' + when(r.created_at) + '</td>' +
+          '<td>' + (r.delivered !== 'email' ? '<button class="tiny" data-rslink="' + esc(r.id) + '">Make link</button>' : '') + '</td></tr>')) +
+      '<div id="rs-out" class="sub" style="margin-top:6px"></div>' +
+      '<div class="sub" style="margin-top:6px">Send the link to the person on WhatsApp. It works once, for one hour. Check the number is really theirs first.</div></div></section>';
+  },
   pipeline(){
     const s = (D.ops && D.ops.signups) || [], b = D.book;
     return '<div class="grid">' + kpi('Signups recorded', s.length, 'most recent first') +
@@ -465,7 +513,7 @@ const VIEWS = {
       tbl('<th>Business</th><th>Industry</th><th>Status</th><th>Contact</th><th>When</th>',
         s.map(x => '<tr><td class="name">' + esc(x.business_name) + (x.note ? '<div class="dim">' + esc(x.note) + '</div>' : '') +
           '</td><td class="dim">' + esc(x.industry || '-') + '</td><td><span class="pill">' +
-          esc(x.status === 'demo_requested' ? 'demo requested' : x.status) + '</span></td>' +
+          esc(x.status === 'demo_requested' ? (x.industry === 'data deletion request' ? 'delete my data' : 'demo requested') : x.status) + '</span></td>' +
           '<td class="dim">' + esc([x.contact_name, x.contact_phone, x.contact_email].filter(Boolean).join(' · ') || '-') + '</td>' +
           '<td class="dim">' + when(x.created_at) + '</td></tr>')) + '</div></section>';
   },
@@ -568,7 +616,8 @@ const VIEWS = {
             '<td class="dim">' + when(r.issued_on) + '</td>' +
             '<td class="dim">' + when(r.due_on) + '</td>' +
             '<td class="dim">' + when(r.sent_at) + '</td>' +
-            '<td>' + (r.status === 'draft' ? '<button class="tiny" data-send="' + esc(r.id) + '">Send</button>' : '') + '</td></tr>').join('')) +
+            '<td>' + (r.status === 'draft' ? '<button class="tiny" data-send="' + esc(r.id) + '">Send</button>'
+              : r.status === 'sent' ? '<button class="tiny" data-mpaid="' + esc(r.id) + '">Mark paid</button>' : '') + '</td></tr>').join('')) +
       '</div></section>';
   },
   health(){
@@ -627,6 +676,47 @@ function wireClients(){
   });
 }
 
+function openRequests(){
+  const ag = (D.agents && D.agents.requests) || [], cl = (D.claims && D.claims.claims) || [],
+        rs = (D.resets && D.resets.requests) || [];
+  return ag.filter(a => a.status === 'requested' || a.status === 'failed').length +
+         cl.filter(c => c.status === 'pending').length + rs.filter(r => r.delivered === 'pending').length;
+}
+function wireRequests(){
+  const el = document.getElementById('view');
+  const go = (sel, fn) => el.querySelectorAll(sel).forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try { await fn(b); } catch (e) { alert(e.message); b.disabled = false; }
+  });
+  go('[data-agok]', async b => { await api('/techdeva/agent-requests/' + b.getAttribute('data-agok') + '/approve', {method:'POST'}); load(); });
+  go('[data-agno]', async b => {
+    const why = prompt('What should the client read? (e.g. We will call you to set it up)', '');
+    if (why === null) { b.disabled = false; return; }
+    await api('/techdeva/agent-requests/' + b.getAttribute('data-agno') + '/reject', {method:'POST', body: JSON.stringify({reason: why})}); load();
+  });
+  go('[data-clok]', async b => {
+    if (!confirm('You found this money in your account?')) { b.disabled = false; return; }
+    await api('/techdeva/payment-claims/' + b.getAttribute('data-clok') + '/confirm', {method:'POST'}); load();
+  });
+  go('[data-clno]', async b => {
+    const why = prompt('What should the client read?', 'We could not find this payment. Please send a screenshot on WhatsApp.');
+    if (why === null) { b.disabled = false; return; }
+    await api('/techdeva/payment-claims/' + b.getAttribute('data-clno') + '/reject', {method:'POST', body: JSON.stringify({reason: why})}); load();
+  });
+  go('[data-rslink]', async b => {
+    const d = await api('/techdeva/password-resets/' + b.getAttribute('data-rslink') + '/link', {method:'POST'});
+    const out = document.getElementById('rs-out');
+    out.innerHTML = 'Link for ' + esc(d.email) + ' (one hour): <input readonly style="width:100%;margin-top:4px" value="' + esc(d.link) + '" onclick="this.select()">';
+    b.disabled = false;
+  });
+  const save = document.getElementById('pay-how-save');
+  if (save) save.onclick = async () => {
+    const m = document.getElementById('pay-how-msg');
+    try { await api('/techdeva/settings/payment_instructions', {method:'PUT', body: JSON.stringify({value: document.getElementById('pay-how').value})}); m.textContent = 'Saved.'; }
+    catch (e) { m.textContent = e.message; }
+  };
+}
+
 function wireInvoices(){
   const el = document.getElementById('view');
   const btn = document.getElementById('inv-create');
@@ -643,6 +733,12 @@ function wireInvoices(){
       load();
     } catch (e) { alert(e.message); }
   };
+  el.querySelectorAll('[data-mpaid]').forEach(b => b.onclick = async () => {
+    const ref = prompt('Money arrived for this invoice. Reference / transaction ID (optional):', '');
+    if (ref === null) return;
+    try { await api('/techdeva/invoices/' + b.getAttribute('data-mpaid') + '/paid', {method:'POST', body: JSON.stringify({reference: ref})}); load(); }
+    catch (e) { alert(e.message); }
+  });
   el.querySelectorAll('[data-send]').forEach(b => b.onclick = async () => {
     try { await api('/techdeva/invoices/' + b.getAttribute('data-send') + '/send', {method:'POST'}); load(); }
     catch (e) { alert(e.message); }

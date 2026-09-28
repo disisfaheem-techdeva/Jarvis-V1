@@ -33,6 +33,8 @@ from pydantic import BaseModel
 from .auth import (AuthError, SESSION_COOKIE, SESSION_TTL_SECONDS, auth_required,
                    issue_token, resolve_scope, verify_password,
                    hash_password, verify_setup_token, _unb64u)
+from .audit import record
+from .db import tenant_session
 
 # Per-process brute-force throttle on login. Not a substitute for a WAF/fail2ban
 # at the edge, but it stops a trivially scripted password guess against /auth/login.
@@ -236,8 +238,12 @@ def make_portal_router(P) -> APIRouter:
             raise HTTPException(e.status or 400, e.message)
         if not P.set_user_password(email, hash_password(pw)):
             raise HTTPException(400, "this link is not valid")
-        record(user.get("tenant_id"), "auth.password_set",
-               {"user_id": str(user.get("id"))})
+        # record() takes a cursor; the old positional call raised after the
+        # password was already saved, so every reset answered 500.
+        with tenant_session(None, "techdeva_admin") as cur:
+            record(cur, action="auth.password_set", resource="users",
+                   resource_id=str(user.get("id")), actor=str(user.get("id")),
+                   status="ok", detail={}, tenant_id=user.get("tenant_id"))
         return {"ok": True}
 
     # ------------------------------------------------------------------ growth

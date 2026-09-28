@@ -457,6 +457,68 @@ def phase5(ctx):
         check("#14", "server voice returns audio for Responding", False, "HTTP %s %s (the browser voice is the fallback)" % (e.code, e.read()[:120]))
 
 
+def phase7(ctx):
+    """Part 15: forgot password, scheduled posts, plan & billing, WhatsApp agent
+    requests, founder Requests page, legal pages. Writes only a QA draft post and
+    (if the QA business has no agent) one QA agent request; both deleted after."""
+    O, OP, tid = ctx["owner"], ctx["operator"], ctx["qa"]
+    ADM = token(None, "techdeva_admin", "live-check")
+    n = lambda t: int(sql("SELECT count(*) FROM %s WHERE tenant_id='%s'" % (t, tid))[0][0])
+    before = {t: n(t) for t in ("social_posts", "agent_requests", "payment_claims")}
+    s, page = call(None, "GET", "/reset")
+    check("P15", "forgot-password page is served", s == 200 and "forgot-password" in str(page), "HTTP %s" % s)
+    s, page = call(None, "GET", "/dashboard")
+    for k, m in {"Posts page": "VIEWS.posts", "Plan & Billing page": "VIEWS.billing",
+                 "agent request": "/whatsapp/agent-request", "Forgot password link": 'href="/reset"'}.items():
+        check("P15", "live dashboard.html has " + k, s == 200 and m in str(page), "marker %r" % m)
+    s, page = call(None, "GET", "/techdeva")
+    check("P15", "founder console has the Requests page", s == 200 and "wireRequests" in str(page), "HTTP %s" % s)
+    s, r = call(None, "POST", "/auth/forgot-password", {"email": "nobody-%s@example.invalid" % uuid.uuid4().hex[:6]})
+    check("P15", "forgot-password answers the same for an unknown email", s == 200 and r.get("ok"), "HTTP %s %s" % (s, r))
+    s, r = call(OP, "GET", "/billing")
+    check("P15", "staff cannot see the plan and bills", s == 403, "HTTP %s" % s)
+    s, r = call(O, "GET", "/billing")
+    check("P15", "owner sees plan & billing", s == 200 and "account" in r, "HTTP %s status=%s" % (s, (r.get("account") or {}).get("status") if isinstance(r, dict) else r))
+    for path in ("/techdeva/payment-claims", "/techdeva/agent-requests", "/techdeva/password-resets"):
+        s, r = call(ADM, "GET", path)
+        check("P15", "founder reads " + path, s == 200, "HTTP %s" % s)
+        s, r = call(O, "GET", path)
+        check("P15", "a client cannot read " + path, s == 403, "HTTP %s" % s)
+    pid = None
+    try:
+        s, r = call(O, "POST", "/social/posts", {"caption": "Live check draft (deleted after)", "platforms": ["facebook"]})
+        pid = (r.get("post") or {}).get("id") if isinstance(r, dict) else None
+        check("P15", "owner writes a draft post", s == 200 and pid, "HTTP %s" % s)
+        s, r = call(OP, "POST", "/social/posts/%s/schedule" % pid, {"at": "2030-01-01T00:00:00Z"})
+        check("P15", "staff cannot schedule a post", s == 403, "HTTP %s" % s)
+        s, r = call(O, "POST", "/social/posts/%s/schedule" % pid, {"at": "2020-01-01T00:00:00Z"})
+        connected = not (s == 409 and "Connect Facebook" in str(r))
+        if connected:
+            check("P15", "a time in the past is refused", s == 400, "HTTP %s %s" % (s, r.get("detail") if isinstance(r, dict) else r))
+            import datetime as _d
+            at = (_d.datetime.now(_d.timezone.utc) + _d.timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            s, r = call(O, "POST", "/social/posts/%s/schedule" % pid, {"at": at})
+            check("P15", "owner schedules a post", s == 200 and (r.get("post") or {}).get("status") == "scheduled", "HTTP %s" % s)
+            s, r = call(O, "POST", "/social/posts/%s/unschedule" % pid)
+            check("P15", "owner takes it back to a draft", s == 200 and (r.get("post") or {}).get("status") == "draft", "HTTP %s" % s)
+        else:
+            check("P15", "scheduling without Facebook says so (QA has no Facebook)", True, r.get("detail") if isinstance(r, dict) else r)
+        s, r = call(OP, "POST", "/whatsapp/agent-request", {"owner_phone": "923000000000"})
+        check("P15", "staff cannot request a WhatsApp agent", s == 403, "HTTP %s" % s)
+        s, r = call(O, "GET", "/whatsapp/agent-request")
+        check("P15", "owner reads the agent request state", s == 200, "HTTP %s %s" % (s, (r.get("request") or {}).get("status") if isinstance(r, dict) else r))
+    finally:
+        if pid:
+            sql("DELETE FROM social_posts WHERE tenant_id='%s' AND id='%s'" % (tid, pid))
+        after = {t: n(t) for t in before}
+        check("DATA", "QA posts / agent requests / payment claims back to where they started", before == after,
+              "before=%s after=%s" % (before, after))
+    if not os.environ.get("TD_SKIP_PORTAL"):
+        for path in ("/privacy", "/terms", "/data-deletion"):
+            s, page = call(None, "GET", path, base=PORTAL)
+            check("P15", "website " + path + " is public", s == 200, "HTTP %s" % s)
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)

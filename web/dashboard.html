@@ -4534,6 +4534,7 @@ function gate(msg){
       '<div class="field"><label>Email</label><input id="em" type="email" autocomplete="username"></div>' +
       '<div class="field"><label>Password</label><input id="pw" type="password" autocomplete="current-password"></div>' +
       '<button class="btn primary" id="go" style="width:100%;padding:10px">Sign in</button>' +
+      '<div style="margin-top:14px;font-size:13px;text-align:center"><a href="/reset" style="color:var(--accent)">Forgot password?</a></div>' +
     '</div></div>';
   var go = document.getElementById('go');
   var err = document.getElementById('gerr');
@@ -4585,6 +4586,325 @@ function boot(){
     });
   });
 }
+
+/* ======================================================== Posts
+   Write a post (with a picture), then post it now or pick a time. Scheduled
+   posts are published by the platform's worker at that time; the owner can
+   take one back to a draft until then. Nothing goes public without the owner. */
+var PST = { img: null, imgUrl: null, busy: false };
+function pstWhen(s){
+  if (!s) return '';
+  var d = new Date(s);
+  return isNaN(d) ? String(s) : d.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+function pstLocalMin(){
+  var d = new Date(Date.now() + 10 * 60000); d.setSeconds(0, 0);
+  var p = function(n){ return (n < 10 ? '0' : '') + n; };
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+var PST_LABEL = { draft: 'Draft', scheduled: 'Scheduled', publishing: 'Posting…', published: 'Posted',
+                  partial: 'Partly posted', failed: 'Not posted', discarded: 'Discarded' };
+VIEWS.posts = function(){
+  var out = '<h1>Posts</h1><p class="sub">Write a post for Facebook and Instagram, then post it now or schedule it. Nothing goes public until you press Post or Schedule.</p>';
+  if (!need('social_acc', '/social/accounts') | !need('social_posts', '/social/posts'))
+    return out + panel('Posts', loading('Loading posts...'));
+  if (S.social_posts === null) return out + panel('Posts', errState('Could not read your posts.'));
+  var acc = S.social_acc || {}, own = isOwner();
+  var pages = (acc.pages || []).map(function(p){ return p.name + (p.instagram ? ' + Instagram' + (typeof p.instagram === 'string' ? ' @' + p.instagram : '') : ''); }).join(', ');
+  out += acc.connected
+    ? '<div class="card-note" style="margin-bottom:12px">Posting to: <b>' + esc(pages) + '</b></div>'
+    : panel('Connect first', '<div class="sub" style="margin-bottom:8px">Facebook is not connected yet. You can write drafts now; posting needs the connection.</div>' +
+        '<a class="btn primary" href="/connect/meta">Connect Facebook &amp; Instagram</a>');
+  if (own) {
+    out += panel('New post',
+      '<div style="padding:14px 16px">' +
+        '<textarea id="ps_cap" class="fld" rows="4" maxlength="2200" placeholder="What should the post say?" style="width:100%"></textarea>' +
+        '<div id="ps_img" style="margin:10px 0">' + pstImgHTML() + '</div>' +
+        '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">' +
+          '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ps_fb" checked> Facebook</label>' +
+          '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ps_ig" checked> Instagram</label>' +
+          '<button class="btn" id="ps_pick" type="button">📎 Add picture</button>' +
+          '<input type="file" id="ps_file" accept="image/*" style="display:none">' +
+        '</div>' +
+        '<div class="card-note" style="margin-top:8px">Instagram needs a picture. Pictures are sent as JPEG, up to 4 MB.</div>' +
+        '<div style="margin-top:12px"><button class="btn primary" id="ps_save" type="button">Save as draft</button></div>' +
+      '</div>');
+  }
+  var list = (S.social_posts && S.social_posts.posts) || [];
+  var groups = [
+    ['Waiting for you', list.filter(function(p){ return p.status === 'draft' || p.status === 'failed'; })],
+    ['Scheduled', list.filter(function(p){ return p.status === 'scheduled' || p.status === 'publishing'; })
+       .sort(function(a, b){ return String(a.scheduled_at || '').localeCompare(String(b.scheduled_at || '')); })],
+    ['Posted', list.filter(function(p){ return p.status === 'published' || p.status === 'partial'; })]
+  ];
+  out += actbar();
+  groups.forEach(function(g){
+    out += panel(g[0] + ' (' + g[1].length + ')', g[1].length
+      ? g[1].map(function(p){ return pstCard(p, own, acc.connected); }).join('')
+      : '<div class="card-note" style="padding:12px 16px">Nothing here.</div>');
+  });
+  setTimeout(pstWire, 0);
+  return out;
+};
+function pstImgHTML(){
+  if (!PST.img) return '';
+  return '<div style="display:flex;gap:10px;align-items:center"><img src="' + PST.img + '" alt="" style="width:84px;height:84px;object-fit:cover;border-radius:8px">' +
+    '<span class="card-note">' + (PST.imgUrl ? 'Picture ready.' : 'Uploading picture…') + '</span>' +
+    '<button class="btn" id="ps_rm" type="button">Remove</button></div>';
+}
+function pstCard(p, own, connected){
+  var res = p.results || {};
+  var errs = Object.keys(res).filter(function(k){ return res[k] && res[k].ok === false; })
+    .map(function(k){ return k + ': ' + (res[k].error || 'failed'); });
+  if (res.error) errs.push(res.error);
+  var meta = esc((p.platforms || []).join(' + ')) + ' · <span class="tag">' + esc(PST_LABEL[p.status] || p.status) + '</span>';
+  if (p.status === 'scheduled') meta += ' · goes out <b>' + esc(pstWhen(p.scheduled_at)) + '</b>';
+  else if (p.published_at) meta += ' · ' + esc(pstWhen(p.published_at));
+  else meta += ' · written ' + esc(pstWhen(p.created_at));
+  var acts = '';
+  if (own && (p.status === 'draft' || p.status === 'failed')) {
+    acts = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">' +
+      (connected ? '<button class="btn primary" data-pnow="' + esc(p.id) + '">Post now</button>' +
+        '<input type="datetime-local" class="fld" id="pat_' + esc(p.id) + '" min="' + pstLocalMin() + '" value="' + pstLocalMin() + '" style="max-width:220px">' +
+        '<button class="btn" data-psch="' + esc(p.id) + '">Schedule</button>' : '') +
+      '<button class="btn" data-pdis="' + esc(p.id) + '">Discard</button></div>';
+  } else if (own && p.status === 'scheduled') {
+    acts = '<div style="margin-top:10px"><button class="btn" data-punsch="' + esc(p.id) + '">Cancel schedule (back to draft)</button></div>';
+  }
+  return '<div class="pst-card">' +
+    '<div class="card-note">' + meta + '</div>' +
+    (p.image_url ? '<img src="' + esc(p.image_url) + '" alt="" class="pst-img">' : '') +
+    '<div style="white-space:pre-wrap;margin:6px 0">' + esc(p.caption) + '</div>' +
+    (errs.length ? '<div class="card-note" style="color:var(--danger)">' + esc(errs.join(' | ')) + '</div>' : '') +
+    acts + '</div>';
+}
+function pstReload(){ S.social_posts = undefined; LOADING.social_posts = false; need('social_posts', '/social/posts', true); }
+function pstWire(){
+  var g = function(id){ return document.getElementById(id); };
+  if (g('ps_pick')) g('ps_pick').onclick = function(){ g('ps_file').click(); };
+  if (g('ps_rm')) g('ps_rm').onclick = function(){ PST.img = PST.imgUrl = null; g('ps_img').innerHTML = ''; };
+  if (g('ps_file')) g('ps_file').onchange = function(){
+    var f = g('ps_file').files && g('ps_file').files[0]; if (!f) return;
+    jvToJpeg(f).then(function(jpeg){
+      PST.img = jpeg; PST.imgUrl = null; g('ps_img').innerHTML = pstImgHTML(); pstWire();
+      return api('/social/media', { method: 'POST', body: { image: jpeg } });
+    }).then(function(r){
+      if (!r || !r.ok) throw new Error((r && r.data && r.data.detail) || 'The picture was not saved.');
+      PST.imgUrl = r.data.url; var b = g('ps_img'); if (b) { b.innerHTML = pstImgHTML(); pstWire(); }
+    }).catch(function(e){ PST.img = PST.imgUrl = null; var b = g('ps_img'); if (b) b.innerHTML = ''; say(e.message); });
+  };
+  if (g('ps_save')) g('ps_save').onclick = function(){
+    var cap = (g('ps_cap').value || '').trim(), plats = [];
+    if (g('ps_fb').checked) plats.push('facebook');
+    if (g('ps_ig').checked) plats.push('instagram');
+    if (cap.length < 2) { say('Write what the post should say.'); return; }
+    if (!plats.length) { say('Tick Facebook, Instagram or both.'); return; }
+    if (PST.img && !PST.imgUrl) { say('Wait a moment, the picture is still uploading.'); return; }
+    if (plats.indexOf('instagram') !== -1 && !PST.imgUrl) { say('Instagram needs a picture. Add one, or untick Instagram.'); return; }
+    g('ps_save').disabled = true;
+    act('/social/posts', { method: 'POST', body: { caption: cap, platforms: plats, image_url: PST.imgUrl } }, 'Draft saved. Post it now or pick a time below.')
+      .then(function(r){ if (r.ok) { PST.img = PST.imgUrl = null; pstReload(); } else g('ps_save').disabled = false; });
+  };
+  document.querySelectorAll('[data-pnow]').forEach(function(b){
+    b.onclick = function(){
+      if (!b.getAttribute('data-armed')) { b.setAttribute('data-armed', '1'); b.textContent = 'Tap again to post publicly'; return; }
+      b.disabled = true; b.textContent = 'Posting…';
+      act('/social/posts/' + b.getAttribute('data-pnow') + '/publish', { method: 'POST' }, 'Posted.').then(pstReload);
+    };
+  });
+  document.querySelectorAll('[data-psch]').forEach(function(b){
+    b.onclick = function(){
+      var id = b.getAttribute('data-psch'), v = (g('pat_' + id) || {}).value;
+      var d = v ? new Date(v) : null;
+      if (!d || isNaN(d)) { say('Pick a date and time.'); return; }
+      b.disabled = true;
+      act('/social/posts/' + id + '/schedule', { method: 'POST', body: { at: d.toISOString() } }, 'Scheduled for ' + pstWhen(d) + '.')
+        .then(function(r){ if (r.ok) pstReload(); else b.disabled = false; });
+    };
+  });
+  document.querySelectorAll('[data-punsch]').forEach(function(b){
+    b.onclick = function(){ b.disabled = true; act('/social/posts/' + b.getAttribute('data-punsch') + '/unschedule', { method: 'POST' }, 'Back to drafts.').then(pstReload); };
+  });
+  document.querySelectorAll('[data-pdis]').forEach(function(b){
+    b.onclick = function(){ b.disabled = true; act('/social/posts/' + b.getAttribute('data-pdis'), { method: 'DELETE' }, 'Discarded.').then(pstReload); };
+  });
+}
+(function(){
+  NAV.forEach(function(g){
+    var i = -1; g.items.forEach(function(it, k){ if (it.id === 'marketing') i = k; });
+    if (i !== -1 && !g.items.some(function(it){ return it.id === 'posts'; }))
+      g.items.splice(i + 1, 0, { id: 'posts', icon: '🗓️', name: 'Posts', sub: false });
+  });
+  var st = document.createElement('style');
+  st.textContent = '.pst-card{padding:12px 16px;border-top:1px solid var(--line)}.pst-card:first-child{border-top:0}' +
+    '.pst-img{max-width:220px;max-height:220px;border-radius:8px;margin:8px 0;display:block;object-fit:cover}';
+  document.head.appendChild(st);
+})();
+
+/* ======================================================== Plan & billing
+   The owner's view of paying TechDeva: trial days left, the agreed monthly fee,
+   bills TechDeva sent, how to pay, and "I have paid" (a claim TechDeva confirms
+   against its bank record). Owner-only; the API refuses staff. */
+var BIL_METHODS = [['bank', 'Bank transfer'], ['jazzcash', 'JazzCash'], ['easypaisa', 'Easypaisa'], ['cash', 'Cash'], ['other', 'Other']];
+function bilMoney(n, cur){ return (cur || 'PKR') + ' ' + Math.round(Number(n) || 0).toLocaleString('en-US'); }
+function bilDate(s){ if (!s) return '—'; var d = new Date(s); return isNaN(d) ? String(s) : d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }); }
+function bilTrialText(a){
+  if (a.status === 'active') return 'Your plan is active.';
+  if (a.status === 'paused') return 'Your account is paused. Talk to TechDeva to switch it back on.';
+  if (!a.trial_ends_at) return 'You are on the free trial.';
+  return a.days_left > 0 ? 'Free trial: ' + a.days_left + ' day' + (a.days_left === 1 ? '' : 's') + ' left (ends ' + bilDate(a.trial_ends_at) + ').'
+                         : 'Your free trial ended on ' + bilDate(a.trial_ends_at) + '. Talk to TechDeva to keep going.';
+}
+VIEWS.billing = function(){
+  var out = '<h1>Plan &amp; Billing</h1><p class="sub">Your TechDeva plan, the bills we sent you, and how to pay.</p>';
+  if (!isOwner()) return out + panel('Plan & Billing', empty('Owner only', 'Only the business owner can see the plan and bills.'));
+  if (!need('billing', '/billing')) return out + panel('Plan & Billing', loading('Loading your plan...'));
+  if (S.billing === null) return out + panel('Plan & Billing', errState('Could not read your plan.'));
+  var b = S.billing, a = b.account || {};
+  out += tiles([statTile('Plan', esc(a.status === 'trial' ? 'Free trial' : a.status === 'active' ? 'Active' : (a.status || '—'))),
+                statTile('Monthly fee', a.monthly_fee > 0 ? esc(bilMoney(a.monthly_fee, a.currency)) : 'Not set yet'),
+                statTile('To pay now', esc(bilMoney(b.due, a.currency)))]);
+  out += panel('Your plan', '<div style="padding:14px 16px">' + esc(bilTrialText(a)) +
+    (a.monthly_fee > 0 ? '' : '<div class="card-note" style="margin-top:6px">TechDeva agrees your monthly fee with you. It shows here once it is set.</div>') + '</div>');
+  out += panel('How to pay TechDeva', '<div style="padding:14px 16px;white-space:pre-wrap">' +
+    (b.payment_instructions ? esc(b.payment_instructions) : '<span class="card-note">TechDeva will send you the payment details with your first bill.</span>') + '</div>');
+  out += actbar();
+  var inv = b.invoices || [];
+  out += panel('Bills', inv.length ? inv.map(function(i){
+    var state = i.status === 'paid' ? '<span class="tag" style="color:var(--growth)">Paid ' + esc(bilDate(i.paid_at)) + '</span>'
+      : i.claim === 'pending' ? '<span class="tag">Payment being checked</span>'
+      : '<span class="tag" style="color:var(--warning,#F0A83C)">To pay' + (i.due_on ? ' by ' + esc(bilDate(i.due_on)) : '') + '</span>';
+    var form = (i.status === 'sent' && i.claim !== 'pending')
+      ? '<div class="bil-pay"><select class="fld" id="bm_' + esc(i.id) + '">' + BIL_METHODS.map(function(m){ return '<option value="' + m[0] + '">' + m[1] + '</option>'; }).join('') + '</select>' +
+        '<input class="fld" id="br_' + esc(i.id) + '" placeholder="Transaction ID / reference">' +
+        '<button class="btn primary" data-bpaid="' + esc(i.id) + '">I have paid</button></div>' : '';
+    return '<div class="bil-row"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><div><b>' + esc(bilMoney(i.amount, i.currency)) + '</b> · ' +
+      esc(i.description || 'TechDeva bill') + '<div class="card-note">Issued ' + esc(bilDate(i.issued_on)) + '</div></div><div>' + state + '</div></div>' + form + '</div>';
+  }).join('') : empty('No bills yet', 'Bills from TechDeva will appear here.'));
+  var rej = (b.claims || []).filter(function(c){ return c.status === 'rejected'; });
+  if (rej.length) out += panel('Payments TechDeva could not find', rej.map(function(c){
+    return '<div class="bil-row">' + esc(bilMoney(c.amount)) + ' by ' + esc(c.method) + ' (' + esc(c.reference || 'no reference') + '): ' + esc(c.reason || '') + '</div>';
+  }).join(''));
+  setTimeout(function(){
+    document.querySelectorAll('[data-bpaid]').forEach(function(btn){
+      btn.onclick = function(){
+        var id = btn.getAttribute('data-bpaid');
+        var m = document.getElementById('bm_' + id).value, r = document.getElementById('br_' + id).value.trim();
+        btn.disabled = true;
+        act('/billing/invoices/' + id + '/paid', { method: 'POST', body: { method: m, reference: r } },
+            'Thank you. TechDeva will check the payment and mark the bill paid.').then(function(res){
+          if (res.ok) need('billing', '/billing', true); else btn.disabled = false;
+        });
+      };
+    });
+  }, 0);
+  return out;
+};
+/* A quiet reminder on the dashboard in the last week of the trial (owner only). */
+var _bilOverview = VIEWS.overview;
+VIEWS.overview = function(){
+  var html = _bilOverview();
+  if (!isOwner()) return html;
+  need('billing', '/billing');
+  var a = S.billing && S.billing.account;
+  if (!a || a.status !== 'trial' || !a.trial_ends_at || a.days_left > 7) return html;
+  return '<div class="bil-note">' + esc(bilTrialText(a)) + ' <a href="#/billing">See plan &amp; billing</a></div>' + html;
+};
+(function(){
+  NAV.forEach(function(g){
+    if (g.label === 'Administration' && !g.items.some(function(it){ return it.id === 'billing'; }))
+      g.items.push({ id: 'billing', icon: '💳', name: 'Plan & Billing', sub: false });
+  });
+  OWNER_ONLY_NAV.billing = 1;
+  var st = document.createElement('style');
+  st.textContent = '.bil-row{padding:12px 16px;border-top:1px solid var(--line)}.bil-row:first-child{border-top:0}' +
+    '.bil-pay{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.bil-pay .fld{max-width:230px}' +
+    '.bil-note{margin:0 0 14px;padding:10px 14px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;background:rgba(108,140,255,.08)}';
+  document.head.appendChild(st);
+})();
+
+/* ======================================================== WhatsApp agent request
+   A business without an agent asks for one here. TechDeva approves it and the
+   server builds it (ops/agent-template/provision-queue.sh); this page then
+   shows Connect WhatsApp like any other business. */
+var AR_TEXT = {
+  requested: ['Request sent', 'TechDeva has your request and will approve it shortly. This page updates by itself.'],
+  approved:  ['Approved', 'Your agent is queued to be built. It usually takes a few minutes.'],
+  building:  ['Building your agent', 'Setting up your WhatsApp agent now. This takes a few minutes.'],
+  failed:    ['Delayed', 'Setting up your agent hit a problem. TechDeva has been told and will retry.'],
+  rejected:  ['Not approved yet', '']
+};
+var AR_POLL = null;
+function arStop(){ if (AR_POLL) { clearInterval(AR_POLL); AR_POLL = null; } }
+function arForm(){
+  if (!isOwner()) return empty('No WhatsApp agent yet', 'Ask the business owner to request one from this page.');
+  return '<div style="padding:16px">' +
+    '<p>Your business does not have its WhatsApp agent yet. Ask for one here: it answers your customers on WhatsApp, in your business name, and books appointments into this dashboard.</p>' +
+    '<div class="ar-grid">' +
+      '<div><label class="card-note">Your own WhatsApp number (the owner)</label><input id="ar_phone" class="fld" placeholder="0300 1234567" inputmode="tel"></div>' +
+      '<div><label class="card-note">How the agent should call you</label><input id="ar_home" class="fld" placeholder="e.g. Dr Noor"></div>' +
+      '<div><label class="card-note">Assistant name</label><input id="ar_asst" class="fld" value="Zara" maxlength="20"></div>' +
+    '</div>' +
+    '<p class="card-note">Your number is where the agent sends you alerts and questions it cannot answer. Customers message your business number, which you connect after the agent is ready.</p>' +
+    '<button class="btn primary" id="ar_go">Request my WhatsApp agent</button><div id="ar_msg" class="card-note" style="min-height:18px;margin-top:8px"></div></div>';
+}
+function arStatus(r){
+  var t = AR_TEXT[r.status] || [r.status, ''];
+  var msg = r.status === 'rejected' ? (r.error || 'TechDeva will contact you about your WhatsApp agent.') : t[1];
+  return '<div style="padding:16px"><p><span class="tag">' + esc(t[0]) + '</span></p><p class="sub">' + esc(msg) + '</p>' +
+    '<div class="card-note">Asked ' + esc(pstWhen(r.created_at)) + ' · assistant ' + esc(r.assistant) + '</div></div>';
+}
+function arMount(){
+  api('/whatsapp/agent-request').then(function(r){
+    var req = r.ok && r.data && r.data.request;
+    if (req && req.status === 'ready') {
+      arStop();
+      /* built; only hand over to Connect once the platform has it linked,
+         otherwise say so (never bounce between the two screens) */
+      api('/whatsapp').then(function(w){
+        if (w.status === 409) waRender('<div style="padding:16px"><p><span class="tag">Almost ready</span></p><p class="sub">Your agent is built. TechDeva is linking it to this dashboard; refresh in a few minutes.</p></div>');
+        else waMount();
+      });
+      return;
+    }
+    if (!req) {
+      if (waRender(arForm())) arWire();
+      return;
+    }
+    waRender(arStatus(req));
+    if (!AR_POLL && ['requested', 'approved', 'building', 'failed'].indexOf(req.status) !== -1) AR_POLL = setInterval(arMount, 15000);
+  });
+}
+function arWire(){
+  var b = document.getElementById('ar_go'); if (!b) return;
+  b.onclick = function(){
+    var m = document.getElementById('ar_msg');
+    b.disabled = true; m.textContent = 'Sending...'; m.style.color = '';
+    api('/whatsapp/agent-request', { method: 'POST', body: {
+      owner_phone: document.getElementById('ar_phone').value,
+      home_name: document.getElementById('ar_home').value,
+      assistant: document.getElementById('ar_asst').value } }).then(function(r){
+      if (!r.ok) { b.disabled = false; m.style.color = 'var(--danger)'; m.textContent = (r.data && r.data.detail) || 'That did not work.'; return; }
+      arMount();
+    });
+  };
+}
+function waMount(){
+  arStop();
+  api('/whatsapp').then(function(r){
+    if (r.status === 409) { arMount(); return; }
+    if (!r.ok) { waRender(errState('The WhatsApp service returned ' + r.status + '.')); return; }
+    var d = r.data || {};
+    if (waRender(d.connected ? waConnected(d) : waIdle(d))) waWire();
+    if (d.status === 'pairing') { waPoll(); waStop(); WA_POLL = setInterval(waPoll, 3000); }
+  });
+}
+window.addEventListener('hashchange', arStop);
+(function(){
+  var st = document.createElement('style');
+  st.textContent = '.ar-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin:12px 0}.ar-grid .fld{width:100%}';
+  document.head.appendChild(st);
+})();
 
 window.addEventListener('hashchange', function(){
   // Every section reads fresh data when it is opened, so something added in
