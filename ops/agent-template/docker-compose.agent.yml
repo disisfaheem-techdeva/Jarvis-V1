@@ -1,0 +1,75 @@
+# TechDeva client agent template. new-agent.sh fills the __PLACEHOLDERS__ and
+# writes this to /docker/hermes-<key>/docker-compose.yml. One compose project
+# per client, so bringing one up or down never re-creates another client's agent.
+name: hermes-__KEY__
+services:
+  hermes-agent-__KEY__:
+    image: __IMG__                      # upstream + T3 gateway patch, built by new-agent.sh
+    container_name: hermes-agent-__KEY__
+    restart: unless-stopped
+    command: ["gateway", "run"]
+    labels:
+      techdeva.agent: "__KEY__"
+      techdeva.pairwatch: "true"        # T6: pairwatch.sh may restart this agent after a pairing
+    env_file:
+      - __SHARED_ENV__                  # shared WhatsApp/gateway settings (same as the live agents)
+      - ./agent.env                     # this agent's GEMINI_API_KEY + HERMES_INTERNAL_KEY (mode 600)
+    environment:
+      HERMES_UID: '__UID__'
+      API_SERVER_HOST: '0.0.0.0'
+      API_SERVER_ENABLED: 'true'
+      # T2: Gemini only. Blank any other provider key the shared env may carry,
+      # so no fallback can reach OpenRouter/OpenAI.
+      OPENROUTER_API_KEY: ""
+      OPENAI_API_KEY: ""
+      OPENAI_BASE_URL: ""
+      # T4: the owner's own chat is the home channel, so "No home channel is
+      # set" never goes to a patient.
+      WHATSAPP_HOME_CHANNEL: "__PHONE__@s.whatsapp.net"
+      WHATSAPP_HOME_CHANNEL_NAME: "__HOME_NAME__"
+    volumes:
+      - hermes-__KEY__-data:/opt/data
+    networks: [hermes]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  pairctl-__KEY__:
+    image: node:22-bookworm-slim
+    container_name: pairctl-__KEY__
+    restart: unless-stopped
+    user: "__UID__:__GID__"
+    command: ["node", "/srv/pairctl/pairctl.mjs"]
+    # T6 + Send: share the agent's network namespace. The agent's WhatsApp
+    # bridge listens on 127.0.0.1 only; this is the only way pairctl can hand
+    # it a dashboard reply. The platform reaches pairctl at
+    # http://hermes-agent-__KEY__:3010 on the hermes network.
+    network_mode: "service:hermes-agent-__KEY__"
+    depends_on: [hermes-agent-__KEY__]
+    labels:
+      techdeva.agent: "__KEY__"
+    env_file:
+      - ./pairctl.env                   # HERMES_INTERNAL_KEY only (mode 600)
+    environment:
+      PAIRCTL_AGENT: "__KEY__"
+      PAIRCTL_PORT: "3010"
+      PAIRCTL_BRIDGE_PORT: "3011"
+      PAIRCTL_AGENT_BRIDGE_PORT: "3000"
+      PAIRCTL_SESSION_DIR: /opt/data/whatsapp/session
+      HOME: /tmp
+    volumes:
+      - __PAIRCTL_DIR__:/srv/pairctl:ro
+      - hermes-__KEY__-data:/opt/data
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+networks:
+  hermes:
+    external: true
+    name: hermes-workspace-ofsd_default
+
+volumes:
+  hermes-__KEY__-data:
+    external: true
+    name: hermes-__KEY__-data

@@ -176,6 +176,21 @@ function bridgeSend(chatId, message) {
   });
 }
 
+// T6. The gateway gives up on WhatsApp when it starts unpaired and does not
+// retry, so a fresh scan is not picked up until the agent restarts. This
+// marker tells the host's pairwatch that a pairing finished; pairwatch
+// restarts the agent once (the marker is newer than the agent's start).
+function markPaired(number) {
+  try {
+    const dir = path.join(DATA_DIR, 'pairing');
+    fs.mkdirSync(dir, { recursive: true });
+    const tmp = path.join(dir, '.techdeva-paired.json.tmp');
+    fs.writeFileSync(tmp, JSON.stringify({ agent: AGENT, number: number || null, at: new Date().toISOString() }));
+    fs.renameSync(tmp, path.join(dir, 'techdeva-paired.json'));
+    log('pairing marker written; pairwatch will restart the agent');
+  } catch (e) { log('could not write pairing marker:', e.message); }
+}
+
 function readBody(req) {
   return new Promise((ok, bad) => {
     let b = '';
@@ -246,6 +261,7 @@ const server = http.createServer(async (req, res) => {
     if (s.connected) {
       // Credentials are on the volume now. Hand the number back to the gateway.
       stopBridge('paired');
+      markPaired(s.number);
       return send(res, 200, { agent: AGENT, running: false, state: 'connected',
                               number: s.number, name: s.name, qr: null });
     }
