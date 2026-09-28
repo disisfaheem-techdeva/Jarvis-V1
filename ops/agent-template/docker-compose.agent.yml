@@ -23,6 +23,11 @@ services:
       OPENROUTER_API_KEY: ""
       OPENAI_API_KEY: ""
       OPENAI_BASE_URL: ""
+      # "auto" helper tasks (vision, compression...) must not find another
+      # provider's key either: Gemini is the only model this agent may call.
+      GROQ_API_KEY: ""
+      AWS_ACCESS_KEY_ID: ""
+      AWS_SECRET_ACCESS_KEY: ""
       # A client agent speaks WhatsApp only. Blank any bot token the shared env
       # carries, so a new agent can never poll (and steal) another agent's
       # Telegram/Discord/Slack updates.

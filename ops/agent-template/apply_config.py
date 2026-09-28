@@ -31,6 +31,11 @@ cfg.setdefault("model", {})
 if not isinstance(cfg["model"], dict):
     cfg["model"] = {}
 cfg["model"].update(MODEL)
+# The config a fresh gateway writes can carry model.base_url pointing at
+# openrouter.ai (seen on the 28 Sep probe). With provider gemini that would
+# still send Gemini calls through OpenRouter, so any endpoint override goes.
+for k in ("base_url", "api_key", "api_mode"):
+    cfg["model"].pop(k, None)
 cfg["fallback_providers"] = FALLBACKS
 cfg["providers"] = {}                       # nothing but gemini is configured
 cfg.setdefault("agent", {})["disabled_toolsets"] = DISABLED
@@ -50,7 +55,7 @@ if back["model"].get("provider") != "gemini" or back["model"].get("default") != 
     problems.append("model")
 if back.get("fallback_providers") != FALLBACKS:
     problems.append("fallback_providers")
-if any("openrouter" in str(x).lower() for x in back.get("fallback_providers", [])) or back["model"].get("provider") == "openrouter":
+if "openrouter" in str(back["model"]).lower() or any("openrouter" in str(x).lower() for x in back.get("fallback_providers", [])):
     problems.append("openrouter present")
 if back["agent"].get("disabled_toolsets") != DISABLED:
     problems.append("agent.disabled_toolsets")
