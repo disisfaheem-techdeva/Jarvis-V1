@@ -70,15 +70,44 @@ def _digits(p):
     return re.sub(r"\D", "", p or "")
 
 
+_CUR = re.compile(r"^[A-Z]{3}$")
+OWNER_ROLES = ("owner", "techdeva_admin")
+
+
+def _currency(v):
+    c = (v or "PKR").strip().upper()
+    if not _CUR.match(c):
+        raise HTTPException(400, "Currency must be a 3-letter code like PKR.")
+    return c
+
+
+def _end(day, start_tm, end_tm):
+    """The end time on the same day, or None. An end before the start is refused."""
+    end_tm = (end_tm or "").strip()
+    if not end_tm:
+        return None
+    if not _HHMM.match(end_tm):
+        raise HTTPException(400, "End time must look like 15:30.")
+    if start_tm and end_tm <= start_tm:
+        raise HTTPException(400, "The end time must be after the start time.")
+    return "%s %s:00" % (day, end_tm)
+
+
 def make_booking_router():
     router = APIRouter(tags=["appointments"])
 
     @router.get("/appointments/list")
     def listing(start: str | None = None, end: str | None = None, status: str | None = None,
+                q: str | None = None, customer_id: str | None = None,
+                include_unlinked: bool = False,
                 x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
                 authorization: str | None = Header(None),
                 td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
-        """Appointments between two days (inclusive), with the bill's money."""
+        """Appointments between two days (inclusive), with the bill's money.
+
+        include_unlinked also returns bills in the same range that have no
+        appointment (recorded before Daily Entry booked through here), so money
+        on the books is never invisible on the appointments screen."""
         tid, role, uid = _who(x_tenant_id, x_role, authorization, td_session)
         s = _day(start, "Start") or "1900-01-01"
         e = _day(end, "End") or "2999-12-31"
@@ -88,31 +117,70 @@ def make_booking_router():
                 raise HTTPException(400, "Unknown status.")
             where.append("a.status = %s")
             args.append(status)
+        if customer_id:
+            where.append("a.customer_id = %s")
+            args.append(customer_id)
+        q = (q or "").strip()[:80]
+        if q:
+            like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            where.append("(c.name ILIKE %s OR c.phone ILIKE %s OR a.service ILIKE %s "
+                         "OR i.number ILIKE %s OR a.notes ILIKE %s)")
+            args += [like] * 5
         with tenant_session(tid, role) as cur:
             cur.execute(
-                "SELECT a.id, a.starts_at, "
+                "SELECT a.id, a.starts_at, a.ends_at, "
                 "  to_char(a.starts_at AT TIME ZONE %s, 'YYYY-MM-DD') AS day, "
                 "  to_char(a.starts_at AT TIME ZONE %s, 'HH24:MI') AS time, "
-                "  a.status, a.service, a.price, a.notes, a.department, a.booked_by, "
+                "  to_char(a.ends_at AT TIME ZONE %s, 'HH24:MI') AS end_time, "
+                "  a.status, a.service, a.service_id, a.price, a.notes, a.department, a.booked_by, "
                 "  a.assisted_by, a.procedure_by, a.payment_method, a.total_sessions, "
-                "  a.next_appointment, a.invoice_id, a.customer_id, "
+                "  a.next_appointment, a.invoice_id, a.customer_id, a.staff_id, a.location_id, "
+                "  COALESCE(i.currency, a.currency, 'PKR') AS currency, "
                 "  c.name AS customer_name, c.phone AS customer_phone, "
+                "  st.name AS staff_name, l.name AS location_name, "
                 "  i.number AS invoice_number, i.subtotal, i.discount, i.tax, i.total, "
                 "  i.voided_at, "
+                "  (SELECT string_agg(DISTINCT pk.name, ', ') FROM invoice_items ii "
+                "     JOIN packages pk ON pk.id = ii.package_id WHERE ii.invoice_id = i.id) AS package_names, "
                 "  COALESCE((SELECT sum(p.amount) FROM payments p WHERE p.invoice_id = i.id), 0) AS paid "
                 "FROM appointments a "
                 "LEFT JOIN customers c ON c.id = a.customer_id "
+                "LEFT JOIN staff st ON st.id = a.staff_id "
+                "LEFT JOIN locations l ON l.id = a.location_id "
                 "LEFT JOIN invoices i ON i.id = a.invoice_id "
                 "WHERE " + " AND ".join(where) + " ORDER BY a.starts_at DESC LIMIT 1000",
-                (TZ, TZ, *args))
+                (TZ, TZ, TZ, *args))
             rows = cur.fetchall()
+            unlinked = None
+            if include_unlinked:
+                cur.execute(
+                    "SELECT i.id AS invoice_id, i.number AS invoice_number, i.issued_on, "
+                    "  to_char(i.issued_on, 'YYYY-MM-DD') AS day, i.status, i.total, i.currency, "
+                    "  i.notes, i.customer_id, c.name AS customer_name, c.phone AS customer_phone, "
+                    "  (SELECT string_agg(ii.description, ', ') FROM invoice_items ii "
+                    "     WHERE ii.invoice_id = i.id) AS service, "
+                    "  COALESCE((SELECT sum(p.amount) FROM payments p WHERE p.invoice_id = i.id), 0) AS paid "
+                    "FROM invoices i LEFT JOIN customers c ON c.id = i.customer_id "
+                    "WHERE i.voided_at IS NULL AND i.issued_on BETWEEN %s AND %s "
+                    "  AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.invoice_id = i.id) "
+                    + ("AND i.customer_id = %s " if customer_id else "") +
+                    "ORDER BY i.issued_on DESC, i.number DESC LIMIT 500",
+                    (s, e, customer_id) if customer_id else (s, e))
+                unlinked = cur.fetchall()
+                for u in unlinked:
+                    u["total"] = round(float(u["total"] or 0), 2)
+                    u["paid"] = round(float(u["paid"] or 0), 2)
+                    u["balance"] = round(max(u["total"] - u["paid"], 0), 2)
         for r in rows:
             total = float(r["total"] or 0) if r["invoice_id"] else float(r["price"] or 0)
             paid = float(r["paid"] or 0)
             r["total"] = round(total, 2)
             r["paid"] = round(paid, 2)
             r["balance"] = round(max(total - paid, 0), 2) if r["invoice_id"] else None
-        return {"count": len(rows), "appointments": rows}
+        out = {"count": len(rows), "appointments": rows}
+        if unlinked is not None:
+            out["unlinked_bills"] = unlinked
+        return out
 
     @router.get("/appointments/{appt_id}/bill")
     def bill(appt_id: str,
@@ -186,7 +254,8 @@ def make_booking_router():
             ld = _num(s.get("discount"), "Line discount")
             if ld > price * qty:
                 raise HTTPException(400, "The discount on %s is more than its price." % nm)
-            lines.append({"service_id": s.get("service_id") or None, "description": nm,
+            lines.append({"service_id": s.get("service_id") or None,
+                          "package_id": s.get("package_id") or None, "description": nm,
                           "quantity": qty, "unit_price": price,
                           "line_total": round(price * qty, 2)})
             subtotal += price * qty
@@ -213,9 +282,17 @@ def make_booking_router():
             raise HTTPException(400, "Sessions must be between 1 and 100.")
         nxt = _day(body.get("next_appointment"), "Next appointment")
         det = {k: ((body.get(k) or "").strip()[:n] or None) for k, n in DETAIL_TEXT.items()}
-        staff_id = (body.get("procedure_staff_id") or "").strip() or None
+        staff_id = (body.get("procedure_staff_id") or body.get("staff_id") or "").strip() or None
+        location_id = (body.get("location_id") or "").strip() or None
+        currency = _currency(body.get("currency"))
+        ends = _end(day, tm, body.get("end_time"))
+        csource = (body.get("source") or "").strip().lower()[:40] or "appointment"
 
         with tenant_session(tid, role) as cur:
+            if location_id:
+                cur.execute("SELECT 1 FROM locations WHERE id = %s", (location_id,))
+                if not cur.fetchone():
+                    raise HTTPException(404, "That location is not in this business.")
             if customer_id:
                 cur.execute("SELECT id, name FROM customers WHERE id = %s", (customer_id,))
                 c = cur.fetchone()
@@ -231,8 +308,8 @@ def make_booking_router():
                     c = cur.fetchone()
                 if not c:
                     cur.execute("INSERT INTO customers (tenant_id, name, phone, source) "
-                                "VALUES (current_tenant(), %s, %s, 'appointment') "
-                                "RETURNING id, name", (name, phone or None))
+                                "VALUES (current_tenant(), %s, %s, %s) "
+                                "RETURNING id, name", (name, phone or None, csource))
                     c = cur.fetchone()
                 customer_id = c["id"]
             if staff_id:
@@ -243,14 +320,15 @@ def make_booking_router():
                 det["procedure_by"] = det["procedure_by"] or st["name"]
 
             cur.execute(
-                "INSERT INTO appointments (tenant_id, customer_id, service_id, staff_id, service, "
-                "starts_at, status, price, currency, notes, department, booked_by, assisted_by, "
-                "procedure_by, payment_method, total_sessions, next_appointment) VALUES "
-                "(current_tenant(), %s, %s, %s, %s, (%s::timestamp AT TIME ZONE %s), %s, %s, 'PKR', "
+                "INSERT INTO appointments (tenant_id, customer_id, service_id, staff_id, location_id, "
+                "service, starts_at, ends_at, status, price, currency, notes, department, booked_by, "
+                "assisted_by, procedure_by, payment_method, total_sessions, next_appointment) VALUES "
+                "(current_tenant(), %s, %s, %s, %s, %s, (%s::timestamp AT TIME ZONE %s), "
+                "(%s::timestamp AT TIME ZONE %s), %s, %s, %s, "
                 "%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-                (customer_id, lines[0]["service_id"] if lines else None, staff_id,
+                (customer_id, lines[0]["service_id"] if lines else None, staff_id, location_id,
                  ", ".join(l["description"] for l in lines)[:500] or None,
-                 "%s %s:00" % (day, tm), TZ, status, total if lines else None,
+                 "%s %s:00" % (day, tm), TZ, ends, TZ, status, total if lines else None, currency,
                  det["notes"], det["department"], det["booked_by"], det["assisted_by"],
                  det["procedure_by"], (body.get("payment_method") or None), sessions, nxt))
             appt_id = cur.fetchone()["id"]
@@ -259,23 +337,27 @@ def make_booking_router():
             if lines:
                 number = _next_invoice_number(cur)
                 cur.execute(
-                    "INSERT INTO invoices (tenant_id, customer_id, number, issued_on, currency, "
-                    "discount, tax, notes) VALUES (current_tenant(), %s, %s, %s, 'PKR', %s, %s, %s) "
-                    "RETURNING id",
-                    (customer_id, number, day, discount, tax, "Appointment %s %s" % (day, tm)))
+                    "INSERT INTO invoices (tenant_id, customer_id, location_id, number, issued_on, "
+                    "currency, discount, tax, notes) VALUES (current_tenant(), %s, %s, %s, %s, %s, "
+                    "%s, %s, %s) RETURNING id",
+                    (customer_id, location_id, number, day, currency, discount, tax,
+                     "Appointment %s %s" % (day, tm)))
                 inv_id = cur.fetchone()["id"]
                 for l in lines:
                     cur.execute(
-                        "INSERT INTO invoice_items (tenant_id, invoice_id, service_id, description, "
-                        "quantity, unit_price, line_total) VALUES (current_tenant(), %s, %s, %s, %s, %s, %s)",
-                        (inv_id, l["service_id"], l["description"], l["quantity"],
+                        "INSERT INTO invoice_items (tenant_id, invoice_id, service_id, package_id, "
+                        "description, quantity, unit_price, line_total) "
+                        "VALUES (current_tenant(), %s, %s, %s, %s, %s, %s, %s)",
+                        (inv_id, l["service_id"], l["package_id"], l["description"], l["quantity"],
                          l["unit_price"], l["line_total"]))
                 if received > 0:
                     method, ref = METHODS[mkey]
                     cur.execute(
-                        "INSERT INTO payments (tenant_id, invoice_id, customer_id, amount, currency, "
-                        "method, reference, notes) VALUES (current_tenant(), %s, %s, %s, 'PKR', %s, %s, %s)",
-                        (inv_id, customer_id, received, method, ref, "Taken at booking"))
+                        "INSERT INTO payments (tenant_id, invoice_id, customer_id, location_id, amount, "
+                        "currency, method, reference, notes) "
+                        "VALUES (current_tenant(), %s, %s, %s, %s, %s, %s, %s, %s)",
+                        (inv_id, customer_id, location_id, received, currency, method, ref,
+                         "Taken at booking"))
                 money = _settle(cur, inv_id, uid)
                 cur.execute("UPDATE appointments SET invoice_id = %s WHERE id = %s", (inv_id, appt_id))
                 money["invoice_number"] = number
@@ -308,6 +390,15 @@ def make_booking_router():
                 raise HTTPException(400, "Send both a date (2026-09-28) and a time (14:30).")
             sets.append("starts_at = (%s::timestamp AT TIME ZONE %s)")
             vals += ["%s %s:00" % (d, t), TZ]
+            if "end_time" in body:
+                sets.append("ends_at = (%s::timestamp AT TIME ZONE %s)")
+                vals += [_end(d, t, body.get("end_time")), TZ]
+        elif "end_time" in body:
+            raise HTTPException(400, "Send the date and start time with the end time.")
+        for k in ("location_id", "staff_id"):
+            if k in body:
+                sets.append(k + " = %s")
+                vals.append((body.get(k) or "").strip() or None)
         for k, n in DETAIL_TEXT.items():
             if k in body:
                 sets.append(k + " = %s")
@@ -324,6 +415,18 @@ def make_booking_router():
         if not sets:
             raise HTTPException(400, "Nothing to change.")
         with tenant_session(tid, role) as cur:
+            if (body.get("location_id") or "").strip():
+                cur.execute("SELECT 1 FROM locations WHERE id = %s", (body["location_id"].strip(),))
+                if not cur.fetchone():
+                    raise HTTPException(404, "That location is not in this business.")
+            if (body.get("staff_id") or "").strip():
+                cur.execute("SELECT name FROM staff WHERE id = %s", (body["staff_id"].strip(),))
+                st = cur.fetchone()
+                if not st:
+                    raise HTTPException(404, "That staff member is not in this business.")
+                if not (body.get("procedure_by") or "").strip():
+                    sets.append("procedure_by = %s")
+                    vals.append(st["name"])
             cur.execute("UPDATE appointments SET " + ", ".join(sets) +
                         " WHERE id = %s RETURNING id", (*vals, appt_id))
             if not cur.fetchone():
@@ -332,5 +435,117 @@ def make_booking_router():
                    resource_id=appt_id, actor=str(uid), actor_type="human", status="ok",
                    detail={"fields": [s.split(" ")[0] for s in sets]}, error=None)
         return {"ok": True}
+
+    @router.delete("/appointments/{appt_id}")
+    def remove(appt_id: str,
+               x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+               authorization: str | None = Header(None),
+               td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Remove a booking. Money already taken is never erased: if its bill has
+        a payment the delete is refused (cancel it instead). An unpaid bill is
+        voided with a reason, so the invoice number and history stay on record."""
+        tid, role, uid = _who(x_tenant_id, x_role, authorization, td_session)
+        if role not in OWNER_ROLES:
+            raise HTTPException(403, "Only the business owner can delete an appointment. "
+                                     "Mark it cancelled instead.")
+        with tenant_session(tid, role) as cur:
+            cur.execute("SELECT id, invoice_id FROM appointments WHERE id = %s", (appt_id,))
+            a = cur.fetchone()
+            if not a:
+                raise HTTPException(404, "Appointment not found.")
+            voided = None
+            if a["invoice_id"]:
+                if _paid_so_far(cur, a["invoice_id"]) > 0:
+                    raise HTTPException(409, "Money has been received on this appointment's bill, "
+                                             "so it cannot be deleted. Mark it cancelled instead.")
+                cur.execute("UPDATE invoices SET voided_at = COALESCE(voided_at, now()), "
+                            "void_reason = COALESCE(void_reason, 'Appointment deleted'), "
+                            "status = 'void', updated_at = now() WHERE id = %s RETURNING number",
+                            (a["invoice_id"],))
+                voided = (cur.fetchone() or {}).get("number")
+            cur.execute("DELETE FROM appointments WHERE id = %s", (appt_id,))
+            record(cur, action="appointment.delete", resource="appointments",
+                   resource_id=appt_id, actor=str(uid), actor_type="human", status="ok",
+                   detail={"voided_invoice": voided}, error=None)
+        return {"ok": True, "deleted": appt_id, "voided_invoice": voided}
+
+    @router.get("/customers/{customer_id}/history")
+    def history(customer_id: str,
+                x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                authorization: str | None = Header(None),
+                td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Everything this business has on one customer, read from the real rows:
+        appointments, bills with their lines and packages, payments, balance.
+        Nothing is summarised that is not also listed."""
+        tid, role, uid = _who(x_tenant_id, x_role, authorization, td_session)
+        with tenant_session(tid, role) as cur:
+            cur.execute("SELECT id, name, phone, email, source, status, tags, notes, "
+                        "first_seen_at, last_interaction_at, created_at, updated_at "
+                        "FROM customers WHERE id = %s", (customer_id,))
+            c = cur.fetchone()
+            if not c:
+                raise HTTPException(404, "Customer not found.")
+            cur.execute(
+                "SELECT a.id, to_char(a.starts_at AT TIME ZONE %s, 'YYYY-MM-DD') AS day, "
+                "  to_char(a.starts_at AT TIME ZONE %s, 'HH24:MI') AS time, "
+                "  to_char(a.ends_at AT TIME ZONE %s, 'HH24:MI') AS end_time, a.status, "
+                "  a.service, a.department, a.booked_by, a.assisted_by, a.procedure_by, "
+                "  a.total_sessions, a.next_appointment, a.notes, a.invoice_id, "
+                "  st.name AS staff_name, l.name AS location_name, i.number AS invoice_number "
+                "FROM appointments a LEFT JOIN staff st ON st.id = a.staff_id "
+                "LEFT JOIN locations l ON l.id = a.location_id "
+                "LEFT JOIN invoices i ON i.id = a.invoice_id "
+                "WHERE a.customer_id = %s ORDER BY a.starts_at DESC LIMIT 500",
+                (TZ, TZ, TZ, customer_id))
+            appts = cur.fetchall()
+            cur.execute(
+                "SELECT i.id, i.number, i.issued_on, i.status, i.currency, i.subtotal, i.discount, "
+                "  i.tax, i.total, i.voided_at, i.void_reason, i.notes, "
+                "  COALESCE((SELECT sum(p.amount) FROM payments p WHERE p.invoice_id = i.id), 0) AS paid "
+                "FROM invoices i WHERE i.customer_id = %s ORDER BY i.issued_on DESC, i.number DESC "
+                "LIMIT 500", (customer_id,))
+            invoices = cur.fetchall()
+            ids = [i["id"] for i in invoices]
+            lines = []
+            if ids:
+                cur.execute(
+                    "SELECT ii.invoice_id, ii.description, ii.quantity, ii.unit_price, ii.line_total, "
+                    "  ii.service_id, ii.product_id, ii.package_id, pk.name AS package_name "
+                    "FROM invoice_items ii LEFT JOIN packages pk ON pk.id = ii.package_id "
+                    "WHERE ii.invoice_id = ANY(%s) ORDER BY ii.description", (ids,))
+                lines = cur.fetchall()
+            cur.execute(
+                "SELECT p.id, p.invoice_id, i.number AS invoice_number, p.amount, p.currency, "
+                "  p.method, p.reference, p.notes, p.paid_at "
+                "FROM payments p LEFT JOIN invoices i ON i.id = p.invoice_id "
+                "WHERE p.customer_id = %s OR p.invoice_id = ANY(%s) "
+                "ORDER BY p.paid_at DESC LIMIT 500", (customer_id, ids or [None]))
+            payments = cur.fetchall()
+        by_inv = {}
+        for ln in lines:
+            by_inv.setdefault(ln["invoice_id"], []).append(ln)
+        billed = paid_total = 0.0
+        for i in invoices:
+            i["items"] = by_inv.get(i["id"], [])
+            i["paid"] = round(float(i["paid"] or 0), 2)
+            i["total"] = round(float(i["total"] or 0), 2)
+            i["balance"] = round(max(i["total"] - i["paid"], 0), 2) if not i["voided_at"] else 0
+            if not i["voided_at"]:
+                billed += i["total"]
+                paid_total += i["paid"]
+        packages = sorted({ln["package_name"] for ln in lines if ln.get("package_name")})
+        staff = sorted({x for a in appts for x in (a["staff_name"], a["procedure_by"],
+                                                   a["assisted_by"], a["booked_by"]) if x})
+        return {
+            "customer": c,
+            "appointments": appts,
+            "invoices": invoices,
+            "payments": payments,
+            "packages": packages,
+            "staff": staff,
+            "totals": {"visits": len(appts), "billed": round(billed, 2),
+                       "paid": round(paid_total, 2),
+                       "balance": round(max(billed - paid_total, 0), 2)},
+        }
 
     return router

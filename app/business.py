@@ -12,6 +12,11 @@ readable 400 rather than silently dropped -- a typo that vanishes is how a
 price quietly fails to save.
 """
 
+import uuid
+from contextlib import contextmanager
+
+import psycopg
+
 from fastapi import APIRouter, Body, Cookie, Header, HTTPException
 
 from .audit import record
@@ -166,6 +171,86 @@ RESOURCES.update({
 })
 
 
+# Tables whose money or ledger rules live elsewhere. Writing them through the
+# generic router would skip those rules (an invoice total not recomputed, a
+# payment that does not move the invoice status, an appointment deleted while
+# its bill stays behind), so the generic verbs are refused with the way to do it.
+DEDICATED = {
+    "appointments": {"POST": "Book through POST /appointments/book.",
+                     "PATCH": "Change a booking through PATCH /appointments/{id}.",
+                     "DELETE": "Delete a booking through DELETE /appointments/{id}."},
+    "invoices": {"POST": "Create a bill through POST /operations/invoices.",
+                 "PATCH": "Bills are not edited. Take a payment or void the bill.",
+                 "DELETE": "Bills are never deleted. Void it with a reason instead."},
+    "payments": {"POST": "Take a payment through POST /operations/invoices/{id}/pay.",
+                 "PATCH": "Payments are not edited once recorded.",
+                 "DELETE": "Payments are never deleted from the books."},
+    "stock_movements": {"PATCH": "Stock history is not edited. Record a correcting adjustment.",
+                        "DELETE": "Stock history is not deleted. Record a correcting adjustment."},
+}
+
+# What still points at a row. Deleting it would silently cascade or orphan
+# those records, so the delete is refused and the owner is told what to do.
+IN_USE = {
+    "customers": [("appointments", "customer_id", "appointment"),
+                  ("invoices", "customer_id", "bill"),
+                  ("payments", "customer_id", "payment")],
+    "services": [("appointments", "service_id", "appointment"),
+                 ("invoice_items", "service_id", "bill line"),
+                 ("package_items", "service_id", "package")],
+    "products": [("stock_movements", "product_id", "stock movement"),
+                 ("invoice_items", "product_id", "bill line"),
+                 ("package_items", "product_id", "package")],
+    "packages": [("invoice_items", "package_id", "bill line")],
+    "staff": [("appointments", "staff_id", "appointment"),
+              ("staff_attendance", "staff_id", "attendance record")],
+    "locations": [("appointments", "location_id", "appointment"),
+                  ("invoices", "location_id", "bill")],
+}
+_DEACTIVATE = {"services", "products", "packages", "staff", "locations"}
+
+
+@contextmanager
+def _readable_db_errors(resource):
+    """Turn a database refusal into a sentence the owner can act on, not a 500."""
+    try:
+        yield
+    except psycopg.errors.UniqueViolation:
+        what = "phone number" if resource == "customers" else "name"
+        raise HTTPException(409, "Another {0} entry already has this {1}.".format(
+            resource.rstrip("s"), what))
+    except psycopg.errors.ForeignKeyViolation:
+        raise HTTPException(400, "One of the linked records does not exist in this business.")
+    except psycopg.errors.CheckViolation:
+        raise HTTPException(400, "A value is out of range (for example a negative price or an empty name).")
+    except (psycopg.errors.InvalidTextRepresentation, psycopg.errors.InvalidDatetimeFormat,
+            psycopg.errors.NumericValueOutOfRange, psycopg.errors.DatetimeFieldOverflow):
+        raise HTTPException(400, "A value is not in the right format (a number, date or id).")
+
+
+def _uuid(item_id):
+    try:
+        return str(uuid.UUID(str(item_id)))
+    except (ValueError, TypeError):
+        raise HTTPException(404, "not found")
+
+
+def _refuse_generic(resource, verb):
+    why = DEDICATED.get(resource, {}).get(verb)
+    if why:
+        raise HTTPException(405, why)
+
+
+def _in_use(cur, resource, item_id):
+    used = []
+    for table, col, label in IN_USE.get(resource, []):
+        cur.execute("SELECT count(*) AS n FROM {0} WHERE {1} = %s".format(table, col), (item_id,))
+        n = cur.fetchone()["n"]
+        if n:
+            used.append("{0} {1}{2}".format(n, label, "" if n == 1 else "s"))
+    return used
+
+
 def _identity(x_tenant_id, x_role, authorization, session):
     try:
         tid, role, uid = resolve_scope(x_tenant_id, x_role, authorization, session)
@@ -307,12 +392,13 @@ def make_business_router(P=None):
                     td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
         spec = _spec(resource)
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        _refuse_generic(resource, "POST")
         data = _clean(spec, body, True)
         cols = ["tenant_id"] + list(data.keys())
         vals = [tid] + list(data.values())
         sql = "INSERT INTO {0} ({1}) VALUES ({2}) RETURNING {3}".format(
             spec.table, ", ".join(cols), ", ".join(["%s"] * len(cols)), spec.read)
-        with tenant_session(tid, role) as cur:
+        with _readable_db_errors(resource), tenant_session(tid, role) as cur:
             cur.execute(sql, vals)
             row = cur.fetchone()
             record(cur, action="create", resource=resource, resource_id=row.get("id"),
@@ -326,6 +412,8 @@ def make_business_router(P=None):
                     td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
         spec = _spec(resource)
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        _refuse_generic(resource, "PATCH")
+        item_id = _uuid(item_id)
         data = _clean(spec, body, False)
         sets = ", ".join("{0} = %s".format(k) for k in data)
         if "updated_at" not in spec.read:
@@ -333,7 +421,7 @@ def make_business_router(P=None):
         else:
             sql = "UPDATE {0} SET {1}, updated_at = now() WHERE id = %s RETURNING {2}"
         sql = sql.format(spec.table, sets, spec.read)
-        with tenant_session(tid, role) as cur:
+        with _readable_db_errors(resource), tenant_session(tid, role) as cur:
             cur.execute(sql, list(data.values()) + [item_id])
             row = cur.fetchone()
             if row:
@@ -352,7 +440,14 @@ def make_business_router(P=None):
                     td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
         spec = _spec(resource)
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        _refuse_generic(resource, "DELETE")
+        item_id = _uuid(item_id)
         with tenant_session(tid, role) as cur:
+            used = _in_use(cur, resource, item_id)
+            if used:
+                raise HTTPException(409, "This is still used by {0}, so deleting it would break "
+                                         "those records.{1}".format(", ".join(used),
+                    " Mark it inactive instead." if resource in _DEACTIVATE else ""))
             cur.execute("DELETE FROM {0} WHERE id = %s RETURNING id".format(spec.table), (item_id,))
             row = cur.fetchone()
             if row:

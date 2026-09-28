@@ -2215,104 +2215,62 @@ function statTile(label, value){
 }
 function tiles(list){ return '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0">' + list.join('') + '</div>'; }
 
-/* ---------------------------------------------------------- Daily Entry */
-var DE_DAY = null, DE_LINES = [];
+/* ---------------------------------------------------------- Daily Entry
+   A day's visits. Each visit is saved through POST /appointments/book (status
+   Completed), so it has a date, a time, a bill and payments, and shows up in
+   Appointments and in the customer's history. It used to write a bare invoice,
+   which is why a visit could be on the books but nowhere in Appointments. */
+var DE_DAY = null, DE_Q = '', DE_ST = '';
 VIEWS.dailyentry = function(){
   if (!DE_DAY) DE_DAY = todayISO();
+  var modal = aptModalPrep();
+  var key = 'de_' + DE_DAY;
   var out = '<h1>Daily Entry</h1><p class="sub">Record what actually happened today: who came, what was done, what was paid. ' +
-            'A booking on its own is not revenue.</p>';
-  var ok = need('invoices', '/business/invoices') & need('payments', '/business/payments') &
-           need('customers', '/business/customers') & need('services', '/business/services') &
-           need('staff', '/business/staff');
-  if (!ok) return out + panel('Daily Entry', loading('Loading today...'));
-  if (S.invoices === null || S.payments === null)
-    return out + panel('Daily Entry', errState('The money service did not respond.'));
-
-  var custs = items('customers'), svcs = items('services');
-  var dayInv = items('invoices').filter(function(i){ return String(i.issued_on || '').slice(0, 10) === DE_DAY && !i.voided_at; });
-  var dayPay = items('payments').filter(function(p){ return dayOf(p.paid_at) === DE_DAY; });
-  var billed = dayInv.reduce(function(a, i){ return a + Number(i.total || 0); }, 0);
-  var got = dayPay.reduce(function(a, p){ return a + Number(p.amount || 0); }, 0);
-  out += row() + inp('de_day', 'Day', 'date', 150) + '</div>';
-  out += tiles([statTile('Visits recorded', dayInv.length), statTile('Billed', money(billed)),
-                statTile('Collected', money(got)), statTile('Still owed', money(Math.max(billed - got, 0)))]);
-
-  var lines = DE_LINES.map(function(l, i){
-    return '<tr><td>' + esc(l.description) + '</td><td>' + money(l.unit_price) +
-           '</td><td><button class="btn" data-deline="' + i + '">Remove</button></td></tr>';
-  }).join('');
-  var lineTotalSum = DE_LINES.reduce(function(a, l){ return a + Number(l.unit_price || 0); }, 0);
-  out += panel('Record a visit',
-    row() + select('de_cust', custs, 'Existing customer') +
-      inp('de_newname', 'Or new customer name', 'text', 170) + inp('de_newphone', 'Phone', 'tel', 130) + '</div>' +
-    row() + select('de_svc', svcs, 'Service') + inp('de_price', 'Price', 'number', 110) +
-      '<button class="btn" id="de_addline">Add service</button></div>' +
-    (DE_LINES.length ? '<div class="tbl-wrap"><table><thead><tr><th>Service</th><th>Price</th><th></th></tr></thead><tbody>' +
-      lines + '</tbody></table></div><div class="card-note" style="margin:6px 0">Total ' + money(lineTotalSum) + '</div>' : '') +
-    row() + inp('de_disc', 'Discount', 'number', 110) + inp('de_recv', 'Amount received', 'number', 140) +
-      '<select class="fld" id="de_method" style="min-width:110px"><option value="cash">Cash</option><option value="card">Card</option>' +
-      '<option value="bank">Bank</option><option value="online">Online</option><option value="other">Other</option></select>' +
-      select('de_staff', items('staff'), 'Performed by') + '</div>' +
-    row() + inp('de_notes', 'Notes', 'text', 220) + '<button class="btn primary" id="de_save">Save visit</button></div>' + actbar());
-
-  if (!dayInv.length) {
-    out += panel('Visits on ' + DE_DAY, empty('Nothing recorded', 'Record the first visit of the day above.'));
-  } else {
-    out += panel('Visits on ' + DE_DAY, '<div class="tbl-wrap"><table><thead><tr><th>Invoice</th><th>Customer</th>' +
-      '<th>Total</th><th>Status</th><th>Notes</th></tr></thead><tbody>' +
-      dayInv.map(function(i){
-        return '<tr><td>' + esc(i.number) + '</td><td>' + esc(nameOf(custs, i.customer_id) || '—') + '</td><td>' +
-               money(i.total, i.currency) + '</td><td><span class="tag">' + esc(i.status || '') + '</span></td><td>' +
-               esc(i.notes || '') + '</td></tr>';
-      }).join('') + '</tbody></table></div>', '<span class="pill count">' + dayInv.length + '</span>');
-  }
-
-  setTimeout(function(){
-    var dd = document.getElementById('de_day');
-    if (dd) { dd.value = DE_DAY; dd.onchange = function(){ DE_DAY = dd.value || todayISO(); renderShell(); }; }
-    var sv = document.getElementById('de_svc');
-    if (sv) sv.onchange = function(){
-      for (var i = 0; i < svcs.length; i++) if (String(svcs[i].id) === sv.value && svcs[i].price != null)
-        document.getElementById('de_price').value = svcs[i].price;
-    };
-    document.querySelectorAll('[data-deline]').forEach(function(b){
-      b.onclick = function(){ DE_LINES.splice(Number(b.getAttribute('data-deline')), 1); renderShell(); };
+            'Every visit is saved as a completed appointment with its bill.</p>';
+  out += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0">' +
+    '<button class="btn primary" id="de_new">+ Record a visit</button>' +
+    '<input class="fld" type="date" id="de_day" value="' + esc(DE_DAY) + '">' +
+    '<button class="btn" id="de_today">Today</button>' +
+    '<select class="fld" id="de_st"><option value="">All statuses</option>' + Object.keys(APT_STATUS).map(function(k){ return '<option value="' + k + '"' + (DE_ST === k ? ' selected' : '') + '>' + APT_STATUS[k] + '</option>'; }).join('') + '</select>' +
+    '<input class="fld" id="de_q" placeholder="Search name, phone, service, bill" value="' + esc(DE_Q) + '" style="min-width:200px">' +
+    '</div>' + actbar();
+  var ok = need(key, '/appointments/list?start=' + DE_DAY + '&end=' + DE_DAY + '&include_unlinked=true') &
+           need('payments', '/business/payments');
+  need('services', '/business/services'); need('staff', '/business/staff');
+  var rows = [];
+  if (!ok) out += panel('Visits', loading('Loading ' + DE_DAY + '...'));
+  else if (S[key] === null) out += panel('Visits', errState('The appointments service did not respond.'));
+  else {
+    var all = S[key].appointments || [], unl = S[key].unlinked_bills || [];
+    var q = DE_Q.toLowerCase();
+    rows = all.filter(function(a){
+      if (DE_ST && a.status !== DE_ST) return false;
+      if (!q) return true;
+      return [a.customer_name, a.customer_phone, a.service, a.invoice_number, a.notes].some(function(x){ return String(x || '').toLowerCase().indexOf(q) !== -1; });
     });
-    var add = document.getElementById('de_addline');
-    if (add) add.onclick = function(){
-      var sid = val('de_svc'), price = numv('de_price');
-      if (!sid) { say('Pick a service first.'); return; }
-      if (price === null || price < 0) { say('Enter the price charged.'); return; }
-      DE_LINES.push({ service_id: sid, description: nameOf(svcs, sid) || 'Service', quantity: 1, unit_price: price });
-      renderShell();
+    var billed = all.concat(unl).reduce(function(s, a){ return s + (a.voided_at ? 0 : Number(a.total || 0)); }, 0);
+    var got = items('payments').filter(function(p){ return dayOf(p.paid_at) === DE_DAY; })
+      .reduce(function(s, p){ return s + Number(p.amount || 0); }, 0);
+    var owed = all.concat(unl).reduce(function(s, a){ return s + Number(a.balance || 0); }, 0);
+    out += tiles([statTile('Visits recorded', all.length), statTile('Billed', money(billed)),
+                  statTile('Collected on this day', money(got)), statTile('Still owed on these bills', money(owed))]);
+    out += panel('Visits on ' + DE_DAY, rows.length ? aptTableHTML(rows, { viewLabel: 'View / Edit' })
+      : empty(all.length ? 'No visit matches' : 'Nothing recorded', all.length ? 'Clear the search or status filter.' : 'Press + Record a visit.'),
+      '<span class="pill count">' + rows.length + '</span>');
+    out += unlinkedHTML(unl);
+  }
+  out += modal;
+  setTimeout(function(){
+    var g = function(id){ return document.getElementById(id); };
+    if (g('de_new')) g('de_new').onclick = function(){ aptOpen(null, { date: DE_DAY, status: 'completed', title: 'Record a visit' }); };
+    if (g('de_day')) g('de_day').onchange = function(){ DE_DAY = g('de_day').value || todayISO(); renderShell(); };
+    if (g('de_today')) g('de_today').onclick = function(){ DE_DAY = todayISO(); renderShell(); };
+    if (g('de_st')) g('de_st').onchange = function(){ DE_ST = g('de_st').value; renderShell(); };
+    if (g('de_q')) g('de_q').oninput = function(){
+      DE_Q = g('de_q').value.trim();
+      clearTimeout(VIEWS._deT); VIEWS._deT = setTimeout(function(){ renderShell(); var e = g('de_q'); if (e) { e.focus(); e.setSelectionRange(e.value.length, e.value.length); } }, 300);
     };
-    var save = document.getElementById('de_save');
-    if (!save) return;
-    save.onclick = function(){
-      if (!DE_LINES.length) { say('Add at least one service.'); return; }
-      var cust = val('de_cust'), nm = val('de_newname'), ph = val('de_newphone');
-      var recv = numv('de_recv') || 0, disc = numv('de_disc') || 0, staffName = nameOf(items('staff'), val('de_staff'));
-      var notes = [staffName ? 'Performed by ' + staffName : '', val('de_notes')].filter(Boolean).join('. ');
-      save.disabled = true;
-      var getCust = (!cust && nm)
-        ? act('/business/customers', {method:'POST', body:{name: nm, phone: ph || null, source: 'walk-in'}}, 'Customer added.')
-            .then(function(r){ if (!r.ok) throw new Error('customer'); return r.data && (r.data.id || (r.data.item && r.data.item.id)); })
-        : Promise.resolve(cust || null);
-      getCust.then(function(cid){
-        return act('/operations/invoices', {method:'POST', body:{
-          customer_id: cid, issued_on: DE_DAY, discount: disc, notes: notes || null, items: DE_LINES
-        }}, 'Visit saved.');
-      }).then(function(r){
-        if (!r.ok) throw new Error('invoice');
-        if (recv > 0) return act('/operations/invoices/' + r.data.invoice_id + '/pay',
-          {method:'POST', body:{amount: Math.min(recv, r.data.total), method: val('de_method') || 'cash'}}, 'Visit and payment saved.');
-        return r;
-      }).then(function(){
-        DE_LINES = [];
-        need('invoices', '/business/invoices', true); need('payments', '/business/payments', true);
-        need('customers', '/business/customers', true);
-      }).catch(function(){ save.disabled = false; });
-    };
+    aptWireRows(rows);
   }, 0);
   return out;
 };
@@ -2722,23 +2680,44 @@ VIEWS.hr = function(){
   document.head.appendChild(st);
 })();
 
-var APT = { from: null, to: null, all: false, status: '', data: undefined, loading: false,
+var SOURCES = [['whatsapp','WhatsApp'],['facebook','Facebook'],['instagram','Instagram'],['website','Website'],
+               ['google','Google'],['walk-in','Walk-in'],['referral','Referral'],['phone','Phone'],['other','Other']];
+function sourceLabel(v){
+  if (!v) return '—';
+  for (var i = 0; i < SOURCES.length; i++) if (SOURCES[i][0] === String(v).toLowerCase()) return SOURCES[i][1];
+  return String(v);
+}
+function sourceSelect(id, sel, blank){
+  return '<select class="fld" id="' + id + '">' + '<option value="">' + esc(blank || 'Source…') + '</option>' +
+    SOURCES.map(function(s){ return '<option value="' + s[0] + '"' + (String(sel || '').toLowerCase() === s[0] ? ' selected' : '') + '>' + s[1] + '</option>'; }).join('') +
+    (sel && !SOURCES.some(function(s){ return s[0] === String(sel).toLowerCase(); }) ? '<option value="' + esc(sel) + '" selected>' + esc(sel) + '</option>' : '') +
+    '</select>';
+}
+function isOwner(){ return !!(S.me && (S.me.role === 'owner' || S.me.role === 'techdeva_admin')); }
+/* Real rows only: onboarding fallback items come back with id null. */
+function realItems(key){ return items(key).filter(function(x){ return x.id; }); }
+
+var APT = { from: null, to: null, all: false, status: '', q: '', data: undefined, loading: false,
             form: null, lines: [], busy: false, delArm: null };
 var APT_STATUS = { booked: 'Scheduled', completed: 'Completed', cancelled: 'Cancelled', no_show: 'No Show' };
 var APT_METHODS = [['cash','Cash'],['jazzcash','JazzCash'],['easypaisa','EasyPaisa'],['bank','Online / Bank Transfer'],['card','Card'],['other','Other']];
 
+function aptQuery(){
+  var q = APT.all ? '?include_unlinked=true' : ('?start=' + APT.from + '&end=' + APT.to + '&include_unlinked=true');
+  if (APT.status) q += '&status=' + encodeURIComponent(APT.status);
+  if (APT.q) q += '&q=' + encodeURIComponent(APT.q);
+  return q;
+}
 function aptLoad(force){
   if (APT.loading || (APT.data !== undefined && !force)) return;
   APT.loading = true;
-  var q = APT.all ? '' : ('?start=' + APT.from + '&end=' + APT.to);
-  if (APT.status) q += (q ? '&' : '?') + 'status=' + APT.status;
-  api('/appointments/list' + q).then(function(r){
+  api('/appointments/list' + aptQuery()).then(function(r){
     APT.loading = false;
     APT.data = r.ok ? r.data : { error: (r.data && r.data.detail) || ('The appointments service returned ' + r.status + '.') };
     renderShell();
   });
 }
-function aptMoney(v){ return money(v || 0); }
+function aptMoney(v, cur){ return money(v || 0, cur); }
 function aptBill(){
   var sub = 0, ld = 0;
   APT.lines.forEach(function(l){ sub += (Number(l.price) || 0) * (Number(l.qty) || 1); ld += Number(l.discount) || 0; });
@@ -2750,60 +2729,91 @@ function aptBill(){
   var rec = numv('ap_recv') || 0;
   return { sub: sub, disc: disc, tax: tax, total: total, rec: rec, bal: Math.round((total - rec) * 100) / 100 };
 }
+function aptCur(){ return (val('ap_cur') || 'PKR').toUpperCase(); }
 function aptBillHTML(){
   if (!APT.lines.length) return 'Add a service to see the bill.';
-  var b = aptBill();
-  return 'Subtotal <b>' + aptMoney(b.sub) + '</b><br>Discount <b>- ' + aptMoney(b.disc) + '</b><br>GST <b>' + aptMoney(b.tax) +
-         '</b><br><span style="font-size:15px">Total <b>' + aptMoney(b.total) + '</b></span><br>Received now <b>' + aptMoney(b.rec) +
-         '</b><br>Remaining balance <b class="' + (b.bal > 0.004 ? 'bal-due' : 'bal-ok') + '">' + aptMoney(Math.max(b.bal, 0)) + '</b>';
+  var b = aptBill(), c = aptCur();
+  return 'Subtotal <b>' + aptMoney(b.sub, c) + '</b><br>Discount <b>- ' + aptMoney(b.disc, c) + '</b><br>GST <b>' + aptMoney(b.tax, c) +
+         '</b><br><span style="font-size:15px">Total <b>' + aptMoney(b.total, c) + '</b></span><br>Received now <b>' + aptMoney(b.rec, c) +
+         '</b><br>Remaining balance <b class="' + (b.bal > 0.004 ? 'bal-due' : 'bal-ok') + '">' + aptMoney(Math.max(b.bal, 0), c) + '</b>';
 }
 function aptRefreshBill(){
   var el = document.getElementById('ap_bill'); if (el) el.innerHTML = aptBillHTML();
   var b = document.getElementById('ap_balance'); if (b) b.value = APT.lines.length ? Math.max(aptBill().bal, 0) : '';
 }
-function aptOpen(a){
-  APT.form = a ? { id: a.id, edit: true, a: a } : { edit: false };
+/* a: an appointment row to edit, or null for a new one.
+   preset: {customer:{id,name,phone}, date, status} for a new one opened from
+   Daily Entry or a customer's history. */
+function aptOpen(a, preset){
+  APT.form = a ? { id: a.id, edit: true, a: a } : { edit: false, a: {}, preset: preset || {} };
   APT.lines = [];
+  need('services', '/business/services'); need('staff', '/business/staff');
+  need('packages', '/business/packages'); need('locations', '/business/locations');
   renderShell();
 }
-function aptLinesHTML(svcs){
+function aptLinesHTML(){
   if (!APT.lines.length) return '<div class="card-note">No services yet. Pick one above and press Add.</div>';
   return APT.lines.map(function(l, i){
-    return '<div class="svrow"><input class="fld" value="' + esc(l.name) + '" data-apl="' + i + '" data-k="name">' +
+    return '<div class="svrow"><input class="fld" value="' + esc(l.name) + '" data-apl="' + i + '" data-k="name"' + (l.package_id ? ' title="Package"' : '') + '>' +
       '<input class="fld" type="number" min="0" value="' + esc(l.price) + '" data-apl="' + i + '" data-k="price" title="Price">' +
       '<input class="fld" type="number" min="1" value="' + esc(l.qty) + '" data-apl="' + i + '" data-k="qty" title="Qty">' +
-      '<input class="fld" type="number" min="0" value="' + esc(l.discount) + '" data-apl="' + i + '" data-k="discount" title="Discount on this service">' +
+      '<input class="fld" type="number" min="0" value="' + esc(l.discount) + '" data-apl="' + i + '" data-k="discount" title="Discount on this line">' +
       '<button class="btn" data-aprm="' + i + '" title="Remove">&times;</button></div>';
   }).join('');
 }
+function aptPickList(){
+  // Services (saved rows and, until they are saved, the onboarding list) and packages.
+  var out = [];
+  items('services').forEach(function(s, i){
+    out.push({ key: s.id ? 's:' + s.id : 'o:' + i, name: s.name, price: s.price, service_id: s.id || null, package_id: null });
+  });
+  realItems('packages').forEach(function(p){
+    if (p.active === false) return;
+    out.push({ key: 'k:' + p.id, name: p.name + ' (package)', price: p.price, service_id: null, package_id: p.id, pname: p.name });
+  });
+  return out;
+}
 function aptFormHTML(){
-  var f = APT.form, a = f.a || {};
-  var svcs = items('services'), staff = items('staff');
+  var f = APT.form, a = f.a || {}, pre = f.preset || {};
+  var staff = realItems('staff'), locs = realItems('locations');
   var opts = function(list, sel){ return list.map(function(x){ return '<option value="' + esc(x.id) + '"' + (String(sel) === String(x.id) ? ' selected' : '') + '>' + esc(x.name) + '</option>'; }).join(''); };
-  var stOpts = Object.keys(APT_STATUS).map(function(k){ return '<option value="' + k + '"' + ((a.status || 'booked') === k ? ' selected' : '') + '>' + APT_STATUS[k] + '</option>'; }).join('');
+  var stOpts = Object.keys(APT_STATUS).map(function(k){ return '<option value="' + k + '"' + ((a.status || pre.status || 'booked') === k ? ' selected' : '') + '>' + APT_STATUS[k] + '</option>'; }).join('');
   var dl = '<datalist id="ap_staffnames">' + staff.map(function(s){ return '<option value="' + esc(s.name) + '">'; }).join('') + '</datalist>';
-  var body = '<h3>' + (f.edit ? 'Edit Appointment' : 'Add Appointment') + '</h3>' + dl;
+  var body = '<h3>' + (f.edit ? 'Edit Appointment' : (pre.title || 'Add Appointment')) + '</h3>' + dl;
   if (!f.edit) {
-    body += '<div class="fgrid"><div><label>Name</label><input class="fld" id="ap_name"></div>' +
-            '<div><label>Phone</label><input class="fld" id="ap_phone" type="tel" placeholder="03xx xxxxxxx"></div></div>' +
-            '<div class="card-note">An existing customer with the same phone number is used automatically.</div>' +
-            '<div class="fgrid" style="margin-top:12px"><div style="grid-column:1/-1"><label>Service (pick, then Add)</label>' +
-            '<div style="display:flex;gap:6px"><select class="fld" id="ap_svc"><option value="">Choose a service…</option>' + opts(svcs) +
-            '<option value="__custom">Other (type it)</option></select><button class="btn" id="ap_addsvc">+ Add Service</button></div></div></div>' +
-            '<label style="font-size:12px;color:var(--muted)">Services in this appointment — name · price · qty · discount</label>' +
-            '<div id="ap_lines">' + aptLinesHTML(svcs) + '</div>' +
-            '<div class="fgrid"><div><label>Discount type</label><select class="fld" id="ap_dtype"><option value="flat">Flat amount (Rs)</option><option value="percent">Percentage (%)</option></select></div>' +
+    if (pre.customer && pre.customer.id) {
+      body += '<div class="card-note">Client: <strong>' + esc(pre.customer.name) + '</strong> ' + esc(pre.customer.phone || '') + '</div>';
+    } else {
+      body += '<div class="fgrid"><div><label>Name</label><input class="fld" id="ap_name"></div>' +
+              '<div><label>Phone</label><input class="fld" id="ap_phone" type="tel" placeholder="03xx xxxxxxx"></div>' +
+              '<div><label>Source (new client)</label>' + sourceSelect('ap_src', '', 'Where did they come from?') + '</div></div>' +
+              '<div class="card-note">An existing customer with the same phone number is used automatically.</div>';
+    }
+    body += '<div class="fgrid" style="margin-top:12px"><div style="grid-column:1/-1"><label>Service or package (pick, then Add)</label>' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap"><select class="fld" id="ap_svc" style="flex:1;min-width:180px"><option value="">Choose…</option>' +
+            aptPickList().map(function(p){ return '<option value="' + esc(p.key) + '">' + esc(p.name) + (p.price != null ? ' — ' + esc(Number(p.price).toLocaleString()) : '') + '</option>'; }).join('') +
+            '<option value="__custom">Other (type it)</option></select><button class="btn" id="ap_addsvc">+ Add</button></div></div></div>' +
+            '<label style="font-size:12px;color:var(--muted)">In this appointment — name · price · qty · discount</label>' +
+            '<div id="ap_lines">' + aptLinesHTML() + '</div>' +
+            '<div class="fgrid"><div><label>Discount type</label><select class="fld" id="ap_dtype"><option value="flat">Flat amount</option><option value="percent">Percentage (%)</option></select></div>' +
             '<div><label>Discount</label><input class="fld" id="ap_dval" type="number" min="0" placeholder="0"></div>' +
-            '<div><label>GST %</label><input class="fld" id="ap_gst" type="number" min="0" value="0"></div></div>' +
+            '<div><label>GST %</label><input class="fld" id="ap_gst" type="number" min="0" value="0"></div>' +
+            '<div><label>Currency</label><input class="fld" id="ap_cur" maxlength="3" value="PKR" style="text-transform:uppercase"></div></div>' +
             '<div class="billbox"><strong>Bill Summary</strong><div id="ap_bill" style="margin-top:6px">' + aptBillHTML() + '</div></div>';
   } else {
     body += '<div class="card-note">' + esc(a.customer_name || '') + ' · ' + esc(a.service || '') +
-            (a.invoice_number ? ' · Bill ' + esc(a.invoice_number) + ' · Total ' + aptMoney(a.total) + ' · Paid ' + aptMoney(a.paid) : '') + '</div>';
+            (a.package_names ? ' · Package: ' + esc(a.package_names) : '') +
+            (a.invoice_number ? ' · Bill ' + esc(a.invoice_number) + ' · Total ' + aptMoney(a.total, a.currency) + ' · Paid ' + aptMoney(a.paid, a.currency) +
+             ' · Balance ' + aptMoney(a.balance, a.currency) : '') + '</div>' +
+            '<div class="card-note">Prices on a saved bill are not edited. Take a payment below, or delete and re-book an unpaid one.</div>';
   }
-  body += '<div class="fgrid"><div><label>Department</label><input class="fld" id="ap_dept" list="ap_depts" value="' + esc(a.department || '') + '">' +
-          '<datalist id="ap_depts"><option value="Clinic"><option value="Aesthetic"><option value="Salon"><option value="Academy"></datalist></div>' +
-          '<div><label>Date</label><input class="fld" id="ap_date" type="date" value="' + esc(a.day || todayISO()) + '"></div>' +
-          '<div><label>Time</label><input class="fld" id="ap_time" type="time" value="' + esc(a.time || '') + '"></div></div>' +
+  body += '<div class="fgrid"><div><label>Date</label><input class="fld" id="ap_date" type="date" value="' + esc(a.day || pre.date || todayISO()) + '"></div>' +
+          '<div><label>Start</label><input class="fld" id="ap_time" type="time" value="' + esc(a.time || (pre.status === 'completed' ? hhmm(new Date()) : '')) + '"></div>' +
+          '<div><label>End</label><input class="fld" id="ap_end" type="time" value="' + esc(a.end_time || '') + '"></div></div>' +
+          '<div class="fgrid"><div><label>Staff</label><select class="fld" id="ap_staff"><option value="">—</option>' + opts(staff, a.staff_id) + '</select></div>' +
+          (locs.length ? '<div><label>Location</label><select class="fld" id="ap_loc"><option value="">—</option>' + opts(locs, a.location_id) + '</select></div>' : '') +
+          '<div><label>Department</label><input class="fld" id="ap_dept" list="ap_depts" value="' + esc(a.department || '') + '">' +
+          '<datalist id="ap_depts"><option value="Clinic"><option value="Aesthetic"><option value="Salon"><option value="Academy"></datalist></div></div>' +
           '<div class="fgrid"><div><label>Booked by</label><input class="fld" id="ap_booked" list="ap_staffnames" value="' + esc(a.booked_by || '') + '" placeholder="Staff who booked"></div>' +
           '<div><label>Assisted by</label><input class="fld" id="ap_assist" list="ap_staffnames" value="' + esc(a.assisted_by || '') + '"></div>' +
           '<div><label>Procedure done by</label><input class="fld" id="ap_proc" list="ap_staffnames" value="' + esc(a.procedure_by || '') + '"></div></div>';
@@ -2813,7 +2823,7 @@ function aptFormHTML(){
             APT_METHODS.map(function(m){ return '<option value="' + m[0] + '">' + m[1] + '</option>'; }).join('') + '</select></div>' +
             '<div><label>Remaining balance</label><input class="fld" id="ap_balance" readonly style="color:var(--accent,#c9a84c);font-weight:700"></div></div>';
   } else if (a.invoice_id && a.balance > 0.004) {
-    body += '<div class="fgrid"><div><label>Take a payment (balance ' + aptMoney(a.balance) + ')</label><input class="fld" id="ap_payamt" type="number" min="0" placeholder="Amount"></div>' +
+    body += '<div class="fgrid"><div><label>Take a payment (balance ' + aptMoney(a.balance, a.currency) + ')</label><input class="fld" id="ap_payamt" type="number" min="0" placeholder="Amount"></div>' +
             '<div><label>Payment method</label><select class="fld" id="ap_paym">' +
             [['cash','Cash'],['online','JazzCash / EasyPaisa / Online'],['bank','Bank transfer'],['card','Card'],['other','Other']].map(function(m){ return '<option value="' + m[0] + '">' + m[1] + '</option>'; }).join('') +
             '</select></div></div>';
@@ -2822,21 +2832,23 @@ function aptFormHTML(){
           '<div><label>Next appointment</label><input class="fld" id="ap_next" type="date" value="' + esc(a.next_appointment || '') + '"></div>' +
           '<div><label>Status</label><select class="fld" id="ap_status">' + stOpts + '</select></div></div>' +
           '<div class="fgrid"><div style="grid-column:1/-1"><label>Notes</label><textarea class="fld" id="ap_notes" rows="2">' + esc(a.notes || '') + '</textarea></div></div>' +
-          actbar() +
+          '<div id="apmsg" class="card-note" style="min-height:18px;margin:10px 0"></div>' +
           '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px"><button class="btn" id="ap_cancel">Cancel</button>' +
           '<button class="btn primary" id="ap_save">Save</button></div>';
   return '<div class="mdl-bg" id="ap_bg"><div class="mdl">' + body + '</div></div>';
 }
+function aptSay(m, bad){ var e = document.getElementById('apmsg'); if (e) { e.textContent = m; e.style.color = bad ? 'var(--danger)' : 'var(--growth)'; } else say(m); }
 function aptPrint(id){
   api('/appointments/' + id + '/bill').then(function(r){
     if (!r.ok) { say((r.data && r.data.detail) || 'Could not load the bill.'); return; }
     var d = r.data, a = d.appointment, inv = d.invoice;
     if (!inv) { say('This appointment has no bill.'); return; }
-    var f = function(n){ return 'Rs ' + Number(n || 0).toLocaleString(); };
+    var cur = inv.currency || 'PKR';
+    var f = function(n){ return cur + ' ' + Number(n || 0).toLocaleString(); };
     var paid = (d.payments || []).reduce(function(s, p){ return s + Number(p.amount || 0); }, 0);
     var due = Math.round((Number(inv.total) - paid) * 100) / 100;
     var lines = (d.items || []).map(function(i){ return '<tr><td>' + esc(i.description) + '</td><td>' + esc(i.quantity) + '</td><td>' + f(i.unit_price) + '</td><td>' + f(i.line_total) + '</td></tr>'; }).join('');
-    var logo = (typeof BRAND !== 'undefined' && BRAND && BRAND.logo_url) ? '<img src="' + esc(BRAND.logo_url) + '" style="height:70px" onerror="this.remove()">' : '';
+    var logo = (typeof BRAND !== 'undefined' && BRAND && BRAND.has_logo) ? '<img src="/brand/logo" style="height:70px" onerror="this.remove()">' : '';
     var h = '<html><head><title>' + esc(inv.number) + '</title><style>body{font-family:Arial,sans-serif;color:#111;padding:24px;max-width:720px;margin:auto}' +
       '.hd{display:flex;justify-content:space-between;border-bottom:2px solid #111;padding-bottom:12px}h1{margin:0;font-size:26px;letter-spacing:3px}' +
       'table{width:100%;border-collapse:collapse;margin-top:18px;font-size:13px}th{background:#f4f4f4;text-align:left;padding:8px}td{padding:8px;border-bottom:1px solid #eee}' +
@@ -2859,17 +2871,17 @@ function aptPrint(id){
   });
 }
 function aptExport(rows){
-  var cols = ['Client','Phone','Service','Date','Time','Total','Paid','Balance','Payment','Sessions','Next','Booked by','Assisted by','Procedure by','Status'];
+  var cols = ['Client','Phone','Service','Package','Date','Start','End','Staff','Location','Currency','Total','Paid','Balance','Payment','Sessions','Next','Booked by','Assisted by','Procedure by','Status','Notes'];
   var csv = cols.join(',') + '\n' + rows.map(function(a){
-    return [a.customer_name, a.customer_phone, a.service, a.day, a.time, a.total, a.paid, a.balance == null ? '' : a.balance,
-            a.payment_method, a.total_sessions, a.next_appointment, a.booked_by, a.assisted_by, a.procedure_by, APT_STATUS[a.status] || a.status]
+    return [a.customer_name, a.customer_phone, a.service, a.package_names, a.day, a.time, a.end_time, a.staff_name, a.location_name, a.currency,
+            a.total, a.paid, a.balance == null ? '' : a.balance, a.payment_method, a.total_sessions, a.next_appointment,
+            a.booked_by, a.assisted_by, a.procedure_by, APT_STATUS[a.status] || a.status, a.notes]
       .map(function(v){ return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; }).join(',');
   }).join('\n');
   var el = document.createElement('a');
   el.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   el.download = 'appointments.csv'; el.click();
 }
-
 function aptSnap(){
   // The page re-renders when data arrives; keep what the person has typed.
   var s = {};
@@ -2878,148 +2890,144 @@ function aptSnap(){
   });
   return s;
 }
-VIEWS.appointments = function(){
-  if (!APT.from) { APT.from = todayISO(); APT.to = todayISO(); }
-  var snap = APT.form ? aptSnap() : null;
-  setTimeout(function(){
-    if (!snap) return;
-    Object.keys(snap).forEach(function(id){ var el = document.getElementById(id); if (el && snap[id] !== undefined && el.type !== 'button') el.value = snap[id]; });
-    aptRefreshBill();
-  }, 0);
-  need('services', '/business/services'); need('staff', '/business/staff');
-  aptLoad(false);
-  var out = '<h1>Appointments</h1><p class="sub">Every booking with its bill: what was charged, what was paid, what is still owed.</p>';
-  out += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0">' +
-    '<button class="btn primary" id="ap_new">+ Add Appointment</button>' +
-    '<input class="fld" type="date" id="ap_from" value="' + esc(APT.from) + '"' + (APT.all ? ' disabled' : '') + '>' +
-    '<span class="card-note">to</span><input class="fld" type="date" id="ap_to" value="' + esc(APT.to) + '"' + (APT.all ? ' disabled' : '') + '>' +
-    '<button class="btn" id="ap_today">Today</button>' +
-    '<label class="card-note"><input type="checkbox" id="ap_all"' + (APT.all ? ' checked' : '') + '> All dates</label>' +
-    '<select class="fld" id="ap_sf"><option value="">All statuses</option>' + Object.keys(APT_STATUS).map(function(k){ return '<option value="' + k + '"' + (APT.status === k ? ' selected' : '') + '>' + APT_STATUS[k] + '</option>'; }).join('') + '</select>' +
-    '<button class="btn" id="ap_export">Export</button></div>' + actbar();
-  if (APT.data === undefined) out += panel('Appointments', loading('Loading the diary...'));
-  else if (APT.data.error) out += panel('Appointments', errState(APT.data.error));
-  else {
-    var rows = APT.data.appointments || [];
-    var tot = rows.reduce(function(s, a){ return s + Number(a.total || 0); }, 0);
-    var got = rows.reduce(function(s, a){ return s + Number(a.paid || 0); }, 0);
-    out += tiles([statTile('Appointments', rows.length), statTile('Billed', aptMoney(tot)), statTile('Received', aptMoney(got)), statTile('Balance', aptMoney(Math.max(tot - got, 0)))]);
-    out += panel('Appointments', rows.length
-      ? '<div class="tbl-wrap"><table class="apt-tbl"><thead><tr><th>Client</th><th>Phone</th><th>Service</th><th>Date</th><th>Time</th><th>Total</th><th>Discount</th><th>GST</th><th>Received</th><th>Balance</th><th>Payment</th><th>Sessions</th><th>Next</th><th>Booked by</th><th>Assisted by</th><th>Procedure by</th><th>Status</th><th></th></tr></thead><tbody>' +
-        rows.map(function(a){
-          var bal = a.balance == null ? '—' : '<span class="' + (a.balance > 0.004 ? 'bal-due' : 'bal-ok') + '">' + aptMoney(a.balance) + '</span>';
-          var canDel = !a.invoice_id;
-          return '<tr><td>' + esc(a.customer_name || '—') + '</td><td>' + esc(a.customer_phone || '') + '</td><td>' + esc(a.service || '—') + '</td><td>' + esc(a.day) + '</td><td>' + esc(a.time) +
-            '</td><td>' + aptMoney(a.total) + '</td><td>' + (a.discount ? aptMoney(a.discount) : '—') + '</td><td>' + (a.tax ? aptMoney(a.tax) : '—') + '</td><td>' + aptMoney(a.paid) + '</td><td>' + bal +
-            '</td><td>' + esc(a.payment_method || '') + '</td><td>' + esc(a.total_sessions || 1) + '</td><td>' + esc(a.next_appointment || '') + '</td><td>' + esc(a.booked_by || '') +
-            '</td><td>' + esc(a.assisted_by || '') + '</td><td>' + esc(a.procedure_by || '') + '</td><td><span class="tag">' + esc(APT_STATUS[a.status] || a.status) + '</span></td>' +
-            '<td>' + (a.invoice_id ? '<button class="btn" data-apprint="' + esc(a.id) + '" title="Print bill">&#128424;</button> ' : '') +
-            '<button class="btn" data-apedit="' + esc(a.id) + '">Edit</button>' +
-            (canDel ? ' <button class="btn" data-apdel="' + esc(a.id) + '">' + (APT.delArm === a.id ? 'Tap again to delete' : 'Delete') + '</button>' : '') + '</td></tr>';
-        }).join('') + '</tbody></table></div>'
-      : empty('No appointments', APT.all ? 'Nothing booked yet.' : 'Nothing on these dates. Press + Add Appointment.'),
-      '<span class="pill count">' + rows.length + '</span>');
-  }
-  if (APT.form) out += aptFormHTML();
-
-  setTimeout(function(){
-    function reload(){ APT.data = undefined; aptLoad(true); }
-    var g = function(id){ return document.getElementById(id); };
-    if (g('ap_new')) g('ap_new').onclick = function(){ aptOpen(null); };
-    if (g('ap_from')) g('ap_from').onchange = function(){ APT.from = g('ap_from').value || todayISO(); if (APT.to < APT.from) APT.to = APT.from; reload(); };
-    if (g('ap_to')) g('ap_to').onchange = function(){ APT.to = g('ap_to').value || APT.from; reload(); };
-    if (g('ap_today')) g('ap_today').onclick = function(){ APT.from = APT.to = todayISO(); APT.all = false; reload(); };
-    if (g('ap_all')) g('ap_all').onchange = function(){ APT.all = g('ap_all').checked; reload(); };
-    if (g('ap_sf')) g('ap_sf').onchange = function(){ APT.status = g('ap_sf').value; reload(); };
-    if (g('ap_export')) g('ap_export').onclick = function(){ aptExport((APT.data && APT.data.appointments) || []); };
-    document.querySelectorAll('[data-apprint]').forEach(function(b){ b.onclick = function(){ aptPrint(b.getAttribute('data-apprint')); }; });
-    document.querySelectorAll('[data-apedit]').forEach(function(b){
-      b.onclick = function(){
-        var id = b.getAttribute('data-apedit'), rows = (APT.data && APT.data.appointments) || [];
-        for (var i = 0; i < rows.length; i++) if (String(rows[i].id) === id) aptOpen(rows[i]);
-      };
-    });
-    document.querySelectorAll('[data-apdel]').forEach(function(b){
-      b.onclick = function(){
-        var id = b.getAttribute('data-apdel');
-        if (APT.delArm !== id) { APT.delArm = id; renderShell(); return; }
-        APT.delArm = null;
-        act('/business/appointments/' + id, { method: 'DELETE' }, 'Deleted.').then(function(r){ if (r.ok) reload(); });
-      };
-    });
-    if (!APT.form) return;
-    var f = APT.form;
-    if (g('ap_bg')) g('ap_bg').onclick = function(e){ if (e.target === g('ap_bg')) { APT.form = null; renderShell(); } };
-    g('ap_cancel').onclick = function(){ APT.form = null; renderShell(); };
-    ['ap_dtype','ap_dval','ap_gst','ap_recv'].forEach(function(id){ if (g(id)) g(id).oninput = aptRefreshBill; });
-    if (g('ap_dtype')) g('ap_dtype').onchange = aptRefreshBill;
-    aptRefreshBill();
-    document.querySelectorAll('[data-apl]').forEach(function(inp){
-      inp.oninput = function(){
-        var l = APT.lines[Number(inp.getAttribute('data-apl'))], k = inp.getAttribute('data-k');
-        l[k] = k === 'name' ? inp.value : (inp.value === '' ? '' : Number(inp.value));
-        aptRefreshBill();
-      };
-    });
-    document.querySelectorAll('[data-aprm]').forEach(function(b){
-      b.onclick = function(){ APT.lines.splice(Number(b.getAttribute('data-aprm')), 1); aptRerenderLines(); };
-    });
-    if (g('ap_addsvc')) g('ap_addsvc').onclick = function(){
-      var sid = val('ap_svc'), svcs = items('services');
-      if (!sid) { say('Choose a service first.'); return; }
-      if (sid === '__custom') APT.lines.push({ service_id: null, name: '', price: '', qty: 1, discount: '' });
-      else for (var i = 0; i < svcs.length; i++) if (String(svcs[i].id) === sid)
-        APT.lines.push({ service_id: sid, name: svcs[i].name, price: svcs[i].price != null ? Number(svcs[i].price) : '', qty: 1, discount: '' });
-      aptRerenderLines();
+function aptRestore(snap){
+  if (!snap) return;
+  Object.keys(snap).forEach(function(id){ var el = document.getElementById(id); if (el && snap[id] !== undefined && el.type !== 'button' && snap[id] !== '') el.value = snap[id]; });
+  aptRefreshBill();
+}
+/* Everything that shows appointments reads fresh data after a change. */
+function aptInvalidate(){
+  APT.data = undefined;
+  Object.keys(S).forEach(function(k){ if (/^(de_|hist_)/.test(k)) { S[k] = undefined; LOADING[k] = false; } });
+  need('invoices', '/business/invoices', true); need('payments', '/business/payments', true); need('customers', '/business/customers', true);
+}
+/* A table of appointment rows, shared by Appointments, Daily Entry and a customer's history. */
+function aptTableHTML(rows, opts){
+  opts = opts || {};
+  var own = isOwner();
+  return '<div class="tbl-wrap"><table class="apt-tbl"><thead><tr>' + (opts.noClient ? '' : '<th>Client</th><th>Phone</th>') +
+    '<th>Service</th><th>Package</th><th>Date</th><th>Start</th><th>End</th><th>Staff</th><th>Location</th><th>Total</th><th>Discount</th><th>GST</th>' +
+    '<th>Received</th><th>Balance</th><th>Payment</th><th>Sessions</th><th>Next</th><th>Status</th><th>Notes</th><th></th></tr></thead><tbody>' +
+    rows.map(function(a){
+      var c = a.currency;
+      var bal = a.balance == null ? '—' : '<span class="' + (a.balance > 0.004 ? 'bal-due' : 'bal-ok') + '">' + aptMoney(a.balance, c) + '</span>';
+      return '<tr>' + (opts.noClient ? '' : '<td>' + (a.customer_id ? '<a href="#/customers?c=' + esc(a.customer_id) + '">' + esc(a.customer_name || '—') + '</a>' : esc(a.customer_name || '—')) +
+        '</td><td>' + esc(a.customer_phone || '') + '</td>') +
+        '<td>' + esc(a.service || '—') + '</td><td>' + esc(a.package_names || '') + '</td><td>' + esc(a.day) + '</td><td>' + esc(a.time) + '</td><td>' + esc(a.end_time || '') +
+        '</td><td>' + esc(a.staff_name || a.procedure_by || '') + '</td><td>' + esc(a.location_name || '') +
+        '</td><td>' + aptMoney(a.total, c) + '</td><td>' + (Number(a.discount) ? aptMoney(a.discount, c) : '—') + '</td><td>' + (Number(a.tax) ? aptMoney(a.tax, c) : '—') + '</td><td>' + aptMoney(a.paid, c) + '</td><td>' + bal +
+        '</td><td>' + esc(a.payment_method || '') + '</td><td>' + esc(a.total_sessions || 1) + '</td><td>' + esc(a.next_appointment || '') +
+        '</td><td><span class="tag">' + esc(APT_STATUS[a.status] || a.status) + '</span></td><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis" title="' + esc(a.notes || '') + '">' + esc(a.notes || '') + '</td>' +
+        '<td>' + (a.invoice_id ? '<button class="btn" data-apprint="' + esc(a.id) + '" title="Print bill">&#128424;</button> ' : '') +
+        '<button class="btn" data-apedit="' + esc(a.id) + '">' + (opts.viewLabel || 'Edit') + '</button>' +
+        (own ? ' <button class="btn" data-apdel="' + esc(a.id) + '">' + (APT.delArm === a.id ? 'Tap again to delete' : 'Delete') + '</button>' : '') + '</td></tr>';
+    }).join('') + '</tbody></table></div>';
+}
+function unlinkedHTML(list){
+  if (!list || !list.length) return '';
+  return panel('Bills with no appointment', '<div class="card-note" style="padding:10px 16px">These were recorded as a bill only (for example from the old Daily Entry), ' +
+    'so they have no date or time slot. They are real money on the books and are counted in the Overview.</div>' +
+    '<div class="tbl-wrap"><table><thead><tr><th>Bill</th><th>Date</th><th>Client</th><th>For</th><th>Total</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead><tbody>' +
+    list.map(function(u){
+      return '<tr><td>' + esc(u.invoice_number) + '</td><td>' + esc(u.day) + '</td><td>' + (u.customer_id ? '<a href="#/customers?c=' + esc(u.customer_id) + '">' + esc(u.customer_name || '—') + '</a>' : '—') +
+        '</td><td>' + esc(u.service || '') + '</td><td>' + aptMoney(u.total, u.currency) + '</td><td>' + aptMoney(u.paid, u.currency) +
+        '</td><td><span class="' + (u.balance > 0.004 ? 'bal-due' : 'bal-ok') + '">' + aptMoney(u.balance, u.currency) + '</span></td><td><span class="tag">' + esc(u.status) + '</span></td></tr>';
+    }).join('') + '</tbody></table></div>', '<a class="btn" href="#/invoices">Open Invoices</a>');
+}
+/* Wire table buttons. rows: the rows currently shown (for Edit). */
+function aptWireRows(rows){
+  document.querySelectorAll('[data-apprint]').forEach(function(b){ b.onclick = function(){ aptPrint(b.getAttribute('data-apprint')); }; });
+  document.querySelectorAll('[data-apedit]').forEach(function(b){
+    b.onclick = function(){
+      var id = b.getAttribute('data-apedit');
+      for (var i = 0; i < rows.length; i++) if (String(rows[i].id) === id) aptOpen(rows[i]);
     };
-    g('ap_save').onclick = function(){
-      if (APT.busy) return;
-      var body, path, method;
-      if (f.edit) {
-        path = '/appointments/' + f.id; method = 'PATCH';
-        body = { date: val('ap_date'), time: val('ap_time') || '00:00', department: val('ap_dept'), booked_by: val('ap_booked'),
-                 assisted_by: val('ap_assist'), procedure_by: val('ap_proc'), total_sessions: numv('ap_sess') || 1,
-                 next_appointment: val('ap_next'), status: val('ap_status'), notes: val('ap_notes') };
-      } else {
-        if (!val('ap_name')) { say('Enter the client\'s name.'); return; }
-        if (!val('ap_date')) { say('Pick the appointment date.'); return; }
-        var bad = APT.lines.filter(function(l){ return !String(l.name).trim() || l.price === '' || Number(l.price) < 0; });
-        if (bad.length) { say('Every service needs a name and a price.'); return; }
-        var b = aptBill();
-        if (b.rec > 0 && !val('ap_pay')) { say('Pick how they paid.'); return; }
-        if (b.rec - b.total > 0.009) { say('Amount received is more than the bill.'); return; }
-        path = '/appointments/book'; method = 'POST';
-        body = { name: val('ap_name'), phone: val('ap_phone'), date: val('ap_date'), time: val('ap_time') || '00:00',
-                 department: val('ap_dept'), booked_by: val('ap_booked'), assisted_by: val('ap_assist'), procedure_by: val('ap_proc'),
-                 services: APT.lines.map(function(l){ return { service_id: l.service_id, name: String(l.name).trim(), price: Number(l.price) || 0, qty: Number(l.qty) || 1, discount: Number(l.discount) || 0 }; }),
-                 discount_type: val('ap_dtype'), discount_value: numv('ap_dval') || 0, gst_percent: numv('ap_gst') || 0,
-                 received: b.rec, payment_method: val('ap_pay'), total_sessions: numv('ap_sess') || 1,
-                 next_appointment: val('ap_next'), status: val('ap_status'), notes: val('ap_notes') };
-      }
-      APT.busy = true; g('ap_save').disabled = true;
-      var payAmt = f.edit ? (numv('ap_payamt') || 0) : 0, payM = f.edit ? val('ap_paym') : '';
-      act(path, { method: method, body: body }, 'Saved.').then(function(r){
-        if (!r.ok) { APT.busy = false; g('ap_save').disabled = false; return null; }
-        if (payAmt > 0 && f.a && f.a.invoice_id)
-          return act('/operations/invoices/' + f.a.invoice_id + '/pay', { method: 'POST', body: { amount: payAmt, method: payM || 'cash' } }, 'Saved and payment recorded.')
-            .then(function(p){ return p.ok ? r : null; });
-        return r;
-      }).then(function(r){
-        APT.busy = false;
-        if (!r) { if (g('ap_save')) g('ap_save').disabled = false; return; }
-        APT.form = null; APT.lines = [];
-        if (!f.edit && body.date && !APT.all) { APT.from = APT.to = body.date; }
-        need('invoices', '/business/invoices', true); need('payments', '/business/payments', true); need('customers', '/business/customers', true);
-        APT.data = undefined; aptLoad(true);
+  });
+  document.querySelectorAll('[data-apdel]').forEach(function(b){
+    b.onclick = function(){
+      var id = b.getAttribute('data-apdel');
+      if (APT.delArm !== id) { APT.delArm = id; renderShell(); return; }
+      APT.delArm = null;
+      act('/appointments/' + id, { method: 'DELETE' }, 'Deleted.').then(function(r){
+        if (r.ok) { aptInvalidate(); renderShell(); }
       });
     };
-  }, 0);
-  return out;
-};
-function aptRerenderLines(){
-  var el = document.getElementById('ap_lines');
-  if (!el) return;
-  el.innerHTML = aptLinesHTML(items('services'));
+  });
+}
+/* Wire the open modal. Works from any view that rendered aptFormHTML(). */
+function aptWireForm(){
+  if (!APT.form) return;
+  var f = APT.form, pre = f.preset || {};
+  var g = function(id){ return document.getElementById(id); };
+  if (!g('ap_save')) return;
+  if (g('ap_bg')) g('ap_bg').onclick = function(e){ if (e.target === g('ap_bg')) { APT.form = null; renderShell(); } };
+  g('ap_cancel').onclick = function(){ APT.form = null; renderShell(); };
+  ['ap_dtype','ap_dval','ap_gst','ap_recv','ap_cur'].forEach(function(id){ if (g(id)) g(id).oninput = aptRefreshBill; });
+  if (g('ap_dtype')) g('ap_dtype').onchange = aptRefreshBill;
+  aptRefreshBill();
+  aptWireLines();
+  if (g('ap_addsvc')) g('ap_addsvc').onclick = function(){
+    var key = val('ap_svc');
+    if (!key) { aptSay('Choose a service or package first.', true); return; }
+    if (key === '__custom') APT.lines.push({ service_id: null, package_id: null, name: '', price: '', qty: 1, discount: '' });
+    else aptPickList().forEach(function(p){
+      if (p.key === key) APT.lines.push({ service_id: p.service_id, package_id: p.package_id, name: p.pname || p.name,
+                                          price: p.price != null ? Number(p.price) : '', qty: 1, discount: '' });
+    });
+    aptRerenderLines();
+  };
+  g('ap_save').onclick = function(){
+    if (APT.busy) return;
+    var body, path, method;
+    var tm = val('ap_time'), en = val('ap_end');
+    if (en && !tm) { aptSay('Set the start time as well as the end time.', true); return; }
+    if (en && tm && en <= tm) { aptSay('The end time must be after the start time.', true); return; }
+    var common = { date: val('ap_date'), time: tm || '00:00', end_time: en, staff_id: val('ap_staff'),
+                   department: val('ap_dept'), booked_by: val('ap_booked'), assisted_by: val('ap_assist'), procedure_by: val('ap_proc'),
+                   total_sessions: numv('ap_sess') || 1, next_appointment: val('ap_next'), status: val('ap_status'), notes: val('ap_notes') };
+    if (g('ap_loc')) common.location_id = val('ap_loc');
+    if (!common.date) { aptSay('Pick the appointment date.', true); return; }
+    if (f.edit) {
+      path = '/appointments/' + f.id; method = 'PATCH'; body = common;
+    } else {
+      var cust = pre.customer && pre.customer.id ? pre.customer : null;
+      if (!cust && !val('ap_name')) { aptSay('Enter the client\'s name.', true); return; }
+      var bad = APT.lines.filter(function(l){ return !String(l.name).trim() || l.price === '' || Number(l.price) < 0; });
+      if (bad.length) { aptSay('Every line needs a name and a price.', true); return; }
+      if (!/^[A-Za-z]{3}$/.test(aptCur())) { aptSay('Currency must be a 3-letter code like PKR.', true); return; }
+      var b = aptBill();
+      if (b.rec > 0 && !val('ap_pay')) { aptSay('Pick how they paid.', true); return; }
+      if (b.rec - b.total > 0.009) { aptSay('Amount received is more than the bill.', true); return; }
+      path = '/appointments/book'; method = 'POST';
+      body = Object.assign({}, common, {
+        services: APT.lines.map(function(l){ return { service_id: l.service_id, package_id: l.package_id, name: String(l.name).trim(), price: Number(l.price) || 0, qty: Number(l.qty) || 1, discount: Number(l.discount) || 0 }; }),
+        discount_type: val('ap_dtype'), discount_value: numv('ap_dval') || 0, gst_percent: numv('ap_gst') || 0, currency: aptCur(),
+        received: b.rec, payment_method: val('ap_pay') });
+      if (cust) body.customer_id = cust.id;
+      else { body.name = val('ap_name'); body.phone = val('ap_phone'); body.source = val('ap_src'); }
+      if (!body.staff_id) delete body.staff_id;
+      if (!body.end_time) delete body.end_time;
+    }
+    APT.busy = true; g('ap_save').disabled = true; aptSay('Saving…');
+    var payAmt = f.edit ? (numv('ap_payamt') || 0) : 0, payM = f.edit ? val('ap_paym') : '';
+    api(path, { method: method, body: body }).then(function(r){
+      if (!r.ok) { aptSay((r.data && r.data.detail) || ('Not saved (' + r.status + ').'), true); return null; }
+      if (payAmt > 0 && f.a && f.a.invoice_id)
+        return api('/operations/invoices/' + f.a.invoice_id + '/pay', { method: 'POST', body: { amount: payAmt, method: payM || 'cash' } })
+          .then(function(p){ if (!p.ok) { aptSay('Saved, but the payment was refused: ' + ((p.data && p.data.detail) || p.status), true); return null; } return r; });
+      return r;
+    }).then(function(r){
+      APT.busy = false;
+      if (!r) { if (g('ap_save')) g('ap_save').disabled = false; return; }
+      APT.form = null; APT.lines = [];
+      if (!f.edit && body.date && !APT.all && APT.from) { if (body.date < APT.from || body.date > APT.to) { APT.from = APT.to = body.date; } }
+      aptInvalidate();
+      say(f.edit ? 'Appointment updated.' : 'Appointment saved.');
+      renderShell();
+    });
+  };
+}
+function aptWireLines(){
   document.querySelectorAll('[data-apl]').forEach(function(inp){
     inp.oninput = function(){
       var l = APT.lines[Number(inp.getAttribute('data-apl'))], k = inp.getAttribute('data-k');
@@ -3030,8 +3038,346 @@ function aptRerenderLines(){
   document.querySelectorAll('[data-aprm]').forEach(function(b){
     b.onclick = function(){ APT.lines.splice(Number(b.getAttribute('data-aprm')), 1); aptRerenderLines(); };
   });
+}
+function aptRerenderLines(){
+  var el = document.getElementById('ap_lines');
+  if (!el) return;
+  el.innerHTML = aptLinesHTML();
+  aptWireLines();
   aptRefreshBill();
 }
+/* Views that host the modal call this at the top of their render. */
+function aptModalPrep(){
+  var snap = APT.form ? aptSnap() : null;
+  setTimeout(function(){ aptRestore(snap); aptWireForm(); }, 0);
+  return APT.form ? aptFormHTML() : '';
+}
+
+VIEWS.appointments = function(){
+  if (!APT.from) { APT.from = todayISO(); APT.to = todayISO(); }
+  var modal = aptModalPrep();
+  need('services', '/business/services'); need('staff', '/business/staff');
+  aptLoad(false);
+  var out = '<h1>Appointments</h1><p class="sub">Every booking with its bill: what was charged, what was paid, what is still owed.</p>';
+  out += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0">' +
+    '<button class="btn primary" id="ap_new">+ Add Appointment</button>' +
+    '<input class="fld" type="date" id="ap_from" value="' + esc(APT.from) + '"' + (APT.all ? ' disabled' : '') + '>' +
+    '<span class="card-note">to</span><input class="fld" type="date" id="ap_to" value="' + esc(APT.to) + '"' + (APT.all ? ' disabled' : '') + '>' +
+    '<button class="btn" id="ap_today">Today</button>' +
+    '<label class="card-note"><input type="checkbox" id="ap_all"' + (APT.all ? ' checked' : '') + '> All dates</label>' +
+    '<select class="fld" id="ap_sf"><option value="">All statuses</option>' + Object.keys(APT_STATUS).map(function(k){ return '<option value="' + k + '"' + (APT.status === k ? ' selected' : '') + '>' + APT_STATUS[k] + '</option>'; }).join('') + '</select>' +
+    '<input class="fld" id="ap_q" placeholder="Search name, phone, service, bill" value="' + esc(APT.q) + '" style="min-width:200px">' +
+    '<button class="btn" id="ap_export">Export</button></div>' + actbar();
+  var rows = [];
+  if (APT.data === undefined) out += panel('Appointments', loading('Loading the diary...'));
+  else if (APT.data.error) out += panel('Appointments', errState(APT.data.error));
+  else {
+    rows = APT.data.appointments || [];
+    var tot = rows.reduce(function(s, a){ return s + Number(a.total || 0); }, 0);
+    var got = rows.reduce(function(s, a){ return s + Number(a.paid || 0); }, 0);
+    out += tiles([statTile('Appointments', rows.length), statTile('Billed', aptMoney(tot)), statTile('Received', aptMoney(got)), statTile('Balance', aptMoney(Math.max(tot - got, 0)))]);
+    out += panel('Appointments', rows.length ? aptTableHTML(rows)
+      : empty('No appointments', APT.all ? 'Nothing booked yet.' : 'Nothing on these dates. Press + Add Appointment, or tick All dates.'),
+      '<span class="pill count">' + rows.length + '</span>');
+    out += unlinkedHTML(APT.data.unlinked_bills);
+  }
+  out += modal;
+
+  setTimeout(function(){
+    function reload(){ APT.data = undefined; aptLoad(true); }
+    var g = function(id){ return document.getElementById(id); };
+    if (g('ap_new')) g('ap_new').onclick = function(){ aptOpen(null); };
+    if (g('ap_from')) g('ap_from').onchange = function(){ APT.from = g('ap_from').value || todayISO(); if (APT.to < APT.from) APT.to = APT.from; reload(); };
+    if (g('ap_to')) g('ap_to').onchange = function(){ APT.to = g('ap_to').value || APT.from; if (APT.to < APT.from) APT.from = APT.to; reload(); };
+    if (g('ap_today')) g('ap_today').onclick = function(){ APT.from = APT.to = todayISO(); APT.all = false; reload(); };
+    if (g('ap_all')) g('ap_all').onchange = function(){ APT.all = g('ap_all').checked; reload(); };
+    if (g('ap_sf')) g('ap_sf').onchange = function(){ APT.status = g('ap_sf').value; reload(); };
+    if (g('ap_q')) g('ap_q').onkeydown = function(e){ if (e.key === 'Enter') { APT.q = g('ap_q').value.trim(); reload(); } };
+    if (g('ap_q')) g('ap_q').onchange = function(){ if (APT.q !== g('ap_q').value.trim()) { APT.q = g('ap_q').value.trim(); reload(); } };
+    if (g('ap_export')) g('ap_export').onclick = function(){ aptExport(rows); };
+    aptWireRows(rows);
+  }, 0);
+  return out;
+};
+
+/* ------------------------------------------------------------- Customers
+   Add (with where they came from), search, and open anyone to see their real
+   history: appointments, bills and their lines, payments, balance, packages,
+   staff and WhatsApp conversations. Edit and delete from the same place;
+   the server refuses a delete that would orphan money or bookings. */
+var CUS = { q: '', src: '', open: null, edit: false, delArm: false };
+function custParam(){
+  var m = /[?&]c=([0-9a-fA-F-]{36})/.exec(location.hash || '');
+  return m ? m[1] : null;
+}
+function digits10(p){ var d = String(p || '').replace(/\D/g, ''); return d.slice(-10); }
+VIEWS.customers = function(){
+  var fromHash = custParam();
+  if (fromHash && CUS.open !== fromHash) { CUS.open = fromHash; CUS.edit = false; CUS.delArm = false; }
+  var modal = aptModalPrep();
+  var out = '<h1>Customers</h1><p class="sub">Everyone this business has served. Tap a name to see their full history.</p>';
+  if (!need('customers', '/business/customers')) return out + panel('Customers', loading('Loading customers...'));
+  if (S.customers === null) return out + panel('Customers', errState('The customers service did not respond.'));
+  var list = S.customers.items || [];
+  out += panel('Add a customer',
+    '<div style="padding:14px 16px"><div class="fgrid">' +
+    '<div><label>Name</label><input class="fld" id="cname"></div>' +
+    '<div><label>Phone</label><input class="fld" id="cphone" type="tel"></div>' +
+    '<div><label>Email</label><input class="fld" id="cemail" type="email"></div>' +
+    '<div><label>Source</label>' + sourceSelect('csrc', '') + '</div></div>' +
+    '<div class="fgrid"><div style="grid-column:1/-1"><label>Notes</label><input class="fld" id="cnotes"></div></div>' +
+    '<button class="btn primary" id="caddbtn">Add customer</button></div>' + actbar());
+  var q = CUS.q.toLowerCase();
+  var shown = list.filter(function(c){
+    if (CUS.src && String(c.source || '').toLowerCase() !== CUS.src) return false;
+    if (!q) return true;
+    return [c.name, c.phone, c.email, c.notes].some(function(x){ return String(x || '').toLowerCase().indexOf(q) !== -1; });
+  });
+  out += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 8px">' +
+    '<input class="fld" id="cq" placeholder="Search name, phone, email" value="' + esc(CUS.q) + '" style="flex:1;min-width:180px">' +
+    sourceSelect('csf', CUS.src, 'All sources') + '</div>';
+  out += panel('All customers', shown.length
+    ? '<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Source</th><th>Status</th><th>Added</th></tr></thead><tbody>' +
+      shown.map(function(c){
+        return '<tr data-cust="' + esc(c.id) + '" style="cursor:pointer' + (CUS.open === c.id ? ';background:rgba(108,140,255,.10)' : '') + '">' +
+          '<td><a href="#/customers?c=' + esc(c.id) + '">' + esc(c.name) + '</a></td><td>' + esc(c.phone || '—') + '</td><td>' + esc(c.email || '—') +
+          '</td><td>' + esc(sourceLabel(c.source)) + '</td><td><span class="tag">' + esc(c.status || '—') + '</span></td><td>' + onlyDate(c.created_at) + '</td></tr>';
+      }).join('') + '</tbody></table></div>'
+    : empty(list.length ? 'No customer matches' : 'No customers yet', list.length ? 'Clear the search or source filter.' : 'Add one above, or book an appointment.'),
+    '<span class="pill count">' + shown.length + '</span>');
+  if (CUS.open) out += custDetailHTML(CUS.open);
+  out += modal;
+
+  setTimeout(function(){
+    var g = function(id){ return document.getElementById(id); };
+    if (g('caddbtn')) g('caddbtn').onclick = function(){
+      var name = val('cname');
+      if (!name) { say('A name is required.'); return; }
+      var btn = g('caddbtn'); btn.disabled = true;
+      act('/business/customers', {method:'POST', body:{ name: name, phone: val('cphone') || null, email: val('cemail') || null,
+        source: val('csrc') || null, notes: val('cnotes') || null }}, 'Customer added.').then(function(r){
+        btn.disabled = false;
+        if (r.ok) { CUS.open = r.data.item.id; need('customers','/business/customers',true); }
+      });
+    };
+    if (g('cq')) g('cq').oninput = function(){
+      CUS.q = g('cq').value.trim();
+      clearTimeout(VIEWS._cT); VIEWS._cT = setTimeout(function(){ renderShell(); var e = g('cq'); if (e) { e.focus(); e.setSelectionRange(e.value.length, e.value.length); } }, 300);
+    };
+    if (g('csf')) g('csf').onchange = function(){ CUS.src = g('csf').value; renderShell(); };
+    document.querySelectorAll('[data-cust]').forEach(function(tr){
+      tr.onclick = function(e){
+        if (e.target.tagName === 'A') return;   // the link changes the hash itself
+        location.hash = '#/customers?c=' + tr.getAttribute('data-cust');
+      };
+    });
+    custWire();
+  }, 0);
+  return out;
+};
+function custDetailHTML(id){
+  var key = 'hist_' + id;
+  if (!need(key, '/customers/' + id + '/history')) return panel('Customer', loading('Reading their history...'));
+  if (S[key] === null) return panel('Customer', errState('This customer could not be opened. They may have been deleted.'));
+  var h = S[key], c = h.customer, t = h.totals;
+  var head = '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+    '<button class="btn primary" id="c_book">+ Book appointment</button>' +
+    '<button class="btn" id="c_edit">' + (CUS.edit ? 'Stop editing' : 'Edit') + '</button>' +
+    (isOwner() ? '<button class="btn" id="c_del">' + (CUS.delArm ? 'Tap again to delete' : 'Delete') + '</button>' : '') +
+    '<button class="btn" id="c_close">Close</button></div>';
+  var body = '<div style="padding:14px 16px">';
+  if (CUS.edit) {
+    body += '<div class="fgrid"><div><label>Name</label><input class="fld" id="ce_name" value="' + esc(c.name) + '"></div>' +
+      '<div><label>Phone</label><input class="fld" id="ce_phone" value="' + esc(c.phone || '') + '"></div>' +
+      '<div><label>Email</label><input class="fld" id="ce_email" value="' + esc(c.email || '') + '"></div>' +
+      '<div><label>Source</label>' + sourceSelect('ce_src', c.source) + '</div>' +
+      '<div><label>Status</label><select class="fld" id="ce_status">' + ['active','inactive','vip','blocked'].map(function(s){ return '<option' + (c.status === s ? ' selected' : '') + '>' + s + '</option>'; }).join('') + '</select></div></div>' +
+      '<div class="fgrid"><div style="grid-column:1/-1"><label>Notes</label><textarea class="fld" id="ce_notes" rows="2">' + esc(c.notes || '') + '</textarea></div></div>' +
+      '<button class="btn primary" id="ce_save">Save changes</button> <button class="btn" id="ce_cancel">Cancel</button>';
+  } else {
+    body += '<div class="card-note">' + esc(c.phone || 'No phone') + ' · ' + esc(c.email || 'No email') + ' · Source: <strong>' + esc(sourceLabel(c.source)) +
+      '</strong> · Status: ' + esc(c.status) + ' · Customer since ' + onlyDate(c.created_at) + '</div>' +
+      (c.notes ? '<div style="margin-top:6px;white-space:pre-wrap">' + esc(c.notes) + '</div>' : '');
+  }
+  body += '<div id="cmsg" class="card-note" style="min-height:18px;margin:8px 0"></div>';
+  body += tiles([statTile('Visits', t.visits), statTile('Billed', money(t.billed)), statTile('Paid', money(t.paid)),
+                 statTile('Balance', '<span class="' + (t.balance > 0.004 ? 'bal-due' : 'bal-ok') + '">' + money(t.balance) + '</span>')]);
+  body += '<div class="card-note">Packages: ' + (h.packages.length ? esc(h.packages.join(', ')) : 'none') +
+          ' · Staff who served them: ' + (h.staff.length ? esc(h.staff.join(', ')) : 'none recorded') + '</div>';
+  body += '<h3>Appointments</h3>' + (h.appointments.length
+    ? '<div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Time</th><th>Service</th><th>Staff</th><th>Location</th><th>Sessions</th><th>Next</th><th>Status</th><th>Bill</th><th>Notes</th></tr></thead><tbody>' +
+      h.appointments.map(function(a){
+        return '<tr><td>' + esc(a.day) + '</td><td>' + esc(a.time) + (a.end_time ? '–' + esc(a.end_time) : '') + '</td><td>' + esc(a.service || '—') + '</td><td>' +
+          esc(a.staff_name || a.procedure_by || '') + '</td><td>' + esc(a.location_name || '') + '</td><td>' + esc(a.total_sessions) + '</td><td>' + esc(a.next_appointment || '') +
+          '</td><td><span class="tag">' + esc(APT_STATUS[a.status] || a.status) + '</span></td><td>' + esc(a.invoice_number || '') + '</td><td>' + esc(a.notes || '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="card-note">No appointments yet.</div>');
+  body += '<h3>Bills and services</h3>' + (h.invoices.length
+    ? '<div class="tbl-wrap"><table><thead><tr><th>Bill</th><th>Date</th><th>Items</th><th>Total</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead><tbody>' +
+      h.invoices.map(function(i){
+        return '<tr><td>' + esc(i.number) + '</td><td>' + esc(String(i.issued_on || '').slice(0, 10)) + '</td><td>' +
+          esc(i.items.map(function(l){ return l.description + (Number(l.quantity) !== 1 ? ' ×' + l.quantity : '') + (l.package_name ? ' [' + l.package_name + ']' : ''); }).join(', ')) +
+          '</td><td>' + money(i.total, i.currency) + '</td><td>' + money(i.paid, i.currency) + '</td><td>' +
+          (i.voided_at ? '—' : '<span class="' + (i.balance > 0.004 ? 'bal-due' : 'bal-ok') + '">' + money(i.balance, i.currency) + '</span>') +
+          '</td><td><span class="tag">' + esc(i.status) + '</span></td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="card-note">No bills yet.</div>');
+  body += '<h3>Payments</h3>' + (h.payments.length
+    ? '<div class="tbl-wrap"><table><thead><tr><th>When</th><th>Bill</th><th>Amount</th><th>Method</th><th>Reference</th></tr></thead><tbody>' +
+      h.payments.map(function(p){
+        return '<tr><td>' + when(p.paid_at) + '</td><td>' + esc(p.invoice_number || '') + '</td><td>' + money(p.amount, p.currency) + '</td><td>' +
+          esc(p.method) + '</td><td>' + esc(p.reference || '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="card-note">No payments yet.</div>');
+  body += '<h3>WhatsApp</h3><div id="c_wa">' + custWaHTML(c) + '</div>';
+  body += '</div>';
+  return panel(esc(c.name), body, head);
+}
+/* Conversations are matched on the last 10 digits of the phone number. */
+function custWaHTML(c){
+  if (!c.phone) return '<div class="card-note">No phone number on file, so no WhatsApp conversation can be matched.</div>';
+  ibxLoad(false);
+  if (IBX.data === undefined) return '<div class="card-note">Checking WhatsApp…</div>';
+  if (IBX.data.error) return '<div class="card-note">WhatsApp conversations are not available: ' + esc(IBX.data.error) + '</div>';
+  var want = digits10(c.phone);
+  var mine = (IBX.data.chats || []).filter(function(ch){ return want && digits10(ch.phone) === want; });
+  if (!mine.length) return '<div class="card-note">No WhatsApp conversation with ' + esc(c.phone) + ' yet.</div>';
+  return mine.map(function(ch){
+    return '<div style="padding:6px 0;border-bottom:1px solid var(--line)"><strong>' + esc(ch.messages) + ' messages</strong> · last ' + (ch.last_at ? when(ch.last_at) : '') +
+      '<div class="card-note">' + esc(ch.last || '') + '</div><a class="btn" href="#/inbox?sid=' + encodeURIComponent(ch.session_id) + '" style="margin-top:6px;display:inline-block">Open conversation</a></div>';
+  }).join('');
+}
+function custWire(){
+  var id = CUS.open; if (!id) return;
+  var h = S['hist_' + id]; if (!h) return;
+  var g = function(x){ return document.getElementById(x); };
+  var msg = function(m, bad){ var e = g('cmsg'); if (e) { e.textContent = m; e.style.color = bad ? 'var(--danger)' : 'var(--growth)'; } };
+  if (g('c_close')) g('c_close').onclick = function(){ CUS.open = null; CUS.edit = false; location.hash = '#/customers'; };
+  if (g('c_edit')) g('c_edit').onclick = function(){ CUS.edit = !CUS.edit; renderShell(); };
+  if (g('ce_cancel')) g('ce_cancel').onclick = function(){ CUS.edit = false; renderShell(); };
+  if (g('c_book')) g('c_book').onclick = function(){
+    aptOpen(null, { customer: { id: h.customer.id, name: h.customer.name, phone: h.customer.phone }, date: todayISO() });
+  };
+  if (g('ce_save')) g('ce_save').onclick = function(){
+    var name = val('ce_name');
+    if (!name) { msg('A name is required.', true); return; }
+    g('ce_save').disabled = true;
+    api('/business/customers/' + id, { method: 'PATCH', body: { name: name, phone: val('ce_phone') || null, email: val('ce_email') || null,
+      source: val('ce_src') || null, status: val('ce_status') || 'active', notes: val('ce_notes') || null } }).then(function(r){
+      if (!r.ok) { g('ce_save').disabled = false; msg((r.data && r.data.detail) || 'Not saved.', true); return; }
+      CUS.edit = false;
+      need('customers', '/business/customers', true); need('hist_' + id, '/customers/' + id + '/history', true);
+    });
+  };
+  if (g('c_del')) g('c_del').onclick = function(){
+    if (!CUS.delArm) { CUS.delArm = true; renderShell(); return; }
+    CUS.delArm = false;
+    api('/business/customers/' + id, { method: 'DELETE' }).then(function(r){
+      if (!r.ok) { renderShell(); setTimeout(function(){ msg((r.data && r.data.detail) || 'Not deleted.', true); }, 0); return; }
+      CUS.open = null; location.hash = '#/customers'; need('customers', '/business/customers', true);
+    });
+  };
+}
+
+/* ------------------------------------------------------------- Inventory
+   Add a product here (it lands in the same products table the catalogue uses),
+   optionally with its opening stock, then record movements. Stock on hand is
+   always summed from the movement ledger by the server. */
+VIEWS.inventory = function(){
+  var out = '<h1>Inventory</h1>' +
+    '<p class="sub">Stock on hand, added up from every movement rather than stored as a number someone can edit.</p>';
+  if (!need('inventory', '/operations/inventory'))
+    return out + panel('Inventory', loading('Counting stock...'));
+  if (S.inventory === null)
+    return out + panel('Inventory', errState('The inventory service did not respond.'));
+  var inv = S.inventory, prods = inv.products || [];
+  out += '<div class="grid">' +
+    metric('Products', prods.length) +
+    metric('Stock tracked', inv.tracked_count) +
+    metric('Low on stock', inv.low_stock_count, inv.low_stock_count ? 'Reorder these' : 'Nothing below its threshold') +
+    '</div>';
+  out += '<h2>Add a product</h2>' + panel('New product',
+    '<div style="padding:14px 16px"><div class="fgrid">' +
+    '<div><label>Product name *</label><input class="fld" id="ip_name"></div>' +
+    '<div><label>SKU</label><input class="fld" id="ip_sku"></div>' +
+    '<div><label>Category</label><input class="fld" id="ip_cat"></div>' +
+    '<div><label>Sale price</label><input class="fld" id="ip_price" type="number" min="0"></div></div>' +
+    '<div class="fgrid"><div><label>Opening stock (units now on the shelf)</label><input class="fld" id="ip_open" type="number" min="0" placeholder="0"></div>' +
+    '<div><label>Warn when stock falls to</label><input class="fld" id="ip_low" type="number" min="0"></div>' +
+    '<div><label>Unit cost (optional)</label><input class="fld" id="ip_cost" type="number" min="0"></div>' +
+    '<div><label style="margin-top:22px"><input type="checkbox" id="ip_track" checked> Track stock</label></div></div>' +
+    '<button class="btn primary" id="ip_add">Save product</button><div id="ipmsg" class="card-note" style="min-height:18px;margin-top:8px"></div></div>');
+
+  if ((inv.low_stock || []).length) {
+    out += panel('Running low',
+      '<div class="tbl-wrap"><table><thead><tr><th>Product</th><th>On hand</th><th>Threshold</th></tr></thead><tbody>' +
+      inv.low_stock.map(function(p){
+        return '<tr><td>' + esc(p.name) + '</td><td>' + esc(p.on_hand) + '</td><td>' + esc(p.low_stock_threshold) + '</td></tr>';
+      }).join('') + '</tbody></table></div>');
+  }
+  out += '<h2>Record a stock movement</h2>' + row() +
+    select('stprod', prods, 'Product') +
+    '<select class="fld" id="stkind" style="flex:1;min-width:140px">' +
+    '<option value="purchase">Purchase in</option><option value="sale">Sale out</option>' +
+    '<option value="adjustment">Adjustment</option><option value="return">Return</option>' +
+    '<option value="opening">Opening balance</option></select>' +
+    inp('stqty', 'Quantity', 'number', 120) +
+    inp('streason', 'Reason', 'text', 150) +
+    '<button class="btn primary" id="stadd">Record</button></div>' +
+    '<div class="card-note">Purchase, return and opening add stock; sale takes it away; an adjustment uses the sign you type (-2 removes two).</div>' + actbar();
+  out += panel('Stock on hand', prods.length
+    ? '<div class="tbl-wrap"><table><thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Price</th><th>Tracked</th>' +
+      '<th>On hand</th><th>Warn at</th><th>Last movement</th></tr></thead><tbody>' + prods.map(function(p){
+        var low = p.track_stock && p.low_stock_threshold != null && Number(p.on_hand) <= Number(p.low_stock_threshold);
+        return '<tr><td>' + esc(p.name) + (p.active === false ? ' <span class="tag">inactive</span>' : '') + '</td><td>' + esc(p.sku || '—') + '</td><td>' + esc(p.category || '—') +
+          '</td><td>' + money(p.price, p.currency) + '</td>' +
+          '<td>' + (p.track_stock ? '<span class="tag">yes</span>' : '—') + '</td>' +
+          '<td' + (low ? ' class="bal-due"' : '') + '>' + (p.track_stock ? esc(p.on_hand) : '—') + '</td><td>' + esc(p.low_stock_threshold == null ? '—' : p.low_stock_threshold) +
+          '</td><td>' + when(p.last_movement) + '</td></tr>';
+      }).join('') + '</tbody></table></div>'
+    : empty('No products yet', 'Add your first product above.'),
+    '<span class="pill count">' + prods.length + '</span>');
+
+  setTimeout(function(){
+    var g = function(id){ return document.getElementById(id); };
+    var msg = function(m, bad){ var e = g('ipmsg'); if (e) { e.textContent = m; e.style.color = bad ? 'var(--danger)' : 'var(--growth)'; } };
+    if (g('ip_add')) g('ip_add').onclick = function(){
+      var name = val('ip_name'), price = numv('ip_price'), open = numv('ip_open'), low = numv('ip_low'), cost = numv('ip_cost');
+      if (!name) { msg('A product needs a name.', true); return; }
+      if ([price, open, low, cost].some(function(n){ return n !== null && (isNaN(n) || n < 0); })) { msg('Numbers cannot be negative.', true); return; }
+      var track = g('ip_track').checked || (open || 0) > 0;
+      g('ip_add').disabled = true; msg('Saving…');
+      api('/business/products', { method: 'POST', body: { name: name, sku: val('ip_sku') || null, category: val('ip_cat') || null,
+        price: price, track_stock: track, low_stock_threshold: low } }).then(function(r){
+        if (!r.ok) { g('ip_add').disabled = false; msg((r.data && r.data.detail) || ('Not saved (' + r.status + ').'), true); return null; }
+        var pid = r.data.item.id;
+        if (!(open > 0)) return { ok: true };
+        return api('/business/stock_movements', { method: 'POST', body: { product_id: pid, kind: 'opening', quantity_delta: open,
+          unit_cost: cost, reason: 'Opening stock' } }).then(function(m){
+          if (!m.ok) msg('Product saved, but the opening stock was refused: ' + ((m.data && m.data.detail) || m.status), true);
+          return m.ok ? m : { ok: true, partial: true };
+        });
+      }).then(function(r){
+        if (!r) return;
+        need('inventory', '/operations/inventory', true); need('products', '/business/products', true);
+        if (!r.partial) setTimeout(function(){ msg('Product saved.'); }, 50);
+      });
+    };
+    var b = g('stadd');
+    if (b) b.onclick = function(){
+      var pid = val('stprod'), q = numv('stqty'), kind = val('stkind') || 'adjustment';
+      if (!pid) { say('Pick a product.'); return; }
+      if (q === null || isNaN(q) || q === 0) { say('A movement needs a non-zero quantity.'); return; }
+      if (kind === 'sale') q = -Math.abs(q);
+      else if (kind !== 'adjustment') q = Math.abs(q);
+      b.disabled = true;
+      act('/business/stock_movements', {method:'POST', body:{
+        product_id: pid, kind: kind, quantity_delta: q, reason: val('streason') || null
+      }}, 'Movement recorded.').then(function(r){
+        b.disabled = false;
+        if (r.ok) need('inventory', '/operations/inventory', true);
+      });
+    };
+  }, 0);
+  return out;
+};
 
 function renderShell(){
   var v = currentView();
