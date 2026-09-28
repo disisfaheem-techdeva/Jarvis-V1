@@ -221,7 +221,8 @@ def phase2(ctx):
     for x in (r.get("saved") or []) if isinstance(r, dict) else []:
         track("services", x["id"])
     s2, r2 = call(O, "POST", "/business/services/import-onboarding")
-    check("#6/A5", "import onboarding services is idempotent", s == 200 and s2 == 200 and r2.get("count") == 0, "first saved %s, second saved %s" % (r.get("count") if isinstance(r, dict) else r, r2.get("count") if isinstance(r2, dict) else r2))
+    check("#6/A5", "import onboarding services is idempotent", s == 200 and s2 == 200 and r2.get("count") == 0,
+          "first HTTP %s %s, second HTTP %s %s" % (s, json.dumps(r)[:200], s2, json.dumps(r2)[:200]))
     # #10 packages with contents, then FK-safe delete of the service
     s, r = call(O, "POST", "/business/packages", {"name": "QA Pack " + tag, "price": 30000, "validity_days": 90})
     pk = item(r).get("id"); track("packages", pk)

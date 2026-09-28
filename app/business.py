@@ -12,6 +12,7 @@ readable 400 rather than silently dropped -- a typo that vanishes is how a
 price quietly fails to save.
 """
 
+import re
 import uuid
 from contextlib import contextmanager
 
@@ -439,20 +440,35 @@ def make_business_router(P=None):
             cur.execute("SELECT name FROM services")
             have = cur.fetchall()
         todo = _unsaved_onboarding(P, tid, have) if P is not None else []
-        saved = []
+        saved, seen, clean = [], set(), []
+        for s in todo:
+            # onboarding text is free-form: skip repeats, keep only plain text categories
+            key = str(s.get("name") or "").strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            s = dict(s, name=str(s["name"]).strip()[:200])
+            s["category"] = s["category"].strip()[:80] if isinstance(s.get("category"), str) and s["category"].strip() else None
+            cur_ = s.get("currency")
+            s["currency"] = cur_.strip().upper()[:3] if isinstance(cur_, str) and cur_.strip() else None
+            d = s.get("duration_minutes")
+            s["duration_minutes"] = int(d) if isinstance(d, (int, float)) and d > 0 else None
+            clean.append(s)
         with _readable_db_errors("services"), tenant_session(tid, role) as cur:
-            for s in todo:
+            for s in clean:
                 price = s.get("price")
                 try:
-                    price = float(str(price).replace(",", "")) if price not in (None, "") else None
+                    digits = re.sub(r"[^0-9.]", "", str(price)) if price not in (None, "") else ""
+                    price = float(digits) if digits else None
                 except ValueError:
+                    price = None
+                if price is not None and price < 0:
                     price = None
                 cur.execute(
                     "INSERT INTO services (tenant_id, name, category, price, currency, duration_minutes, sort_order) "
                     "VALUES (current_tenant(), %s, %s, %s, COALESCE(%s, 'PKR'), %s, %s) RETURNING id, name, price",
                     (s["name"], s.get("category"), price, s.get("currency"),
-                     s.get("duration_minutes") if isinstance(s.get("duration_minutes"), int) else None,
-                     s.get("sort_order") or 0))
+                     s["duration_minutes"], s.get("sort_order") or 0))
                 saved.append(cur.fetchone())
             if saved:
                 record(cur, action="services.import_onboarding", resource="services", resource_id=None,
