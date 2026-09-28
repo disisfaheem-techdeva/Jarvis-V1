@@ -391,6 +391,24 @@ def phase4(ctx):
         check("DATA", "QA dashboard prefs restored exactly", (orig or [["{}"]])[0][0] == (now or [["{}"]])[0][0] or not orig, "restored")
 
 
+def phase5(ctx):
+    """Jarvis end to end on the live AI chain (a question: nothing is written),
+    and the server voice that the Responding state plays."""
+    O = ctx["owner"]
+    s, r = call(O, "POST", "/console", {"message": "How many customers and appointments do I have? Answer in one sentence."})
+    kind = r.get("kind") if isinstance(r, dict) else None
+    check("#14", "Jarvis answers through the live AI chain", s == 200 and kind == "question" and r.get("reply"),
+          "HTTP %s kind=%s reply=%s" % (s, kind, (r.get("reply") or r.get("detail") or "")[:120] if isinstance(r, dict) else r))
+    req = urllib.request.Request(API + "/console/speak", data=json.dumps({"text": "Test", "lang": "en"}).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", "Authorization": "Bearer " + O})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            audio = resp.read(); ok = resp.status == 200 and len(audio) > 1000
+            check("#14", "server voice returns audio for Responding", ok, "HTTP %s, %d bytes %s" % (resp.status, len(audio), resp.headers.get("content-type")))
+    except urllib.error.HTTPError as e:
+        check("#14", "server voice returns audio for Responding", False, "HTTP %s %s (the browser voice is the fallback)" % (e.code, e.read()[:120]))
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)
