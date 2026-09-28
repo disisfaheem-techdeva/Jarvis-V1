@@ -10,7 +10,10 @@ cd "$(dirname "$0")/../.."
 TS=$(date +%Y%m%d-%H%M%S); BK=/root/backups/part14-$TS; mkdir -p "$BK"
 docker compose exec -T db pg_dump -U postgres -Fc techdeva > "$BK/techdeva.dump"
 [ -s "$BK/techdeva.dump" ] || { echo "ABORT: backup is empty"; exit 1; }
-git rev-parse HEAD > "$BK/code-commit.txt"
+# The code that was running before this deploy: the commit before the last
+# merge/pull if there was one (HEAD@{1}), else HEAD. PREV=<sha> overrides.
+PREV="${PREV:-$(git rev-parse HEAD@{1} 2>/dev/null || git rev-parse HEAD)}"
+echo "$PREV" > "$BK/code-commit.txt"
 echo "backup: $BK ($(du -h "$BK/techdeva.dump" | cut -f1)), code at $(cat "$BK/code-commit.txt")"
 for f in $(ls db/[0-9][0-9]_*.sql 2>/dev/null | sort); do
   n=$(basename "$f")
@@ -24,12 +27,20 @@ for f in $(ls db/[0-9][0-9]_*.sql 2>/dev/null | sort); do
     docker compose exec -T db psql -U postgres -d techdeva -qc "INSERT INTO _td_migrations(name) VALUES ('$n')"
   fi
 done
-docker compose build api >/dev/null && docker compose up -d --no-deps api
-if [ "${1:-}" = "web" ]; then docker compose build web >/dev/null && docker compose up -d --no-deps web; fi
+build() {  # show the tail of the build log, and stop if it failed
+  if ! docker compose build --progress plain "$1" > "$BK/build-$1.log" 2>&1; then
+    tail -40 "$BK/build-$1.log"; echo "ABORT: $1 build failed (full log $BK/build-$1.log). Nothing was restarted."; exit 1
+  fi
+  echo "$1 built ($(grep -c '' "$BK/build-$1.log") log lines)"
+}
+build api
+[ "${1:-}" = "web" ] && build web
+docker compose up -d --no-deps api
+[ "${1:-}" = "web" ] && docker compose up -d --no-deps web
 for i in $(seq 1 30); do
   code=$(curl -s -o /dev/null -w '%{http_code}' https://api.techdeva.net/health || true)
   [ "$code" = "200" ] && break; sleep 2
 done
 echo "api /health: $code"
-echo "rollback code: git checkout $(cat "$BK/code-commit.txt") -- . && docker compose build api && docker compose up -d --no-deps api"
+echo "rollback code: git reset --hard $(cat "$BK/code-commit.txt") && docker compose build api web && docker compose up -d --no-deps api web"
 echo "rollback data: docker compose exec -T db pg_restore -U postgres -d techdeva --clean < $BK/techdeva.dump   (only if a migration went wrong)"
