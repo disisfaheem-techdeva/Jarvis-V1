@@ -108,6 +108,14 @@ def set_account(tenant_id: str, body: dict = Body(...),
         except (TypeError, ValueError):
             raise HTTPException(400, "%s must be a number" % k)
     with tenant_session(None, "techdeva_admin") as cur:
+        # Only the fields sent change. The console's fee box sends monthly_fee
+        # alone, and used to wipe the setup fee, contact and notes with it.
+        cur.execute("SELECT * FROM client_accounts WHERE tenant_id = %s", (tenant_id,))
+        old = dict(cur.fetchone() or {})
+        for k in ("monthly_fee", "setup_fee", "performance_pct", "started_on",
+                  "next_invoice_on", "contact", "notes"):
+            if k not in body and old.get(k) is not None:
+                body[k] = old[k]
         cur.execute("""INSERT INTO client_accounts (tenant_id,monthly_fee,setup_fee,
                          performance_pct,started_on,next_invoice_on,contact,notes)
                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
