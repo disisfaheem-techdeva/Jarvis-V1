@@ -3514,24 +3514,33 @@ function pendingOnboardingHTML(){
 }
 VIEWS.catalogue = function(){
   var out = '<h1>Services &amp; Products</h1><p class="sub">What the business sells. Appointments, bills, packages and your AI all use this one list.</p>';
+  // One page, reachable as Services, Products or both (#18 lists them apart).
+  var cv = currentView(), showS = cv !== 'products', showP = cv !== 'services';
+  if (cv === 'services') out = '<h1>Services</h1><p class="sub">What the business offers. Appointments, bills, packages and your AI all use this one list.</p>';
+  if (cv === 'products') out = '<h1>Products</h1><p class="sub">What the business sells over the counter. Stock is kept on the Inventory page.</p>';
   if (!need('services', '/business/services') | !need('products', '/business/products'))
     return out + panel('Services', loading('Loading the catalogue...'));
   if (S.services === null || S.products === null) return out + panel('Services', errState('The catalogue service did not respond.'));
   var own = isOwner();
+  if (showS) {
   out += pendingOnboardingHTML() + actbar();
   if (own) out += panel('Add a service', '<div style="padding:12px 16px">' + row() + inp('svname', 'Service name *', 'text', 180) + inp('svprice', 'Price', 'number', 110) +
     inp('svmins', 'Minutes', 'number', 100) + inp('svcat', 'Category', 'text', 130) + '<button class="btn primary" id="svadd">Add service</button></div></div>');
   out += panel('Services', crudTable(svcSpec()), '<span class="pill count">' + items('services').filter(function(x){ return x.id; }).length + '</span>');
-  out += '<h2>Products</h2>';
+  } else out += actbar();
+  if (showP) {
+  if (showS) out += '<h2>Products</h2>';
   if (own) out += panel('Add a product', '<div style="padding:12px 16px">' + row() + inp('prname', 'Product name *', 'text', 180) + inp('prprice', 'Price', 'number', 110) +
     inp('prsku', 'SKU', 'text', 110) + inp('prcat', 'Category', 'text', 130) + '</div>' + row() +
     '<label class="card-note" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="prtrack" checked> Track stock</label>' +
     inp('prlow', 'Warn below', 'number', 120) + '<button class="btn primary" id="pradd">Add product</button></div>' +
     '<div class="card-note">Opening stock is recorded on the Inventory page.</div></div>');
   out += panel('Products', crudTable(prdSpec()), '<span class="pill count">' + items('products').length + '</span>');
+  }
   if (!own) out += '<div class="card-note" style="margin-top:8px">Only the owner can change what the business sells or its prices.</div>';
   setTimeout(function(){
-    crudWire(svcSpec()); crudWire(prdSpec());
+    if (showS) crudWire(svcSpec());
+    if (showP) crudWire(prdSpec());
     var g = function(id){ return document.getElementById(id); };
     if (g('svc_import')) g('svc_import').onclick = function(){
       g('svc_import').disabled = true;
@@ -3817,6 +3826,247 @@ function ibxWire(){
   st.textContent = '.bub.sys{max-width:100%;margin:6px auto;background:transparent;border:1px dashed var(--line);color:var(--muted);font-size:12px}' +
     '.bub.sys summary{cursor:pointer}.bub.owner{background:rgba(52,208,124,.14);border:1px solid rgba(52,208,124,.35)}' +
     '.ibx-reply{margin-top:10px}.ibx-reply textarea{width:100%;resize:vertical}';
+  document.head.appendChild(st);
+})();
+
+/* ======================================================== Phase 4
+   Menu groups (#18), per-role Dashboard pins (#13), Jarvis with one
+   LISTEN/STOP toggle and visible states (#14/#15). */
+
+VIEWS.services = function(){ return VIEWS.catalogue(); };
+VIEWS.products = function(){ return VIEWS.catalogue(); };
+
+/* #18. Only sections that exist are listed. OWNER_ONLY_NAV are pages whose data
+   the API refuses to an operator (P&L, HR), so they are not offered. */
+var OWNER_ONLY_NAV = { pnl: 1, hr: 1 };
+(function(){
+  function it(id, icon, name, sub){ return { id: id, name: (icon ? icon + '  ' : '') + name, sub: !!sub }; }
+  NAV.length = 0;
+  NAV.push(
+    { label: 'Dashboard', items: [ it('overview', '🏠', 'Dashboard'), it('console', '🎙️', 'Jarvis') ]},
+    { label: 'CRM', items: [ it('leads', '👥', 'Leads'), it('customers', '👤', 'Customers'),
+      it('appointments', '📅', 'Appointments'), it('calendar', '', 'Calendar', true), it('inbox', '💬', 'WhatsApp Inbox') ]},
+    { label: 'Business', items: [ it('services', '🛠️', 'Services'), it('products', '🧴', 'Products'), it('packages', '🎁', 'Packages'),
+      it('team', '🤝', 'Team'), it('attendance', '', 'Attendance', true), it('hr', '', 'HR', true), it('settings', '⚙️', 'Business Settings') ]},
+    { label: 'Finance', items: [ it('revenue', '💰', 'Revenue'), it('expenses', '🧾', 'Expenses'), it('invoices', '📄', 'Invoices & Payments'),
+      it('dayclose', '🔒', 'Daily Closing'), it('pnl', '📊', 'Profit & Loss') ]},
+    { label: 'Operations', items: [ it('inventory', '📦', 'Inventory'), it('dailyentry', '📝', 'Daily Entry'), it('reports', '📈', 'Reports') ]},
+    { label: 'AI / Automation', items: [ it('ai', '🤖', 'AI Agents'), it('hermes', '', 'WhatsApp Agent', true),
+      it('needshuman', '🙋', 'Needs Human'), it('marketing', '📣', 'Campaigns') ]},
+    { label: 'Administration', items: [ it('integrations', '🔗', 'Integrations'), it('whatsapp', '📱', 'WhatsApp Connection') ]}
+  );
+})();
+var _navHTMLbase = navHTML;
+navHTML = function(active){
+  // Hide owner-only pages from operators (the API refuses them anyway), and
+  // highlight Services/Products when their shared page is open.
+  var saved = NAV.map(function(g){ return g.items; });
+  if (!isOwner()) NAV.forEach(function(g){ g.items = g.items.filter(function(x){ return !OWNER_ONLY_NAV[x.id]; }); });
+  var html = _navHTMLbase(active === 'catalogue' ? 'services' : active);
+  NAV.forEach(function(g, i){ g.items = saved[i]; });
+  return html;
+};
+function navLabel(id){
+  for (var i = 0; i < NAV.length; i++) for (var j = 0; j < NAV[i].items.length; j++)
+    if (NAV[i].items[j].id === id) return NAV[i].items[j].name;
+  return id;
+}
+
+/* #13 Pins. Stored in tenant_config.dashboard_prefs.pinned_by_role (the same
+   prefs Jarvis writes), set by the owner on the Team page, shown on the
+   Dashboard for whoever is signed in, by their role. */
+var PIN_ROLES = [['owner', 'Owner'], ['operator', 'Front desk / staff']];
+function pinsFor(role){ var p = (PREFS && PREFS.pinned_by_role) || {}; return p[role] || []; }
+function pinnedHTML(){
+  var role = (S.me && S.me.role === 'operator') ? 'operator' : 'owner';
+  var ids = pinsFor(role).filter(function(id){ return VIEWS[id] && !(role === 'operator' && OWNER_ONLY_NAV[id]); });
+  if (!ids.length) return '';
+  return '<h2>Pinned for you</h2><div class="grid">' + ids.map(function(id){
+    return '<a class="card pin-card" href="#/' + id + '"><div class="card-label">Open</div><div style="font-size:16px;font-weight:600;margin-top:6px">' + esc(navLabel(id)) + '</div></a>';
+  }).join('') + '</div>';
+}
+var _overviewBase = VIEWS.overview;
+VIEWS.overview = function(){
+  var html = _overviewBase();
+  var pins = pinnedHTML();
+  if (!pins) return html;
+  var at = html.indexOf('</p>');
+  return at === -1 ? pins + html : html.slice(0, at + 4) + pins + html.slice(at + 4);
+};
+var _teamBase = VIEWS.team;
+VIEWS.team = function(){
+  var out = _teamBase();
+  if (!isOwner()) return out;
+  var all = [];
+  NAV.forEach(function(g){ g.items.forEach(function(x){ if (x.id !== 'overview') all.push(x); }); });
+  out += '<h2>Pin to Dashboard</h2>' + panel('What each role sees first',
+    '<div class="card-note" style="padding:10px 16px">Tick the sections each role should find pinned on their Dashboard. Staff never see owner-only pages (Profit &amp; Loss, HR), even if ticked.</div>' +
+    '<div class="tbl-wrap"><table><thead><tr><th>Section</th>' + PIN_ROLES.map(function(r){ return '<th>' + esc(r[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+    all.map(function(x){
+      return '<tr><td>' + esc(x.name) + '</td>' + PIN_ROLES.map(function(r){
+        var dis = r[0] === 'operator' && OWNER_ONLY_NAV[x.id];
+        return '<td><input type="checkbox" class="pinchk" data-role="' + r[0] + '" data-id="' + x.id + '"' +
+          (pinsFor(r[0]).indexOf(x.id) !== -1 ? ' checked' : '') + (dis ? ' disabled title="Owner-only page"' : '') + '></td>';
+      }).join('') + '</tr>';
+    }).join('') + '</tbody></table></div>' +
+    '<div style="padding:12px 16px"><button class="btn primary" id="pinsave">Save pins</button> <span id="pinmsg" class="card-note"></span></div>');
+  setTimeout(function(){
+    var b = document.getElementById('pinsave');
+    if (!b) return;
+    b.onclick = function(){
+      var body = { owner: [], operator: [] };
+      document.querySelectorAll('.pinchk').forEach(function(c){ if (c.checked && !c.disabled) body[c.getAttribute('data-role')].push(c.getAttribute('data-id')); });
+      if (body.owner.length > 12 || body.operator.length > 12) { document.getElementById('pinmsg').textContent = 'At most 12 per role.'; return; }
+      b.disabled = true;
+      api('/console/prefs/pins', { method: 'PUT', body: { pinned_by_role: body } }).then(function(r){
+        b.disabled = false;
+        var m = document.getElementById('pinmsg');
+        if (!r.ok) { m.textContent = (r.data && r.data.detail) || 'Not saved.'; m.style.color = 'var(--danger)'; return; }
+        PREFS = r.data.prefs || PREFS;
+        m.textContent = 'Saved. ' + body.owner.length + ' pinned for the owner, ' + body.operator.length + ' for staff.'; m.style.color = 'var(--growth)';
+      });
+    };
+  }, 0);
+  return out;
+};
+
+/* #14/#15 Jarvis. One button: LISTEN starts, STOP ends (and sends what was
+   heard). The orb and label always say what Jarvis is doing:
+   Idle -> Listening -> Processing -> Responding -> Idle, or Error with the
+   reason (microphone blocked gets its own instructions). Reuses the existing
+   voice helpers: jarvisHeard, the server voice (/console/speak), consoleSend's
+   API call. */
+var JV = { state: 'idle', msg: '', rec: null, heard: '', audio: null };
+var JV_LABEL = { idle: 'Idle', listening: 'Listening…', processing: 'Processing…', responding: 'Responding…', error: 'Error' };
+function jvSet(state, msg){
+  JV.state = state; JV.msg = msg || '';
+  var orb = document.getElementById('jv-orb'), lab = document.getElementById('jv-state'), m = document.getElementById('jv-msg'), b = document.getElementById('con-mic');
+  if (orb) orb.className = 'jv-orb ' + state;
+  if (lab) lab.textContent = JV_LABEL[state];
+  if (m) { m.textContent = JV.msg; m.style.color = state === 'error' ? 'var(--danger)' : 'var(--muted)'; }
+  if (b) {
+    b.textContent = (state === 'listening' || state === 'responding') ? '■ STOP' : '● LISTEN';
+    b.classList.toggle('stop', state === 'listening' || state === 'responding');
+    b.disabled = state === 'processing';
+  }
+}
+function jvSpeak(text){
+  return new Promise(function(done){
+    if (!text) return done();
+    JARVIS_LAST = String(text).slice(0, 600);
+    var urdu = JARVIS_LANG === 'ur' || /[؀-ۿ]/.test(JARVIS_LAST);
+    fetch('/console/speak', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ text: JARVIS_LAST, lang: urdu ? 'ur' : 'en' }) })
+      .then(function(r){ if (!r.ok) throw new Error('voice ' + r.status); return r.blob(); })
+      .then(function(b){ var a = new Audio(URL.createObjectURL(b)); JV.audio = a; a.onended = done; a.onerror = done; return a.play(); })
+      .catch(function(){
+        try {
+          if (!window.speechSynthesis) return done();
+          var u = new SpeechSynthesisUtterance(JARVIS_LAST); u.lang = urdu ? 'ur-PK' : 'en-US';
+          u.onend = done; u.onerror = done; window.speechSynthesis.speak(u);
+        } catch (e) { done(); }
+      });
+  });
+}
+function jvStopAudio(){ try { if (JV.audio) JV.audio.pause(); if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {} }
+function jvMicError(code){
+  if (code === 'not-allowed' || code === 'service-not-allowed')
+    return 'Microphone is blocked for this site. Click the lock icon next to the address bar, set Microphone to Allow, then press LISTEN again. You can also type below.';
+  if (code === 'audio-capture') return 'No microphone was found on this device. Plug one in, or type below.';
+  if (code === 'no-speech') return 'I did not hear anything. Press LISTEN and speak, or type below.';
+  if (code === 'network') return 'The browser could not reach its speech service. Check the connection, or type below.';
+  return 'Voice stopped (' + code + '). Press LISTEN to try again, or type below.';
+}
+function wireConsoleMic(){
+  var mic = document.getElementById('con-mic'), box = document.getElementById('con-in');
+  if (!mic || !box) return;
+  var lb = document.getElementById('con-lang'); if (lb) lb.textContent = jarvisLangLabel();
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  mic.style.display = '';
+  jvSet(JV.state === 'processing' ? 'processing' : 'idle', JV.state === 'error' ? '' : JV.msg);
+  mic.onclick = function(){
+    if (JV.state === 'responding') { jvStopAudio(); jvSet('idle'); return; }
+    if (JV.state === 'listening') { if (JV.rec) JV.rec.stop(); return; }
+    if (!SR) { jvSet('error', 'Voice needs Chrome or Edge on this device. You can type below.'); return; }
+    try { JV.rec = new SR(); } catch (e) { jvSet('error', 'This browser would not start voice input. Type below instead.'); return; }
+    var rec = JV.rec, failed = null;
+    rec.lang = jarvisRecLang(); rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+    JV.heard = '';
+    rec.onresult = function(ev){ JV.heard = jarvisHeard(ev); box.value = JV.heard; };
+    rec.onerror = function(ev){ failed = ev.error || 'unknown'; };
+    rec.onend = function(){
+      JV.rec = null;
+      if (failed && failed !== 'aborted') { jvSet('error', jvMicError(failed)); return; }
+      if (JV.heard.trim()) { JARVIS_SPOKEN = true; consoleSend(); }
+      else jvSet('idle', 'Nothing heard.');
+    };
+    try { rec.start(); jvSet('listening', 'Speak now. Press STOP when you are done.'); }
+    catch (e) { jvSet('error', jvMicError('start-failed')); }
+  };
+}
+function consoleSend(){
+  var box = document.getElementById('con-in'), out = document.getElementById('con-out');
+  if (!box || !box.value.trim() || JV.state === 'processing') return;
+  var msg = box.value.trim(), spoken = JARVIS_SPOKEN; JARVIS_SPOKEN = false;
+  jvSet('processing', 'Working on: "' + msg.slice(0, 80) + (msg.length > 80 ? '…' : '') + '"');
+  api('/console', { method: 'POST', body: { message: msg } }).then(function(r){
+    if (!r.ok) {
+      var why = (r.data && r.data.detail) || ('Jarvis could not do that (HTTP ' + r.status + ').');
+      if (out) out.innerHTML = errState(why);
+      jvSet('error', why);
+      if (spoken) jvSpeak(why);
+      return;
+    }
+    var d = r.data || {}, extra = '';
+    box.value = '';
+    if (d.kind === 'teach') { extra = '<div class="sub" style="margin-top:8px">Your agent will now follow: <em>' + esc(d.lesson || '') + '</em></div>'; loadLessons(); }
+    if (d.kind === 'dashboard') { PREFS = d.prefs || PREFS; applyBrand(); extra = '<div class="sub" style="margin-top:8px">Applied: ' + esc(JSON.stringify(d.changed || {})) + '</div>'; }
+    if (d.kind === 'post') { extra = '<div class="sub" style="margin-top:8px">Nothing is public yet. Review it under Social posts below.</div>'; loadPosts(); }
+    if (d.kind === 'business') {
+      need('biz_' + d.resource, '/business/' + d.resource, true);
+      extra = '<div class="sub" style="margin-top:8px">' + (d.action === 'create' ? 'Added to ' : 'Updated in ') + esc(d.resource || 'your business details') + '.</div>';
+    }
+    var reply = d.reply || 'Done.';
+    if (out) out.innerHTML = '<div class="jv-reply">' + esc(reply) + extra + jarvisListenBtn('btn') + '</div>';
+    JARVIS_LAST = reply;
+    if (spoken) { jvSet('responding', 'Speaking the answer. Press STOP to cut it short.'); jvSpeak(reply).then(function(){ if (JV.state === 'responding') jvSet('idle'); }); }
+    else jvSet('idle');
+  });
+}
+VIEWS.console = function(){
+  var out = '<h1>Jarvis</h1><p class="sub">Tell the platform what to change, in your own words: prices, services, staff, hours, how your dashboard looks, or what your WhatsApp agent should know.</p>';
+  out += '<div class="panel jv-panel"><div class="jv-head"><div id="jv-orb" class="jv-orb ' + JV.state + '"></div>' +
+    '<div style="flex:1;min-width:0"><div id="jv-state" class="jv-state">' + JV_LABEL[JV.state] + '</div><div id="jv-msg" class="card-note">' + esc(JV.msg) + '</div></div>' +
+    '<button id="con-mic" class="btn primary jv-mic" type="button">● LISTEN</button>' +
+    '<button id="con-lang" class="btn" type="button" title="Voice language: English or Urdu" onclick="jarvisToggleLang(this)">EN</button></div>' +
+    '<div style="padding:0 16px 16px"><textarea id="con-in" class="fld" rows="3" style="width:100%" placeholder="Teach my WhatsApp agent: hair PRP is 12,000 per session, three for 30,000.&#10;Or: add a new service called HydraFacial at 8,000."></textarea>' +
+    '<div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button id="con-go" class="btn">Send</button><span class="card-note">Enter sends · Shift+Enter for a new line</span></div>' +
+    '<div id="con-out" style="margin-top:14px"></div></div></div>';
+  out += '<h2>Social posts</h2>' + panel('Waiting for your approval', actbar() + '<div id="con-posts">' + loading('Loading posts...') + '</div>');
+  out += '<h2>What your WhatsApp agent has been taught</h2>' + panel('Lessons', '<div id="con-les">' + loading('Loading...') + '</div>');
+  setTimeout(function(){
+    var go = document.getElementById('con-go'); if (go) go.onclick = consoleSend;
+    var box = document.getElementById('con-in');
+    if (box) box.onkeydown = function(e){ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); consoleSend(); } };
+    wireConsoleMic(); loadPosts(); loadLessons();
+  }, 0);
+  return out;
+};
+(function(){
+  var st = document.createElement('style');
+  st.textContent =
+    '.jv-head{display:flex;gap:14px;align-items:center;padding:16px;flex-wrap:wrap}' +
+    '.jv-orb{width:44px;height:44px;border-radius:50%;flex:0 0 44px;background:radial-gradient(circle at 35% 35%,#9fb3ff,var(--accent));box-shadow:0 0 0 0 rgba(108,140,255,.5);transition:background .2s}' +
+    '.jv-orb.idle{opacity:.55}' +
+    '.jv-orb.listening{background:radial-gradient(circle at 35% 35%,#ffb4b4,#e05555);animation:jvpulse 1.1s infinite}' +
+    '.jv-orb.processing{animation:jvspin 1s linear infinite;background:conic-gradient(var(--accent),transparent 70%)}' +
+    '.jv-orb.responding{background:radial-gradient(circle at 35% 35%,#b6f5cf,var(--growth));animation:jvpulse 1.6s infinite}' +
+    '.jv-orb.error{background:radial-gradient(circle at 35% 35%,#ffd0a0,var(--warn))}' +
+    '@keyframes jvpulse{0%{box-shadow:0 0 0 0 rgba(224,85,85,.45)}70%{box-shadow:0 0 0 14px rgba(224,85,85,0)}100%{box-shadow:0 0 0 0 rgba(224,85,85,0)}}' +
+    '@keyframes jvspin{to{transform:rotate(360deg)}}' +
+    '.jv-state{font-weight:600;font-size:15px}.jv-mic{min-width:110px;letter-spacing:.06em}.jv-mic.stop{background:var(--danger);border-color:var(--danger);color:#fff}' +
+    '.jv-reply{padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);white-space:pre-wrap}' +
+    '.pin-card{display:block;color:var(--text)}.pin-card:hover{border-color:var(--accent)}';
   document.head.appendChild(st);
 })();
 

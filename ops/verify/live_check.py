@@ -362,6 +362,35 @@ def phase3(ctx):
     check("DATA", "Irfan's audit rows back to where they started after the probe", before == after, "%s -> %s" % (before, after))
 
 
+def phase4(ctx):
+    """#13 pins (QA tenant; its prefs are restored exactly), and that the served
+    dashboard carries the A9/#14/#17/#18 changes."""
+    O, OP, tid = ctx["owner"], ctx["operator"], ctx["qa"]
+    s, page = call(None, "GET", "/dashboard")
+    markers = {"A9 incidents throttle": "INC_EVERY_MS", "#17 sidebar scroll kept": "S.sbTop",
+               "#18 menu groups": "'AI / Automation'", "#14 Jarvis states": "JV_LABEL", "#13 pins": "pinned_by_role",
+               "#5 reply box": "ibx_send"}
+    for k, m in markers.items():
+        check(k.split()[0], "live dashboard.html has " + k, s == 200 and isinstance(page, str) and m in page, "marker %r" % m)
+    orig = sql("SELECT coalesce(dashboard_prefs::text, '{}') FROM tenant_config WHERE tenant_id='%s'" % tid)
+    try:
+        s, r = call(OP, "PUT", "/console/prefs/pins", {"pinned_by_role": {"owner": ["appointments"], "operator": []}})
+        check("#13/#11", "operator cannot change pins", s == 403, "HTTP %s" % s)
+        s, r = call(O, "PUT", "/console/prefs/pins", {"pinned_by_role": {"owner": ["appointments", "inbox"], "operator": ["dailyentry"]}})
+        s2, pr = call(OP, "GET", "/console/prefs")
+        got = (pr.get("prefs") or {}).get("pinned_by_role") if isinstance(pr, dict) else None
+        check("#13", "pins saved per role and read back by staff", s == 200 and got == {"owner": ["appointments", "inbox"], "operator": ["dailyentry"]}, "HTTP %s read=%s" % (s, got))
+        s, r = call(O, "PUT", "/console/prefs/pins", {"pinned_by_role": {"owner": ["../../x"]}})
+        check("#13", "a bad section id is refused", s == 400, "HTTP %s" % s)
+    finally:
+        if orig:
+            sql("UPDATE tenant_config SET dashboard_prefs = $TD$%s$TD$::jsonb WHERE tenant_id='%s'" % (orig[0][0], tid))
+        else:
+            sql("UPDATE tenant_config SET dashboard_prefs = '{}'::jsonb WHERE tenant_id='%s'" % tid)
+        now = sql("SELECT coalesce(dashboard_prefs::text, '{}') FROM tenant_config WHERE tenant_id='%s'" % tid)
+        check("DATA", "QA dashboard prefs restored exactly", (orig or [["{}"]])[0][0] == (now or [["{}"]])[0][0] or not orig, "restored")
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)
