@@ -496,6 +496,48 @@ def public_signup(body: SignupIn, request: Request):
             "message": "Analysis in progress — your report is being prepared."}
 
 
+class DemoRequestIn(BaseModel):
+    name: str
+    business: str
+    phone: str | None = None
+    email: str | None = None
+    message: str | None = None
+    website: str | None = None      # honeypot: a hidden field people never fill
+
+
+@app.post("/public/demo-request")
+def public_demo_request(body: DemoRequestIn, request: Request):
+    """PUBLIC 'Book a demo' from the website. The form used to post to an
+    address that never existed, so every request was lost. Stored in the
+    signups intake queue (status demo_requested), shown in the founder console."""
+    if (body.website or "").strip():
+        return {"ok": True}                      # a bot filled the hidden field; say nothing
+    ip = _client_ip(request)
+    if not _rate_ok("demo:" + ip, SIGNUP_MAX_PER_IP):
+        raise HTTPException(429, "Too many requests from this address. Please try again later.")
+    name = (body.name or "").strip()[:120]
+    business = (body.business or "").strip()[:160]
+    phone = re.sub(r"[^0-9+ ]", "", body.phone or "").strip()[:30] or None
+    email = (body.email or "").strip().lower()[:200] or None
+    if len(name) < 2 or len(business) < 2:
+        raise HTTPException(400, "Please enter your name and your business name.")
+    if not phone and not email:
+        raise HTTPException(400, "Please leave a phone number or an email so we can reach you.")
+    if email and not EMAIL_RE.match(email):
+        raise HTTPException(400, "That email address does not look right.")
+    if phone and len(re.sub(r"\D", "", phone)) < 7:
+        raise HTTPException(400, "That phone number looks too short.")
+    note = (body.message or "").strip()[:1000] or None
+    with tenant_session(None, "techdeva_admin") as cur:
+        cur.execute("""INSERT INTO signups (business_name, industry, contact_email, contact_phone,
+                                            contact_name, note, status)
+                       VALUES (%s, 'demo request', %s, %s, %s, %s, 'demo_requested') RETURNING id""",
+                    (business, email, phone, name, note))
+        sid = cur.fetchone()["id"]
+    print("[demo] request from %s (%s)" % (business, "phone" if phone else "email"), flush=True)
+    return {"ok": True, "id": str(sid)}
+
+
 # ---------------------- the pages the client actually sees ----------------------
 @app.get("/", include_in_schema=False)
 def signup_page():

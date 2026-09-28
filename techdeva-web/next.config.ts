@@ -8,6 +8,11 @@ const nextConfig: NextConfig = {
     return [
       { source: "/auth/login", destination: "/login", permanent: false },
       { source: "/dashboard", destination: "https://api.techdeva.net/dashboard", permanent: false },
+      // The old /portal/* screens duplicated the client dashboard and went
+      // stale; every client now works in the one dashboard on the API host.
+      { source: "/portal/onboarding", destination: "https://api.techdeva.net/onboarding", permanent: false },
+      { source: "/portal/:path+", destination: "https://api.techdeva.net/dashboard", permanent: false },
+      { source: "/signup", destination: "https://api.techdeva.net/", permanent: false },
     ];
   },
 };

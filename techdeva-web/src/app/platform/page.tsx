@@ -4,13 +4,14 @@ export default function PlatformPage() {
   return (
     <MarketingPage
       eyebrow="Platform"
-      title="One engine, every industry"
-      body="Business rules — services, prices, persona, hours, departments — live in configuration, not code. Onboarding a new industry is a config row, never a rebuild. Every tenant is isolated at the database layer with row-level security; the app never connects as a superuser."
+      title="One platform, set up for your business"
+      body="Your services, prices, hours and departments are settings, not custom software, so a new clinic, salon or academy is running on the same proven platform the day it signs up."
     >
       <ul className="mt-8 space-y-3 text-sm text-[var(--muted)]">
-        <li>• Master Orchestrator — a rulebook and task router, not a chatbot.</li>
-        <li>• Agent Contract — every AI employee reads config and events only; the orchestrator is the only thing with write access.</li>
-        <li>• Human-in-the-loop enforced in code, not policy — money, publishing and pricing always park for approval.</li>
+        <li>• Your data is yours alone: every business is kept strictly separate from every other.</li>
+        <li>• Your AI employees work for you: they answer, draft and report, but never change a price, spend money or publish without your approval.</li>
+        <li>• Owner and staff logins: staff can book and take payments; prices, deletions and reports stay with the owner.</li>
+        <li>• Works on your phone as well as your computer.</li>
       </ul>
     </MarketingPage>
   );

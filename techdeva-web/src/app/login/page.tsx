@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
+import { SIGNUP_URL } from "@/lib/links";
 
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +68,10 @@ export default function LoginPage() {
             {loading ? "Signing in…" : "Log in"}
           </button>
         </form>
+        <p className="mt-5 text-center text-sm text-[var(--muted)]">
+          New to TechDeva?{" "}
+          <a className="text-white underline" href={SIGNUP_URL}>Start a free trial</a>
+        </p>
       </div>
     </div>
   );

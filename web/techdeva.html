@@ -462,9 +462,11 @@ const VIEWS = {
       kpi('On trial now', b.trials, 'still inside the free window') +
       kpi('Converted', b.paying, 'have a fee against their name') + '</div>' +
       '<section><h2>Recent signups</h2><div class="card" style="padding:6px 8px">' +
-      tbl('<th>Business</th><th>Industry</th><th>Status</th><th>When</th>',
-        s.map(x => '<tr><td class="name">' + esc(x.business_name) + '</td><td class="dim">' +
-          esc(x.industry || '-') + '</td><td><span class="pill">' + esc(x.status) + '</span></td>' +
+      tbl('<th>Business</th><th>Industry</th><th>Status</th><th>Contact</th><th>When</th>',
+        s.map(x => '<tr><td class="name">' + esc(x.business_name) + (x.note ? '<div class="dim">' + esc(x.note) + '</div>' : '') +
+          '</td><td class="dim">' + esc(x.industry || '-') + '</td><td><span class="pill">' +
+          esc(x.status === 'demo_requested' ? 'demo requested' : x.status) + '</span></td>' +
+          '<td class="dim">' + esc([x.contact_name, x.contact_phone, x.contact_email].filter(Boolean).join(' · ') || '-') + '</td>' +
           '<td class="dim">' + when(x.created_at) + '</td></tr>')) + '</div></section>';
   },
   bookings(){

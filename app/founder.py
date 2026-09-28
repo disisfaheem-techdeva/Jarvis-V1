@@ -284,8 +284,9 @@ def operations(x_tenant_id: str | None = Header(None),
                         WHERE NOT t.is_test""")
         pay = dict(cur.fetchone())
         cur.execute("""SELECT s.business_name, s.industry, s.status::text AS status,
+                              s.contact_name, s.contact_phone, s.contact_email, s.note,
                               s.created_at
-                         FROM signups s ORDER BY s.created_at DESC LIMIT 10""")
+                         FROM signups s ORDER BY s.created_at DESC LIMIT 25""")
         signups = [dict(r) for r in cur.fetchall()]
     return {"bookings": book, "bookings_by_status": by_status,
             "bookings_by_client": per_client,

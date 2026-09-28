@@ -1,39 +1,23 @@
 import Link from "next/link";
+import { SiteHeader } from "@/components/SiteHeader";
+import { CtaBand, SiteFooter } from "@/components/SiteFooter";
+import { SIGNUP_URL, TRIAL_DAYS } from "@/lib/links";
 
-const NAV = [
-  { href: "/platform", label: "Platform" },
-  { href: "/ai-workforce", label: "AI Workforce" },
-  { href: "/solutions", label: "Solutions" },
-  { href: "/pricing", label: "Pricing" },
-  { href: "/case-studies", label: "Case Studies" },
+const FEATURES = [
+  { title: "Appointments & bills", body: "Book clients with services, discounts, GST and part payments. Every balance comes from the real bill." },
+  { title: "Customers & history", body: "Every visit, payment, package, note and WhatsApp chat for each customer, in one place." },
+  { title: "WhatsApp AI agent", body: "Your own agent answers customers on your business number in their language, and you can reply from the dashboard." },
+  { title: "Jarvis, your voice assistant", body: "Ask about your figures, change prices or hours, or attach a photo and have a post drafted, just by talking." },
+  { title: "Money & stock", body: "Expenses, daily closing, profit and loss, and stock that adds up from every movement." },
+  { title: "Team & permissions", body: "Staff, attendance and HR. Front-desk logins can book and take payments; prices and deletions stay with the owner." },
 ];
 
 export default function Home() {
   return (
     <div className="min-h-screen bg-[var(--background)]">
-      <header className="flex items-center justify-between border-b border-white/10 px-6 py-4">
-        <span className="flex items-center gap-2 text-base font-semibold text-white">
-          <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
-          TechDeva
-        </span>
-        <nav className="hidden gap-7 text-sm text-[var(--muted)] md:flex">
-          {NAV.map((n) => (
-            <Link key={n.href} href={n.href} className="transition-colors hover:text-white">
-              {n.label}
-            </Link>
-          ))}
-        </nav>
-        <div className="flex items-center gap-2 text-sm">
-          <Link href="/login" className="td-btn-ghost px-3 py-2">
-            Log in
-          </Link>
-          <Link href="/demo" className="td-btn-primary px-4 py-2">
-            Book a demo
-          </Link>
-        </div>
-      </header>
+      <SiteHeader />
 
-      <section className="mx-auto max-w-4xl px-6 py-28 text-center">
+      <section className="mx-auto max-w-4xl px-5 py-20 text-center sm:py-28">
         <div className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-[var(--muted)]">
           <span className="h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
           Live in production — The Beauty Aesthetic &amp; Lounge
@@ -44,41 +28,47 @@ export default function Home() {
           Operating System
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg text-[var(--muted)]">
-          One platform, one AI workforce, every business function — leads, bookings,
-          reporting, campaigns — running on autopilot with a human always in
-          control of the decisions that matter.
+          One dashboard for your clinic, salon or academy: bookings, bills, customers, stock, your team,
+          a WhatsApp agent and a voice assistant. The AI does the routine work; you approve what matters.
         </p>
-        <div className="mt-9 flex justify-center gap-3">
-          <Link href="/demo" className="td-btn-primary px-6 py-3 text-sm font-medium">
-            See it in action
-          </Link>
-          <Link href="/platform" className="td-btn-ghost px-6 py-3 text-sm font-medium">
-            Explore the platform
+        <div className="mt-9 flex flex-col justify-center gap-3 sm:flex-row">
+          <a href={SIGNUP_URL} className="td-btn-primary px-6 py-3 text-sm font-medium">
+            Start your {TRIAL_DAYS}-day free trial
+          </a>
+          <Link href="/demo" className="td-btn-ghost px-6 py-3 text-sm font-medium">
+            Book a demo
           </Link>
         </div>
+        <p className="mt-3 text-xs text-[var(--muted)]">No card needed. Set up takes a few minutes.</p>
       </section>
 
-      <section className="mx-auto grid max-w-5xl gap-5 px-6 pb-28 sm:grid-cols-3">
-        {[
-          {
-            title: "Not a chatbot",
-            body: "Hermes is Employee #1, not the product. The platform is the operating system your whole business runs on.",
-          },
-          {
-            title: "Human in the loop",
-            body: "Money, publishing, pricing and permissions always require your sign-off. Everything else runs autonomously.",
-          },
-          {
-            title: "One engine, any industry",
-            body: "Salon, clinic, academy — the same engine, configured per business. Onboarding is a config row, not new code.",
-          },
-        ].map((f) => (
+      <section className="mx-auto grid max-w-5xl gap-5 px-5 sm:grid-cols-2 lg:grid-cols-3">
+        {FEATURES.map((f) => (
           <div key={f.title} className="td-card p-6">
             <h3 className="font-semibold text-white">{f.title}</h3>
             <p className="mt-2 text-sm text-[var(--muted)]">{f.body}</p>
           </div>
         ))}
       </section>
+
+      <section className="mx-auto mt-20 max-w-5xl px-5">
+        <h2 className="text-center text-2xl font-semibold text-white">How it starts</h2>
+        <ol className="mt-8 grid gap-5 sm:grid-cols-3">
+          {[
+            ["1. Sign up", "Your business and your owner login are created straight away."],
+            ["2. Tell it about your business", "Services, prices, hours and your logo. Your dashboard uses them immediately."],
+            ["3. Connect WhatsApp & Facebook", "Scan a QR code for WhatsApp, and connect your Page to post from the dashboard."],
+          ].map(([t, b]) => (
+            <li key={t} className="td-card p-6">
+              <div className="font-semibold text-white">{t}</div>
+              <p className="mt-2 text-sm text-[var(--muted)]">{b}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <div className="px-5"><CtaBand /></div>
+      <SiteFooter />
     </div>
   );
 }

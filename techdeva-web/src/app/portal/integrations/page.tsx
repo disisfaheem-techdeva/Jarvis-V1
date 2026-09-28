@@ -89,7 +89,7 @@ export default function IntegrationsPage() {
     return (
       <p className="text-sm text-[var(--muted)]">
         You are signed out.{" "}
-        <Link className="underline" href="/auth/login">
+        <Link className="underline" href="/login">
           Sign in
         </Link>{" "}
         to manage your connections.
