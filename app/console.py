@@ -169,6 +169,80 @@ LANG_RULE = ("\n\nLanguage: write \"reply\" in the same language and script the 
              "(English, Urdu script, or Roman Urdu). Keep it short and natural to say aloud.")
 
 
+# ------------------------------------------------------------------ facts
+# The console used to answer questions with nothing but the question, so a
+# "how many appointments this week?" came back as a confident invented number.
+# Every call now carries a small live snapshot of the business, read under the
+# caller's own tenant fence, and the model is told to answer only from it.
+FACTS_RULE = ("\n\nBUSINESS FACTS below are live data from this business's own "
+              "records. Answer questions ONLY from them. If the answer is not in "
+              "them, say you do not have that yet -- never invent a number, "
+              "price, name or date.")
+
+_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+
+def _facts(tid, role):
+    f = {}
+    tz = "Asia/Karachi"
+    try:
+        with tenant_session(tid, role) as cur:
+            cur.execute("SELECT to_char(now() AT TIME ZONE %s, 'Dy DD Mon YYYY HH24:MI') AS now", (tz,))
+            f["now_pakistan_time"] = cur.fetchone()["now"]
+            cur.execute("SELECT name, price, currency, active FROM services "
+                        "ORDER BY sort_order NULLS LAST, name LIMIT 40")
+            f["services"] = [dict(r) for r in cur.fetchall()]
+            cur.execute("SELECT day_of_week, opens::text, closes::text, is_closed "
+                        "FROM business_hours ORDER BY day_of_week LIMIT 14")
+            f["business_hours"] = [
+                {"day": _DAYS[r["day_of_week"] % 7], "opens": r["opens"],
+                 "closes": r["closes"], "closed": r["is_closed"]} for r in cur.fetchall()]
+            cur.execute("""
+                SELECT
+                  count(*) FILTER (WHERE (starts_at AT TIME ZONE %(tz)s)::date
+                                         = (now() AT TIME ZONE %(tz)s)::date) AS today,
+                  count(*) FILTER (WHERE date_trunc('week', starts_at AT TIME ZONE %(tz)s)
+                                         = date_trunc('week', now() AT TIME ZONE %(tz)s)) AS this_week_mon_to_sun,
+                  count(*) FILTER (WHERE starts_at >= now()) AS upcoming,
+                  count(*) AS all_time
+                FROM appointments""", {"tz": tz})
+            f["appointments"] = dict(cur.fetchone())
+            cur.execute("""
+                SELECT count(*) FILTER (WHERE created_at >= now() - interval '7 days') AS last_7_days,
+                       count(*) FILTER (WHERE created_at >= now() - interval '30 days') AS last_30_days,
+                       count(*) AS all_time
+                FROM leads""")
+            f["leads"] = dict(cur.fetchone())
+            cur.execute("SELECT count(*) AS total FROM customers")
+            f["customers"] = cur.fetchone()["total"]
+            if role in ("owner", "techdeva_admin"):
+                cur.execute("""
+                    SELECT coalesce(sum(amount), 0)::float AS collected_this_month
+                    FROM payments
+                    WHERE date_trunc('month', paid_at AT TIME ZONE %(tz)s)
+                          = date_trunc('month', now() AT TIME ZONE %(tz)s)""", {"tz": tz})
+                f["money_pkr"] = dict(cur.fetchone())
+    except Exception as e:  # a facts failure must never block the console
+        f["facts_error"] = type(e).__name__
+    if not f.get("services"):
+        try:
+            from .persistence import Persistence
+            cfg = Persistence().load_config(tid) or {}
+            fb = biz._onboarding_fallback("services", cfg) or []
+            f["services"] = [{k: v for k, v in dict(i).items() if k in ("name", "price", "currency")}
+                             for i in fb][:40]
+            if not f.get("business_hours") and cfg.get("working_hours"):
+                f["business_hours"] = cfg.get("working_hours")
+        except Exception:
+            pass
+    return f
+
+
+def _with_facts(tid, role, message):
+    return ("BUSINESS FACTS:\n" + json.dumps(_facts(tid, role), default=str)[:6000] +
+            "\n\nOWNER SAYS:\n" + message)
+
+
 # ------------------------------------------------------------------ voice
 # Browsers have no Urdu voice worth hearing, so Jarvis speaks through Gemini's
 # speech models. Tried in order; a busy model falls through to the next.
@@ -242,7 +316,7 @@ def make_console_router():
             # No retry here on purpose. A person is sitting in front of this
             # box: a second full pass through the model chain turns a slow
             # answer into a minute of silence, and silence reads as broken.
-            out = generate_json(CLASSIFY + LANG_RULE, message,
+            out = generate_json(CLASSIFY + LANG_RULE + FACTS_RULE, _with_facts(tid, role, message),
                                 required_keys=("kind",), _retry=False)
         except AIUnavailable as e:
             # Better to say the console is deaf than to guess at an instruction
