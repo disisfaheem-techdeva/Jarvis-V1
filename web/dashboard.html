@@ -597,6 +597,33 @@ VIEWS.console = function(){
   return out;
 };
 
+/* ---- Jarvis voice helpers ----
+   jarvisHeard: the phrase heard in THIS listening session. Chrome (Android
+   especially) fires onresult repeatedly, often re-sending the same or a growing
+   copy of the phrase; appending each one typed the user's words several times.
+   jarvisSpeak: read Jarvis's reply aloud after a spoken request. */
+function jarvisHeard(ev){
+  var parts = [];
+  for (var i = 0; i < ev.results.length; i++) {
+    var t = ((ev.results[i][0] && ev.results[i][0].transcript) || '').trim();
+    if (!t) continue;
+    var last = parts.length ? parts[parts.length - 1] : '';
+    if (last && (t === last || t.toLowerCase().indexOf(last.toLowerCase()) === 0)) parts[parts.length - 1] = t;
+    else if (last && last.toLowerCase().indexOf(t.toLowerCase()) === 0) continue;
+    else parts.push(t);
+  }
+  return parts.join(' ');
+}
+var JARVIS_SPOKEN = false;
+function jarvisSpeak(text){
+  try {
+    if (!window.speechSynthesis || !text) return;
+    window.speechSynthesis.cancel();
+    var u = new SpeechSynthesisUtterance(String(text).slice(0, 600));
+    u.lang = /[؀-ۿ]/.test(String(text)) ? 'ur-PK' : 'en-US';
+    window.speechSynthesis.speak(u);
+  } catch (e) {}
+}
 function wireConsoleMic(){
   var mic = document.getElementById('con-mic');
   var box = document.getElementById('con-in');
@@ -614,11 +641,10 @@ function wireConsoleMic(){
     rec.maxAlternatives = 1;
     listening = true;
     mic.textContent = '... Listening';
+    var base = box.value.trim();
     rec.onresult = function(ev){
-      var text = ev.results && ev.results[0] && ev.results[0][0] && ev.results[0][0].transcript;
-      if (text) {
-        box.value = (box.value ? box.value.trim() + ' ' : '') + text;
-      }
+      var heard = jarvisHeard(ev);
+      if (heard) { box.value = (base ? base + ' ' : '') + heard; JARVIS_SPOKEN = true; }
     };
     rec.onerror = function(){
       listening = false;
@@ -642,7 +668,9 @@ function consoleSend(){
   act('/console', { method: 'POST', body: { message: msg } }, '').then(function(r){
     if (note) note.textContent = '';
     if (!r.ok) {
-      if (out) out.innerHTML = errState((r.data && r.data.detail) || 'The console could not do that.');
+      var why = (r.data && r.data.detail) || 'The console could not do that.';
+      if (out) out.innerHTML = errState(why);
+      if (JARVIS_SPOKEN) { jarvisSpeak(why); JARVIS_SPOKEN = false; }
       return;
     }
     var d = r.data || {};
@@ -672,6 +700,7 @@ function consoleSend(){
     if (out) out.innerHTML =
       '<div style="padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--card)">' +
       esc(d.reply || 'Done.') + extra + '</div>';
+    if (JARVIS_SPOKEN) { jarvisSpeak(d.reply || 'Done.'); JARVIS_SPOKEN = false; }
   });
 }
 

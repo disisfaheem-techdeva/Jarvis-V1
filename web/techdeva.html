@@ -226,6 +226,33 @@ function paint(){
   if (v === 'jarvis') wireJarvis();
 }
 
+/* ---- Jarvis voice helpers ----
+   jarvisHeard: the phrase heard in THIS listening session. Chrome (Android
+   especially) fires onresult repeatedly, often re-sending the same or a growing
+   copy of the phrase; appending each one typed the user's words several times.
+   jarvisSpeak: read Jarvis's reply aloud after a spoken request. */
+function jarvisHeard(ev){
+  var parts = [];
+  for (var i = 0; i < ev.results.length; i++) {
+    var t = ((ev.results[i][0] && ev.results[i][0].transcript) || '').trim();
+    if (!t) continue;
+    var last = parts.length ? parts[parts.length - 1] : '';
+    if (last && (t === last || t.toLowerCase().indexOf(last.toLowerCase()) === 0)) parts[parts.length - 1] = t;
+    else if (last && last.toLowerCase().indexOf(t.toLowerCase()) === 0) continue;
+    else parts.push(t);
+  }
+  return parts.join(' ');
+}
+var JARVIS_SPOKEN = false;
+function jarvisSpeak(text){
+  try {
+    if (!window.speechSynthesis || !text) return;
+    window.speechSynthesis.cancel();
+    var u = new SpeechSynthesisUtterance(String(text).slice(0, 600));
+    u.lang = /[؀-ۿ]/.test(String(text)) ? 'ur-PK' : 'en-US';
+    window.speechSynthesis.speak(u);
+  } catch (e) {}
+}
 let JV_CLIENT = '';
 async function jvLoadPosts(){
   const el = document.getElementById('jv-posts');
@@ -292,7 +319,11 @@ function wireJarvis(){
         '</div><div>' + esc(d.reply || 'Done.') + '</div>' +
         (extra ? '<div class="sub" style="margin-top:6px">' + esc(extra) + '</div>' : '') + '</div>';
       note.textContent = '';
-    } catch (e) { note.textContent = e.message || 'Jarvis could not do that.'; }
+      if (JARVIS_SPOKEN) { jarvisSpeak(d.reply || 'Done.'); JARVIS_SPOKEN = false; }
+    } catch (e) {
+      note.textContent = e.message || 'Jarvis could not do that.';
+      if (JARVIS_SPOKEN) { jarvisSpeak(note.textContent); JARVIS_SPOKEN = false; }
+    }
     go.disabled = false;
   };
   go.onclick = send;
@@ -307,8 +338,9 @@ function wireJarvis(){
     try { rec = new SR(); } catch (e) { mic.style.display = 'none'; return; }
     rec.lang = 'en-US'; rec.interimResults = false; rec.maxAlternatives = 1;
     on = true; mic.textContent = '... Listening';
-    rec.onresult = ev => { const t = ev.results[0][0].transcript;
-      if (t) box.value = (box.value ? box.value.trim() + ' ' : '') + t; };
+    const base = box.value.trim();
+    rec.onresult = ev => { const heard = jarvisHeard(ev);
+      if (heard) { box.value = (base ? base + ' ' : '') + heard; JARVIS_SPOKEN = true; } };
     rec.onerror = rec.onend = () => { on = false; mic.textContent = label; };
     try { rec.start(); } catch (e) { on = false; mic.textContent = label; }
   };
