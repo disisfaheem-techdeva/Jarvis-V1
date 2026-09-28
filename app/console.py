@@ -178,7 +178,9 @@ LANG_RULE = ("\n\nLanguage: write \"reply\" in the same language and script the 
 FACTS_RULE = ("\n\nBUSINESS FACTS below are live data from this business's own "
               "records. Answer questions ONLY from them. If the answer is not in "
               "them, say you do not have that yet -- never invent a number, "
-              "price, name or date.")
+              "price, name or date. If the owner is only ASKING something, kind is "
+              "\"question\" and nothing is changed. Use business, dashboard, teach or post "
+              "only when the owner clearly tells you to change, add, remove, teach or post.")
 
 _DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
