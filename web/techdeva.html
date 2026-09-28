@@ -244,14 +244,42 @@ function jarvisHeard(ev){
   return parts.join(' ');
 }
 var JARVIS_SPOKEN = false;
-function jarvisSpeak(text){
+var JARVIS_LANG = 'en', JARVIS_AUDIO = null, JARVIS_LAST = '';
+try { JARVIS_LANG = localStorage.getItem('jarvis_lang') || 'en'; } catch (e) {}
+function jarvisLangLabel(){ return JARVIS_LANG === 'ur' ? 'اردو' : 'EN'; }
+function jarvisToggleLang(btn){
+  JARVIS_LANG = JARVIS_LANG === 'ur' ? 'en' : 'ur';
+  try { localStorage.setItem('jarvis_lang', JARVIS_LANG); } catch (e) {}
+  if (btn) btn.textContent = jarvisLangLabel();
+}
+function jarvisRecLang(){ return JARVIS_LANG === 'ur' ? 'ur-PK' : 'en-US'; }
+function jarvisBrowserSpeak(text){
   try {
     if (!window.speechSynthesis || !text) return;
     window.speechSynthesis.cancel();
-    var u = new SpeechSynthesisUtterance(String(text).slice(0, 600));
-    u.lang = /[؀-ۿ]/.test(String(text)) ? 'ur-PK' : 'en-US';
+    var u = new SpeechSynthesisUtterance(text);
+    u.lang = (JARVIS_LANG === 'ur' || /[؀-ۿ]/.test(text)) ? 'ur-PK' : 'en-US';
     window.speechSynthesis.speak(u);
   } catch (e) {}
+}
+/* Jarvis speaks through the server (Gemini voice, real Urdu); the browser's
+   own voice is only the fallback when the server voice is busy. */
+function jarvisSpeak(text){
+  if (!text) return;
+  text = String(text).slice(0, 600);
+  JARVIS_LAST = text;
+  var urdu = JARVIS_LANG === 'ur' || /[؀-ۿ]/.test(text);
+  try { if (JARVIS_AUDIO) JARVIS_AUDIO.pause(); if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {}
+  var h = {'Content-Type': 'application/json'};
+  if (typeof TOKEN !== 'undefined' && TOKEN) h['Authorization'] = 'Bearer ' + TOKEN;
+  fetch('/console/speak', {method: 'POST', credentials: 'include', headers: h,
+                           body: JSON.stringify({text: text, lang: urdu ? 'ur' : 'en'})})
+    .then(function(r){ if (!r.ok) throw new Error('voice ' + r.status); return r.blob(); })
+    .then(function(b){ var a = new Audio(URL.createObjectURL(b)); JARVIS_AUDIO = a; return a.play(); })
+    .catch(function(){ jarvisBrowserSpeak(text); });
+}
+function jarvisListenBtn(cls){
+  return ' <button class="' + cls + '" type="button" onclick="jarvisSpeak(JARVIS_LAST)" title="Hear this reply">&#128266; Listen</button>';
 }
 let JV_CLIENT = '';
 async function jvLoadPosts(){
@@ -295,6 +323,7 @@ async function jvLoadPosts(){
 function wireJarvis(){
   const sel = document.getElementById('jv-client'), box = document.getElementById('jv-in');
   const go = document.getElementById('jv-go'), mic = document.getElementById('jv-mic');
+  const lb = document.getElementById('jv-lang'); if (lb) lb.textContent = jarvisLangLabel();
   const out = document.getElementById('jv-out'), note = document.getElementById('jv-note');
   if (!sel) return;
   if (JV_CLIENT) sel.value = JV_CLIENT;
@@ -317,7 +346,8 @@ function wireJarvis(){
       const name = sel.options[sel.selectedIndex].text;
       out.innerHTML = '<div class="card" style="padding:12px 14px"><div class="k-note">' + esc(name) +
         '</div><div>' + esc(d.reply || 'Done.') + '</div>' +
-        (extra ? '<div class="sub" style="margin-top:6px">' + esc(extra) + '</div>' : '') + '</div>';
+        (extra ? '<div class="sub" style="margin-top:6px">' + esc(extra) + '</div>' : '') + jarvisListenBtn('tiny') + '</div>';
+      JARVIS_LAST = d.reply || 'Done.';
       note.textContent = '';
       if (JARVIS_SPOKEN) { jarvisSpeak(d.reply || 'Done.'); JARVIS_SPOKEN = false; }
     } catch (e) {
@@ -336,7 +366,7 @@ function wireJarvis(){
   mic.onclick = () => {
     if (on) { rec && rec.stop(); return; }
     try { rec = new SR(); } catch (e) { mic.style.display = 'none'; return; }
-    rec.lang = 'en-US'; rec.interimResults = false; rec.maxAlternatives = 1;
+    rec.lang = jarvisRecLang(); rec.interimResults = false; rec.maxAlternatives = 1;
     on = true; mic.textContent = '... Listening';
     const base = box.value.trim();
     rec.onresult = ev => { const heard = jarvisHeard(ev);
@@ -387,7 +417,7 @@ const VIEWS = {
       '<textarea id="jv-in" rows="3" style="width:100%;padding:12px;border-radius:10px;font:inherit" ' +
       'placeholder="Add a service called HydraFacial at 8,000. / Close on Fridays. / Teach their agent: consultations are free. / Make their brand colour #C9A227."></textarea>' +
       '<div class="row" style="margin-top:10px;gap:8px;align-items:center"><button id="jv-go" class="tiny primary">Send</button>' +
-      '<button id="jv-mic" class="tiny" type="button">Speak</button><span id="jv-note" class="sub"></span></div>' +
+      '<button id="jv-mic" class="tiny" type="button">Speak</button><button id="jv-lang" class="tiny" type="button" title="Voice language: English or Urdu" onclick="jarvisToggleLang(this)">EN</button><span id="jv-note" class="sub"></span></div>' +
       '<div id="jv-out" style="margin-top:14px"></div>' +
       '<div class="k-label" style="margin-top:18px">Social posts for this client</div>' +
       '<div id="jv-posts" style="margin-top:8px"><div class="empty">Pick a client to see their posts.</div></div></div>' +

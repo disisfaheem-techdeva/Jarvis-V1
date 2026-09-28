@@ -15,10 +15,15 @@ An operator can use the console to ask questions. They cannot teach the agent
 and they cannot redecorate the business's dashboard.
 """
 
+import base64
+import io
 import json
+import re
 import uuid
+import wave
 
-from fastapi import APIRouter, Body, Cookie, Header, HTTPException
+import requests
+from fastapi import APIRouter, Body, Cookie, Header, HTTPException, Response
 
 from . import business as biz
 from .ai import AIUnavailable, generate_json
@@ -159,6 +164,63 @@ def _clean_prefs(raw):
     return out
 
 
+# Appended to the classifier so the reply sounds right when spoken.
+LANG_RULE = ("\n\nLanguage: write \"reply\" in the same language and script the owner used "
+             "(English, Urdu script, or Roman Urdu). Keep it short and natural to say aloud.")
+
+
+# ------------------------------------------------------------------ voice
+# Browsers have no Urdu voice worth hearing, so Jarvis speaks through Gemini's
+# speech models. Tried in order; a busy model falls through to the next.
+_TTS_MODELS = ("gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts",
+               "gemini-2.5-flash-preview-tts")
+
+
+def _pcm_to_wav(pcm: bytes, rate: int) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm)
+    return buf.getvalue()
+
+
+def _tts(text: str, urdu: bool) -> bytes:
+    import os
+    from .ai import base_url
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not key:
+        raise HTTPException(503, "Voice is not set up on this server.")
+    style = ("Read this aloud in natural, warm Pakistani Urdu, like a friendly assistant: "
+             if urdu else "Read this aloud in a warm, friendly, clear voice: ")
+    last = "no model tried"
+    for m in _TTS_MODELS:
+        try:
+            r = requests.post(
+                f'{base_url("gemini")}/v1beta/models/{m}:generateContent',
+                params={"key": key},
+                json={"contents": [{"parts": [{"text": style + text}]}],
+                      "generationConfig": {
+                          "responseModalities": ["AUDIO"],
+                          "speechConfig": {"voiceConfig": {
+                              "prebuiltVoiceConfig": {"voiceName": "Kore"}}}}},
+                timeout=25)
+            if r.status_code >= 400:
+                last = "%s_%s" % (m, r.status_code)
+                continue
+            part = r.json()["candidates"][0]["content"]["parts"][0]["inlineData"]
+            data = base64.b64decode(part["data"])
+            mime = part.get("mimeType", "")
+            if "wav" in mime:
+                return data
+            mm = re.search(r"rate=(\d+)", mime)
+            return _pcm_to_wav(data, int(mm.group(1)) if mm else 24000)
+        except (requests.RequestException, KeyError, IndexError, ValueError) as e:
+            last = "%s: %s" % (m, type(e).__name__)
+    raise HTTPException(503, "Voice is busy right now (%s)." % last)
+
+
 def make_console_router():
     router = APIRouter(prefix="/console", tags=["console"])
 
@@ -180,7 +242,7 @@ def make_console_router():
             # No retry here on purpose. A person is sitting in front of this
             # box: a second full pass through the model chain turns a slow
             # answer into a minute of silence, and silence reads as broken.
-            out = generate_json(CLASSIFY, message,
+            out = generate_json(CLASSIFY + LANG_RULE, message,
                                 required_keys=("kind",), _retry=False)
         except AIUnavailable as e:
             # Better to say the console is deaf than to guess at an instruction
@@ -354,5 +416,23 @@ def make_console_router():
             cur.execute("SELECT dashboard_prefs FROM tenant_config WHERE tenant_id = %s", (tid,))
             row = cur.fetchone()
         return {"prefs": (row or {}).get("dashboard_prefs") or {}}
+
+    @router.post("/speak")
+    def speak(body: dict = Body(...),
+              x_tenant_id: str | None = Header(None),
+              x_role: str | None = Header(None),
+              authorization: str | None = Header(None),
+              td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        # Any signed-in user may hear Jarvis; nothing here reads or writes data.
+        try:
+            resolve_scope(x_tenant_id, x_role, authorization, td_session)
+        except AuthError as e:
+            raise HTTPException(401, str(e))
+        text = (body.get("text") or "").strip()[:600]
+        if not text:
+            raise HTTPException(400, "Nothing to say.")
+        urdu = body.get("lang") == "ur" or any("\u0600" <= c <= "\u06ff" for c in text)
+        return Response(content=_tts(text, urdu), media_type="audio/wav",
+                        headers={"Cache-Control": "no-store"})
 
     return router
