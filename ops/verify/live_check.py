@@ -183,7 +183,7 @@ def staff_and_rest(ctx, O, OP, tid, tag):
     # an unpaid one can be deleted and its bill is voided, not erased
     s, u = call(O, "POST", "/appointments/book", {"name": "QA Del " + tag, "date": "2026-09-30", "time": "09:00", "services": [{"name": "X", "price": 100}]})
     if s == 200:
-        track("customers", u["customer_id"]); uinv = sql("SELECT invoice_id FROM appointments WHERE id='%s'" % u["appointment_id"])[0][0]; track("invoices", uinv)
+        track("appointments", u["appointment_id"]); track("customers", u["customer_id"]); uinv = sql("SELECT invoice_id FROM appointments WHERE id='%s'" % u["appointment_id"])[0][0]; track("invoices", uinv)
         s, d = call(O, "DELETE", "/appointments/" + u["appointment_id"])
         st = sql("SELECT status, void_reason FROM invoices WHERE id='%s'" % uinv)[0]
         check("#2/#9", "Daily Entry delete (unpaid) voids the bill", s == 200 and st[0] == "void", "HTTP %s bill=%s" % (s, st))
