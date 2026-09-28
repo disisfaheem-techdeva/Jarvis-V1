@@ -20,12 +20,16 @@ for f in $(ls db/[0-9][0-9]_*.sql 2>/dev/null | sort); do
   n=$(basename "$f")
   # a migration newer than 29 is applied once and remembered in a marker table
   case "$n" in 0*|1*|2[0-9]_*) continue;; esac
-  applied=$(docker compose exec -T db psql -U postgres -d techdeva -tAc \
-    "CREATE TABLE IF NOT EXISTS _td_migrations(name text primary key, applied_at timestamptz default now()); SELECT 1 FROM _td_migrations WHERE name='$n'")
+  # -q: without it psql prints "CREATE TABLE" before the 1, the answer never
+  # equals "1", and every migration was re-run (and the marker insert failed)
+  docker compose exec -T db psql -U postgres -d techdeva -qtAc \
+    "CREATE TABLE IF NOT EXISTS _td_migrations(name text primary key, applied_at timestamptz default now())" >/dev/null
+  applied=$(docker compose exec -T db psql -U postgres -d techdeva -qtAc \
+    "SELECT 1 FROM _td_migrations WHERE name='$n'" | tr -d '[:space:]')
   if [ "$applied" != "1" ]; then
     echo "applying $n"
     docker compose exec -T db psql -U postgres -d techdeva -v ON_ERROR_STOP=1 -q < "$f"
-    docker compose exec -T db psql -U postgres -d techdeva -qc "INSERT INTO _td_migrations(name) VALUES ('$n')"
+    docker compose exec -T db psql -U postgres -d techdeva -qc "INSERT INTO _td_migrations(name) VALUES ('$n') ON CONFLICT DO NOTHING"
   fi
 done
 build() {  # show the tail of the build log, and stop if it failed
