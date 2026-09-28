@@ -7,7 +7,7 @@ Reads other tenants (Dr Irfan) read-only. Sessions are short-lived tokens
 minted inside the api container; no password is typed or printed.
 Standard library only.
 """
-import json, os, subprocess, sys, urllib.request, urllib.error, uuid
+import json, os, subprocess, sys, urllib.parse, urllib.request, urllib.error, uuid
 
 API = os.environ.get("API", "https://api.techdeva.net")
 PORTAL = os.environ.get("PORTAL", "https://portal.techdeva.net")
@@ -315,6 +315,51 @@ def a5_readonly():
     if cfg:
         print("  onboarding services:", cfg[0][0][:300])
         print("  onboarding prices:  ", cfg[0][1][:300])
+
+
+def phase3(ctx):
+    """#16 Facebook config vs Meta, and #5 WhatsApp send, read-only on Irfan except
+    one probe whose audit row is deleted again (proved by count)."""
+    O = ctx["owner"]
+    s, d = call(O, "GET", "/oauth/meta/diagnose")
+    print("\n#16 Meta app diagnose:", json.dumps(d, indent=1) if isinstance(d, dict) else d)
+    if isinstance(d, dict) and s == 200:
+        check("#16", "Meta app id + secret accepted by Meta", d.get("app_check") == "ok",
+              d.get("app_error") or ("app '%s'" % d.get("app_name")))
+        check("#16", "redirect_uri is public https, same for dialog and exchange",
+              d.get("redirect_uri", "").startswith("https://") and not d.get("redirect_base_is_localhost"), d.get("redirect_uri"))
+        check("#16", "no stray whitespace in META_APP_SECRET in .env", not d.get("secret_had_whitespace"),
+              "secret length %s" % d.get("secret_length"))
+    else:
+        check("#16", "diagnose endpoint answered", False, "HTTP %s %s" % (s, d))
+    err = sql("SELECT provider, status, coalesce(last_error,'') FROM integrations WHERE tenant_id='%s' AND provider IN ('meta','instagram')" % IRFAN)
+    print("  Irfan's Meta integration rows (read-only):", err or "none")
+    # --- WhatsApp, Irfan, read-only
+    conn = sql("SELECT status, coalesce(phone_number,''), agent_key FROM whatsapp_connections WHERE tenant_id='%s'" % IRFAN)
+    print("\n#5 Irfan WhatsApp connection:", conn or "none")
+    uid = sql("SELECT id FROM users WHERE tenant_id='%s' ORDER BY (role='owner') DESC LIMIT 1" % IRFAN)
+    if not (conn and uid):
+        check("#5", "Irfan has a WhatsApp agent assigned", False, "no whatsapp_connections row or no user")
+        return
+    I = token(IRFAN, "owner", uid[0][0])
+    s, chats = call(I, "GET", "/whatsapp/chats")
+    lst = chats.get("chats", []) if isinstance(chats, dict) else []
+    check("#5", "Irfan's inbox reads through pairctl", s == 200, "HTTP %s, %d chats" % (s, len(lst)))
+    if lst:
+        s, m = call(I, "GET", "/whatsapp/chats/" + urllib.parse.quote(lst[0]["session_id"], safe=""))
+        print("  roles in the latest chat (A7 label check; 30 chars each):")
+        for x in (m.get("messages", []) if isinstance(m, dict) else [])[:8]:
+            print("    %-9s %s" % (x.get("role"), str(x.get("content", "")).replace("\n", " ")[:30]))
+    probe = "td-probe-" + uuid.uuid4().hex[:8]
+    before = sql("SELECT count(*) FROM executions WHERE tenant_id='%s' AND action='whatsapp.send'" % IRFAN)[0][0]
+    s, r = call(I, "POST", "/whatsapp/chats/%s/send" % probe, {"text": "probe - never delivered (no such conversation)"})
+    reason = r.get("detail") if isinstance(r, dict) else r
+    refused_honestly = s in (409, 502, 503) and not (isinstance(r, dict) and r.get("sent"))
+    check("#5", "a refused send shows the real reason, never 'sent'", refused_honestly,
+          "HTTP %s %s" % (s, reason))
+    sql("DELETE FROM executions WHERE tenant_id='%s' AND action='whatsapp.send' AND resource_id='%s'" % (IRFAN, probe))
+    after = sql("SELECT count(*) FROM executions WHERE tenant_id='%s' AND action='whatsapp.send'" % IRFAN)[0][0]
+    check("DATA", "Irfan's audit rows back to where they started after the probe", before == after, "%s -> %s" % (before, after))
 
 
 def main():

@@ -497,6 +497,48 @@ def make_console_router():
             row = cur.fetchone()
         return {"prefs": (row or {}).get("dashboard_prefs") or {}}
 
+    @router.put("/prefs/pins")
+    def save_pins(body: dict = Body(...),
+                  x_tenant_id: str | None = Header(None),
+                  x_role: str | None = Header(None),
+                  authorization: str | None = Header(None),
+                  td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Which sections each role sees pinned on its Dashboard.
+
+        Stored in the same dashboard_prefs the console writes (no new table),
+        keyed by the platform's two tenant roles. Owner only: deciding what the
+        front desk sees first is the owner's call."""
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        if role not in ("owner", "techdeva_admin"):
+            raise HTTPException(403, "Only the business owner can choose what is pinned.")
+        raw = body.get("pinned_by_role")
+        if not isinstance(raw, dict):
+            raise HTTPException(400, "Send pinned_by_role as {owner: [...], operator: [...]}.")
+        clean = {}
+        for r in ("owner", "operator"):
+            ids = raw.get(r) or []
+            if not isinstance(ids, list) or len(ids) > 12:
+                raise HTTPException(400, "Each role can pin at most 12 sections.")
+            ok = []
+            for x in ids:
+                x = str(x)
+                if not re.fullmatch(r"[a-z]{2,20}", x):
+                    raise HTTPException(400, "Unknown section: %s" % x[:30])
+                if x not in ok:
+                    ok.append(x)
+            clean[r] = ok
+        with tenant_session(tid, role) as cur:
+            cur.execute("""INSERT INTO tenant_config (tenant_id, dashboard_prefs)
+                           VALUES (%s, %s::jsonb)
+                           ON CONFLICT (tenant_id) DO UPDATE
+                             SET dashboard_prefs = tenant_config.dashboard_prefs || EXCLUDED.dashboard_prefs
+                           RETURNING dashboard_prefs""",
+                        (tid, json.dumps({"pinned_by_role": clean})))
+            merged = cur.fetchone()["dashboard_prefs"]
+            record(cur, action="dashboard.pins", resource="tenant_config", resource_id=str(tid),
+                   actor=str(uid), actor_type="human", status="ok", detail=clean, error=None)
+        return {"prefs": merged}
+
     @router.post("/speak")
     def speak(body: dict = Body(...),
               x_tenant_id: str | None = Header(None),

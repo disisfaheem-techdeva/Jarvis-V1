@@ -141,6 +141,41 @@ function chatMessages(sid) {
   } finally { d.close(); }
 }
 
+// ---- sending a reply from the dashboard ---------------------------------
+// The agent's own WhatsApp bridge listens on 127.0.0.1 inside the agent's
+// network namespace and refuses non-loopback Host headers. pairctl reaches it
+// only when it runs in that same namespace (network_mode: "service:<agent>"
+// in the agent template). Anywhere else the connect fails and the caller gets
+// that failure verbatim -- never a pretend "sent".
+const AGENT_BRIDGE_PORT = parseInt(process.env.PAIRCTL_AGENT_BRIDGE_PORT || '3000', 10);
+
+function chatJid(sid) {
+  const d = openDb();
+  if (!d) return null;
+  try {
+    const r = d.prepare(`SELECT user_id FROM sessions WHERE id = ? AND source = 'whatsapp'`).get(sid);
+    if (!r || !r.user_id) return null;
+    const u = String(r.user_id);
+    return u.includes('@') ? u : u.replace(/\D/g, '') + '@s.whatsapp.net';
+  } finally { d.close(); }
+}
+
+function bridgeSend(chatId, message) {
+  return new Promise((resolve) => {
+    const body = JSON.stringify({ chatId, message });
+    const req = http.request({ host: '127.0.0.1', port: AGENT_BRIDGE_PORT, path: '/send', method: 'POST', timeout: 30000,
+      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body),
+                 host: '127.0.0.1:' + AGENT_BRIDGE_PORT, 'x-internal-key': KEY } }, (res) => {
+      let b = '';
+      res.on('data', c => b += c);
+      res.on('end', () => { let j = null; try { j = JSON.parse(b); } catch (e) {} resolve({ status: res.statusCode, body: j, raw: b.slice(0, 300) }); });
+    });
+    req.on('error', (e) => resolve({ status: 0, error: e.code || e.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ status: 0, error: 'timed out after 30s' }); });
+    req.end(body);
+  });
+}
+
 function readBody(req) {
   return new Promise((ok, bad) => {
     let b = '';
@@ -238,8 +273,32 @@ const server = http.createServer(async (req, res) => {
     catch (e) { log('lesson write failed', e.message); return send(res, 500, { error: 'could not write SOUL.md' }); }
   }
 
+  if (req.method === 'POST' && url === '/send') {
+    let body;
+    try { body = JSON.parse((await readBody(req)) || '{}'); }
+    catch (e) { return send(res, 400, { error: 'bad json' }); }
+    const text = String(body.text || '').trim();
+    if (!text || text.length > 4000) return send(res, 400, { error: 'text must be 1 to 4000 characters' });
+    let jid;
+    try { jid = chatJid(String(body.session_id || '')); }
+    catch (e) { return send(res, 500, { error: 'could not read the conversation: ' + e.message }); }
+    if (!jid) return send(res, 404, { error: 'no such conversation' });
+    const r = await bridgeSend(jid, text);
+    if (r.status === 0) {
+      log('send failed: bridge unreachable', r.error);
+      return send(res, 502, { error: `cannot reach the agent's WhatsApp bridge on 127.0.0.1:${AGENT_BRIDGE_PORT} (${r.error}). ` +
+                                     'This pairctl does not share the agent network, or the agent is down.' });
+    }
+    if (r.status !== 200 || !r.body || !r.body.success) {
+      return send(res, 502, { error: `the WhatsApp bridge refused (HTTP ${r.status}): ` + ((r.body && r.body.error) || r.raw || 'no reason given') });
+    }
+    if (r.body.guarded) return send(res, 502, { error: 'the bridge held this message back (reliability guard)' });
+    log('sent a dashboard reply to', jid.replace(/\d(?=\d{4})/g, '*'));
+    return send(res, 200, { agent: AGENT, sent: true, message_id: r.body.messageId || null, at: new Date().toISOString() });
+  }
+
   if (req.method === 'GET' && url === '/health') {
-    return send(res, 200, { ok: true, agent: AGENT, pairing: !!child });
+    return send(res, 200, { ok: true, agent: AGENT, pairing: !!child, can_send: true });
   }
 
   send(res, 404, { error: 'not found' });

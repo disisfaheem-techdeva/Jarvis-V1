@@ -572,7 +572,9 @@ def list_events(x_tenant_id: str | None = Header(None), x_role: str | None = Hea
 # ======================== OAuth — client account connections ========================
 from fastapi.responses import RedirectResponse, HTMLResponse
 from .oauth import (meta_auth_url, meta_exchange_code, google_auth_url,
-                    google_exchange_code, save_connection)
+                    google_exchange_code, save_connection, save_failure,
+                    meta_diagnose, MetaOAuthError)
+import html as _html
 
 
 @app.get("/connect/{provider}")
@@ -610,8 +612,20 @@ def meta_callback(code: str = "", state: str = "", error: str = ""):
         return HTMLResponse("<h2>Missing tenant</h2>", 400)
     try:
         token_data = meta_exchange_code(code)
+    except MetaOAuthError as e:
+        # Meta's own reason, shown to the person and kept on the integration
+        # row so the Integrations page says why. Never the secret or the code.
+        why = e.describe()
+        print("[oauth] meta callback refused: %s" % why, flush=True)
+        save_failure(tenant_id, "meta", why)
+        return HTMLResponse(
+            "<html><body style='background:#0A0E1A;color:#EAF1FF;font-family:sans-serif;padding:40px;max-width:720px;margin:auto'>"
+            "<h2 style='color:#E06A6A'>Facebook did not connect</h2><p>" + _html.escape(why) + "</p>"
+            "<p style='color:#8A99B8'>Nothing was saved. Send this message to TechDeva; it says exactly which setting to fix.</p>"
+            "<p><a style='color:#6C8CFF' href='/dashboard#/integrations'>Back to the dashboard</a></p></body></html>", 400)
     except Exception as e:
-        return HTMLResponse(f"<h2>Token exchange failed</h2><p>{e}</p>", 500)
+        print("[oauth] meta callback failed: %s" % type(e).__name__, flush=True)
+        return HTMLResponse("<h2>Token exchange failed</h2><p>%s</p>" % _html.escape(type(e).__name__), 500)
     ad_accts = token_data.get("ad_accounts", [])
     ext = ad_accts[0]["account_id"] if ad_accts else ""
     save_connection(P, tenant_id, "meta", token_data, ext)
@@ -624,6 +638,22 @@ def meta_callback(code: str = "", state: str = "", error: str = ""):
         "<p>You can close this window. TechDeva is ready to run your campaigns.</p>"
         "</body></html>"
     )
+
+
+@app.get("/oauth/meta/diagnose")
+def meta_diagnose_route(x_tenant_id: str | None = Header(None),
+                        x_role: str | None = Header(None),
+                        authorization: str | None = Header(None),
+                        td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+    """Is the Meta app configured, and does Meta accept its id + secret?
+    Owner or TechDeva only. Returns no secret, only facts about it."""
+    try:
+        tid, role, _uid = resolve_scope(x_tenant_id, x_role, authorization, td_session)
+    except AuthError as e:
+        raise HTTPException(e.status, e.message)
+    if role not in ("owner", "techdeva_admin"):
+        raise HTTPException(403, "Only the business owner can see this.")
+    return meta_diagnose()
 
 
 @app.get("/oauth/google/callback")

@@ -270,7 +270,78 @@ def make_whatsapp_router():
         with tenant_session(tid, role) as cur:
             r = _row(cur, tid)
         data = _pairctl_json(r["pairctl_url"], "/chats/" + urllib.parse.quote(session_id, safe=""))
-        return {"messages": data.get("messages", [])}
+        msgs = data.get("messages", [])
+        # Replies sent from the dashboard are not in the agent's own history, so
+        # they come from the audit log (one row per attempt, sent or not).
+        with tenant_session(tid, role) as cur:
+            cur.execute("""SELECT at, status, detail, error FROM executions
+                            WHERE action = 'whatsapp.send' AND resource_id = %s
+                            ORDER BY at LIMIT 200""", (session_id,))
+            for x in cur.fetchall():
+                d = x["detail"] if isinstance(x["detail"], dict) else {}
+                msgs.append({"role": "owner", "content": d.get("text") or "", "at": x["at"].isoformat() if x["at"] else None,
+                             "status": "sent" if x["status"] == "ok" else "failed", "error": x["error"]})
+        msgs.sort(key=lambda m: m.get("at") or "")
+        return {"messages": msgs}
+
+    @router.post("/chats/{session_id}/send")
+    def send_reply(session_id: str, body: dict,
+                   x_tenant_id: str | None = Header(None),
+                   x_role: str | None = Header(None),
+                   authorization: str | None = Header(None),
+                   td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Send a person's reply into a WhatsApp conversation.
+
+        It goes through this tenant's own pairctl (the pairctl URL comes from
+        the tenant's row, never the request) with the internal key, and on to
+        the agent's bridge. Whatever the chain answers is what the dashboard
+        shows: a refusal is reported with its reason, never as "sent"."""
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        if not re.fullmatch(r"[\w.:@+\-]{1,200}", session_id or ""):
+            raise HTTPException(400, "That is not a conversation id.")
+        text = str((body or {}).get("text") or "").strip()
+        if not text:
+            raise HTTPException(400, "Type a message first.")
+        if len(text) > 4000:
+            raise HTTPException(400, "That message is too long (4000 characters at most).")
+        with tenant_session(tid, role) as cur:
+            r = _row(cur, tid)
+        if r["status"] != "connected":
+            raise HTTPException(409, "This WhatsApp number is not connected, so nothing can be sent. "
+                                     "Open WhatsApp in the menu and connect it.")
+        key = _key()
+        if not key:
+            raise HTTPException(503, "WhatsApp is not configured on this server.")
+        req = urllib.request.Request(
+            r["pairctl_url"].rstrip("/") + "/send", method="POST",
+            data=json.dumps({"session_id": session_id, "text": text}).encode(),
+            headers={"x-internal-key": key, "content-type": "application/json"})
+        status, reason, out = None, None, {}
+        try:
+            with urllib.request.urlopen(req, timeout=40) as resp:
+                out = json.loads(resp.read().decode() or "{}")
+                status = resp.status
+        except urllib.error.HTTPError as e:
+            status = e.code
+            try:
+                reason = (json.loads(e.read().decode() or "{}") or {}).get("error")
+            except ValueError:
+                reason = None
+            if e.code == 404 and not reason:
+                reason = "this agent's WhatsApp service has no send route yet (older pairctl)"
+            elif e.code == 404:
+                reason = {"not found": "this agent's WhatsApp service has no send route yet (older pairctl)"}.get(reason, reason)
+        except Exception as e:
+            status, reason = 0, "the WhatsApp service for this business is not reachable (%s)" % type(e).__name__
+        ok = status == 200 and out.get("sent") is True
+        with tenant_session(tid, role) as cur:
+            record(cur, action="whatsapp.send", resource="whatsapp_messages", resource_id=session_id,
+                   actor=str(uid), actor_type="human", status="ok" if ok else "error",
+                   detail={"text": text, "message_id": out.get("message_id"), "at": out.get("at")},
+                   error=None if ok else ("HTTP %s: %s" % (status, reason)))
+        if not ok:
+            raise HTTPException(502, "Not sent. %s" % (reason or ("the WhatsApp service answered HTTP %s" % status)))
+        return {"sent": True, "message_id": out.get("message_id"), "at": out.get("at")}
 
     @router.post("/sync-lessons")
     def sync(x_tenant_id: str | None = Header(None),

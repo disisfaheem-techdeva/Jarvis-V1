@@ -2139,13 +2139,30 @@ function currentView(){
 // A degraded platform should be readable from the screen the client is already
 // looking at. Before Part 4 this lived in a log file on the server, which is
 // why a workforce that had stopped thinking went unnoticed for weeks.
+/* A9: this used to call GET /incidents on EVERY redraw, and the shell redraws
+   each time any section's data arrives -- about once a second while a page
+   loads. Now: at most one call a minute, only while the tab is visible, and
+   every redraw paints the last answer from memory. */
+var INC = { html: '', at: 0, busy: false };
+var INC_EVERY_MS = 60000;
 function incidentBar(){
+  var el = document.getElementById('incbar');
+  if (el) el.innerHTML = INC.html;
+  if (INC.busy || document.hidden || Date.now() - INC.at < INC_EVERY_MS) return;
+  INC.busy = true; INC.at = Date.now();
   api('/incidents').then(function(r){
-    var el = document.getElementById('incbar');
-    if (!el || !r.ok) return;
-    var items = (r.data && r.data.incidents) || [];
-    if (!items.length) { el.innerHTML = ''; return; }
-    el.innerHTML = items.slice(0, 3).map(function(i){
+    INC.busy = false;
+    if (!r.ok) return;
+    INC.html = incidentHTML((r.data && r.data.incidents) || []);
+    var e2 = document.getElementById('incbar');
+    if (e2) e2.innerHTML = INC.html;
+  });
+}
+document.addEventListener('visibilitychange', function(){ if (!document.hidden && S.me) incidentBar(); });
+setInterval(function(){ if (S.me) incidentBar(); }, INC_EVERY_MS);
+function incidentHTML(items){
+    if (!items.length) return '';
+    return items.slice(0, 3).map(function(i){
       var critical = i.severity === 'critical';
       return '<div style="margin:0 0 12px;padding:12px 14px;border-radius:10px;' +
         'border:1px solid ' + (critical ? 'var(--danger)' : 'var(--warn)') + ';' +
@@ -2157,7 +2174,6 @@ function incidentBar(){
         esc(String(i.opened_at).slice(0, 16).replace('T', ' ')) +
         (i.seen_count > 1 ? ' - seen ' + i.seen_count + ' times' : '') + '</div></div>';
     }).join('');
-  });
 }
 
 /* ==== Beauty-parity sections ==========================================
@@ -3715,12 +3731,106 @@ VIEWS.settings = function(){
   return out;
 };
 
+/* -------------------------------------------------------- WhatsApp Inbox
+   Who said what comes from the agent's own history: role 'user' is the
+   customer, 'assistant' is the AI agent. 'owner' rows are replies a person
+   sent from here (kept in the audit log, so they survive a refresh). */
+var IBX_WHO = { user: 'Customer', assistant: 'AI agent', owner: 'You (dashboard)' };
+IBX.draft = ''; IBX.sending = false; IBX.note = null;
+function ibxSidParam(){ var m = /[?&]sid=([^&]+)/.exec(location.hash || ''); return m ? decodeURIComponent(m[1]) : null; }
+VIEWS.inbox = function(){
+  var out = '<h1>WhatsApp Inbox</h1><p class="sub">Every WhatsApp conversation with your customers. Reply here and it is sent from your business number.</p>';
+  var want = ibxSidParam();
+  if (want && IBX.sel !== want) { setTimeout(function(){ ibxOpen(want); }, 0); }
+  ibxLoad(false);
+  if (IBX.data === undefined) return out + panel('Conversations', loading('Reading your conversations...'));
+  if (IBX.data.error) return out + panel('Conversations', errState(IBX.data.error +
+    ' If your number is not connected yet, open WhatsApp in the menu and scan the QR code.'));
+  var chats = IBX.data.chats || [];
+  var head = '<button class="btn" id="ibx_ref">Refresh</button>';
+  if (!chats.length) return out + panel('Conversations', empty('No conversations yet',
+    IBX.data.connected ? 'When customers message your WhatsApp, their chats appear here.'
+                       : 'Connect your WhatsApp number first: open WhatsApp in the menu and scan the QR code.'), head) + ibxWire();
+  var list = chats.map(function(c){
+    return '<div class="ibx-item' + (IBX.sel === c.session_id ? ' sel' : '') + '" data-sid="' + esc(c.session_id) + '">' +
+      '<div style="display:flex;justify-content:space-between;gap:8px"><strong>' + esc(c.phone ? '+' + c.phone : 'Unknown number') +
+      '</strong><span class="card-note">' + esc(c.messages) + ' msgs</span></div>' +
+      '<div class="card-note" style="margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(c.last || '') + '</div>' +
+      '<div class="card-note">' + (c.last_at ? when(c.last_at) : '') + '</div></div>';
+  }).join('');
+  var chat, reply = '';
+  if (!IBX.sel) chat = empty('Select a conversation', 'Tap a chat to read it and reply.');
+  else if (IBX.msgs === null) chat = loading('Opening the chat...');
+  else if (IBX.msgs.error) chat = errState(IBX.msgs.error);
+  else {
+    chat = IBX.msgs.map(function(m){
+      var mine = m.role === 'assistant' || m.role === 'owner';
+      var st = m.role === 'owner' ? (m.status === 'sent' ? ' · <span style="color:var(--growth)">Sent ✓</span>'
+                                    : ' · <span style="color:var(--danger)" title="' + esc(m.error || '') + '">Not sent</span>') : '';
+      return '<div class="bub ' + (mine ? 'assistant' : 'user') + (m.role === 'owner' ? ' owner' : '') + '">' + esc(m.content) +
+             '<div class="t">' + esc(IBX_WHO[m.role] || m.role) + (m.at ? ' · ' + when(m.at) : '') + st + '</div>' +
+             (m.role === 'owner' && m.status !== 'sent' && m.error ? '<div class="t" style="color:var(--danger)">' + esc(m.error) + '</div>' : '') + '</div>';
+    }).join('') || empty('Empty chat', '');
+    var connected = IBX.data.connected;
+    reply = '<div class="ibx-reply">' +
+      (connected ? '' : '<div class="card-note" style="color:var(--warn)">Your number is not connected, so replies cannot be sent.</div>') +
+      '<textarea class="fld" id="ibx_text" rows="2" maxlength="4000" placeholder="Type a reply to this customer…"' + (connected ? '' : ' disabled') + '>' + esc(IBX.draft) + '</textarea>' +
+      '<div style="display:flex;gap:8px;align-items:center;margin-top:6px"><button class="btn primary" id="ibx_send"' + (connected && !IBX.sending ? '' : ' disabled') + '>' +
+      (IBX.sending ? 'Sending…' : 'Send') + '</button><span id="ibx_note" class="card-note" style="' + (IBX.note && IBX.note.bad ? 'color:var(--danger)' : 'color:var(--growth)') + '">' +
+      esc(IBX.note ? IBX.note.text : '') + '</span></div>' +
+      '<div class="card-note">Your AI agent keeps answering this chat too. Replies sent here go out from your business number.</div></div>';
+  }
+  out += panel('Conversations', '<div class="ibx"><div class="ibx-list">' + list + '</div><div><div class="ibx-chat" id="ibx_chat">' +
+    chat + '</div>' + reply + '</div></div>', '<span class="pill count">' + chats.length + '</span> ' + head);
+  return out + ibxWire();
+};
+function ibxWire(){
+  setTimeout(function(){
+    var r = document.getElementById('ibx_ref');
+    if (r) r.onclick = function(){ IBX.data = undefined; ibxLoad(true); if (IBX.sel) ibxOpen(IBX.sel); };
+    document.querySelectorAll('[data-sid]').forEach(function(el){
+      el.onclick = function(){ IBX.draft = ''; IBX.note = null; ibxOpen(el.getAttribute('data-sid')); };
+    });
+    var box = document.getElementById('ibx_chat');
+    if (box) box.scrollTop = box.scrollHeight;
+    var t = document.getElementById('ibx_text'), b = document.getElementById('ibx_send');
+    if (t) { t.oninput = function(){ IBX.draft = t.value; };
+             t.onkeydown = function(e){ if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (b) b.click(); } }; }
+    if (b) b.onclick = function(){
+      var text = (t && t.value || '').trim(), sid = IBX.sel;
+      if (!text) { IBX.note = { text: 'Type a message first.', bad: true }; renderShell(); return; }
+      IBX.sending = true; IBX.note = null; renderShell();
+      api('/whatsapp/chats/' + encodeURIComponent(sid) + '/send', { method: 'POST', body: { text: text } }).then(function(res){
+        IBX.sending = false;
+        if (res.ok) { IBX.draft = ''; IBX.note = { text: 'Sent at ' + when(res.data.at || new Date().toISOString()) + '.', bad: false }; }
+        else IBX.note = { text: (res.data && res.data.detail) || ('Not sent (HTTP ' + res.status + ').'), bad: true };
+        if (IBX.sel === sid) ibxOpen(sid); else renderShell();
+      });
+    };
+  }, 0);
+  return '';
+}
+(function(){
+  var st = document.createElement('style');
+  st.textContent = '.bub.owner{background:rgba(52,208,124,.14);border:1px solid rgba(52,208,124,.35)}' +
+    '.ibx-reply{margin-top:10px}.ibx-reply textarea{width:100%;resize:vertical}';
+  document.head.appendChild(st);
+})();
+
+/* The whole shell is redrawn whenever data arrives. Keep the sidebar where the
+   person scrolled it (#17), keep the page where it was while the same section
+   redraws, and go to the top only when the section changes. */
+var RENDER_LAST_VIEW = null;
 function renderShell(){
   var v = currentView();
   var id = bizIdentity();
+  var oldSb = root.querySelector('.sidebar');
+  var sbTop = oldSb ? oldSb.scrollTop : (S.sbTop || 0);
+  var sameView = RENDER_LAST_VIEW === v, winY = window.scrollY;
+  var focusId = document.activeElement && document.activeElement.id;
   var body;
   try { body = VIEWS[v](); }
-  catch (e) { body = errState('Something went wrong rendering this section.'); }
+  catch (e) { console.error(e); body = errState('Something went wrong rendering this section.'); }
   root.innerHTML =
     '<div class="scrim' + (S.navOpen ? ' on' : '') + '" id="scrim"></div>' +
     '<div class="app">' +
@@ -3747,6 +3857,11 @@ function renderShell(){
   if (lo) lo.onclick = function(){
     api('/auth/logout', {method:'POST'}).then(function(){ S.me = null; gate(); });
   };
+  var sb = root.querySelector('.sidebar');
+  if (sb) { sb.scrollTop = sbTop; sb.onscroll = function(){ S.sbTop = sb.scrollTop; }; }
+  if (sameView) window.scrollTo(0, winY); else window.scrollTo(0, 0);
+  if (sameView && focusId && focusId.indexOf('ce_') !== 0) { var f = document.getElementById(focusId); if (f && f.focus && f.tagName !== 'BUTTON') try { f.focus({preventScroll: true}); } catch (e) {} }
+  RENDER_LAST_VIEW = v;
   incidentBar();
 }
 
