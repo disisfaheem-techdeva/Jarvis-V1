@@ -271,6 +271,13 @@ def make_whatsapp_router():
             r = _row(cur, tid)
         data = _pairctl_json(r["pairctl_url"], "/chats/" + urllib.parse.quote(session_id, safe=""))
         msgs = data.get("messages", [])
+        # The agent stores its own retry nudges ("[System: Your previous
+        # response ...]") as role 'user'. They quote the agent's earlier reply,
+        # which is why agent text appeared under "Customer" (A7). They were
+        # never sent to or by the customer.
+        for m in msgs:
+            if m.get("role") == "user" and str(m.get("content") or "").lstrip().lower().startswith(("[system:", "[system note")):
+                m["role"] = "system"
         # Replies sent from the dashboard are not in the agent's own history, so
         # they come from the audit log (one row per attempt, sent or not).
         with tenant_session(tid, role) as cur:

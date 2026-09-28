@@ -13,6 +13,7 @@ The client never shares their password with TechDeva. Tokens are stored per-tena
 and isolated by Row-Level Security — one client's credentials can never leak to another.
 """
 import os
+import re
 import json
 import urllib.error
 import urllib.request
@@ -22,8 +23,17 @@ from datetime import datetime, timezone
 # ---------- config ----------
 # .strip(): a trailing space or newline pasted into .env makes Meta answer
 # "Error validating client secret" (HTTP 400) on the token exchange.
-META_APP_ID = os.environ.get("META_APP_ID", "").strip()
-META_APP_SECRET = os.environ.get("META_APP_SECRET", "").strip()
+META_APP_ID = os.environ.get("META_APP_ID", "").strip().strip("\"'")
+def _unquote(v):
+    """A value written as "abc" or 'abc' in .env can reach the process with the
+    quotes still on it; Meta then rejects the signature (error 190)."""
+    v = (v or "").strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+        v = v[1:-1].strip()
+    return v
+
+
+META_APP_SECRET = _unquote(os.environ.get("META_APP_SECRET", ""))
 _RAW_META_SECRET = os.environ.get("META_APP_SECRET", "")
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_SECRET = os.environ.get("GOOGLE_SECRET", "")
@@ -91,6 +101,9 @@ def meta_diagnose() -> dict:
         "secret_set": bool(META_APP_SECRET),
         "secret_length": len(META_APP_SECRET),
         "secret_had_whitespace": _RAW_META_SECRET != _RAW_META_SECRET.strip(),
+        "secret_had_quotes": _unquote(_RAW_META_SECRET) != _RAW_META_SECRET.strip(),
+        # Meta app secrets are 32 lowercase hex characters.
+        "secret_format_ok": bool(re.fullmatch(r"[0-9a-f]{32}", META_APP_SECRET)),
         "redirect_uri": meta_redirect_uri(),
         "redirect_base_is_localhost": "localhost" in OAUTH_REDIRECT_BASE,
     }

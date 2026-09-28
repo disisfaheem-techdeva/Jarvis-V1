@@ -3735,7 +3735,7 @@ VIEWS.settings = function(){
    Who said what comes from the agent's own history: role 'user' is the
    customer, 'assistant' is the AI agent. 'owner' rows are replies a person
    sent from here (kept in the audit log, so they survive a refresh). */
-var IBX_WHO = { user: 'Customer', assistant: 'AI agent', owner: 'You (dashboard)' };
+var IBX_WHO = { user: 'Customer', assistant: 'AI agent', owner: 'You (dashboard)', system: 'Internal note to the AI (the customer never saw this)' };
 IBX.draft = ''; IBX.sending = false; IBX.note = null;
 function ibxSidParam(){ var m = /[?&]sid=([^&]+)/.exec(location.hash || ''); return m ? decodeURIComponent(m[1]) : null; }
 VIEWS.inbox = function(){
@@ -3764,6 +3764,8 @@ VIEWS.inbox = function(){
   else if (IBX.msgs.error) chat = errState(IBX.msgs.error);
   else {
     chat = IBX.msgs.map(function(m){
+      if (m.role === 'system') return '<details class="bub sys"><summary class="t">' + esc(IBX_WHO.system) + (m.at ? ' · ' + when(m.at) : '') +
+        '</summary><div style="white-space:pre-wrap">' + esc(m.content) + '</div></details>';
       var mine = m.role === 'assistant' || m.role === 'owner';
       var st = m.role === 'owner' ? (m.status === 'sent' ? ' · <span style="color:var(--growth)">Sent ✓</span>'
                                     : ' · <span style="color:var(--danger)" title="' + esc(m.error || '') + '">Not sent</span>') : '';
@@ -3812,7 +3814,8 @@ function ibxWire(){
 }
 (function(){
   var st = document.createElement('style');
-  st.textContent = '.bub.owner{background:rgba(52,208,124,.14);border:1px solid rgba(52,208,124,.35)}' +
+  st.textContent = '.bub.sys{max-width:100%;margin:6px auto;background:transparent;border:1px dashed var(--line);color:var(--muted);font-size:12px}' +
+    '.bub.sys summary{cursor:pointer}.bub.owner{background:rgba(52,208,124,.14);border:1px solid rgba(52,208,124,.35)}' +
     '.ibx-reply{margin-top:10px}.ibx-reply textarea{width:100%;resize:vertical}';
   document.head.appendChild(st);
 })();
