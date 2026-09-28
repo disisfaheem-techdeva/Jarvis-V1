@@ -2158,6 +2158,545 @@ function incidentBar(){
   });
 }
 
+/* ==== Beauty-parity sections ==========================================
+   Daily Entry, WhatsApp Inbox, Marketing, Attendance, Calendar, Hermes AI,
+   Team and HR -- the sections the Beauty clinic's own CRM has, built on the
+   platform's tenant-fenced API so every client gets them. */
+(function(){
+  var st = document.createElement('style');
+  st.textContent =
+    '.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}' +
+    '.cal-h{font-size:12px;color:var(--muted);text-align:center;padding:4px 0}' +
+    '.cal-c{min-height:64px;border:1px solid var(--line);border-radius:8px;padding:6px;cursor:pointer;background:var(--card)}' +
+    '.cal-c.off{border:none;background:transparent;cursor:default}' +
+    '.cal-c.today{border-color:var(--accent,#c9a84c)}' +
+    '.cal-c.sel{outline:2px solid var(--accent,#c9a84c)}' +
+    '.cal-n{font-size:12px;color:var(--muted)}' +
+    '.cal-b{margin-top:6px;font-size:12px;font-weight:600;color:var(--accent,#c9a84c)}' +
+    '.ibx{display:grid;grid-template-columns:minmax(220px,1fr) 2fr;gap:12px}' +
+    '@media(max-width:760px){.ibx{grid-template-columns:1fr}.cal-c{min-height:48px;padding:4px}}' +
+    '.ibx-list{max-height:520px;overflow:auto;border:1px solid var(--line);border-radius:10px}' +
+    '.ibx-item{padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer}' +
+    '.ibx-item.sel{background:rgba(201,168,76,.10)}' +
+    '.ibx-chat{max-height:520px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:12px}' +
+    '.bub{max-width:80%;padding:8px 12px;border-radius:12px;margin:6px 0;white-space:pre-wrap;word-break:break-word}' +
+    '.bub.user{background:var(--card);border:1px solid var(--line)}' +
+    '.bub.assistant{background:rgba(201,168,76,.14);margin-left:auto}' +
+    '.bub .t{font-size:11px;color:var(--muted);margin-top:4px}' +
+    '.att-btn{padding:4px 8px;font-size:12px}' +
+    '.att-btn.on{background:var(--accent,#c9a84c);color:#111;border-color:transparent}' +
+    '.bar{height:8px;border-radius:4px;background:var(--accent,#c9a84c)}';
+  document.head.appendChild(st);
+})();
+
+function todayISO(){
+  var d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function dayOf(ts){
+  var d = new Date(ts);
+  if (isNaN(d)) return String(ts || '').slice(0, 10);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function hhmm(ts){
+  var d = new Date(ts);
+  return isNaN(d) ? '' : String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+function items(key){ return (S[key] && S[key].items) || []; }
+function nameOf(list, id){
+  for (var i = 0; i < list.length; i++) if (String(list[i].id) === String(id)) return list[i].name;
+  return '';
+}
+function statTile(label, value){
+  return '<div class="panel" style="flex:1;min-width:140px;margin:0"><div class="card-note">' + esc(label) +
+         '</div><div style="font-size:22px;font-weight:700;margin-top:4px">' + value + '</div></div>';
+}
+function tiles(list){ return '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0">' + list.join('') + '</div>'; }
+
+/* ---------------------------------------------------------- Daily Entry */
+var DE_DAY = null, DE_LINES = [];
+VIEWS.dailyentry = function(){
+  if (!DE_DAY) DE_DAY = todayISO();
+  var out = '<h1>Daily Entry</h1><p class="sub">Record what actually happened today: who came, what was done, what was paid. ' +
+            'A booking on its own is not revenue.</p>';
+  var ok = need('invoices', '/business/invoices') & need('payments', '/business/payments') &
+           need('customers', '/business/customers') & need('services', '/business/services') &
+           need('staff', '/business/staff');
+  if (!ok) return out + panel('Daily Entry', loading('Loading today...'));
+  if (S.invoices === null || S.payments === null)
+    return out + panel('Daily Entry', errState('The money service did not respond.'));
+
+  var custs = items('customers'), svcs = items('services');
+  var dayInv = items('invoices').filter(function(i){ return String(i.issued_on || '').slice(0, 10) === DE_DAY && !i.voided_at; });
+  var dayPay = items('payments').filter(function(p){ return dayOf(p.paid_at) === DE_DAY; });
+  var billed = dayInv.reduce(function(a, i){ return a + Number(i.total || 0); }, 0);
+  var got = dayPay.reduce(function(a, p){ return a + Number(p.amount || 0); }, 0);
+  out += row() + inp('de_day', 'Day', 'date', 150) + '</div>';
+  out += tiles([statTile('Visits recorded', dayInv.length), statTile('Billed', money(billed)),
+                statTile('Collected', money(got)), statTile('Still owed', money(Math.max(billed - got, 0)))]);
+
+  var lines = DE_LINES.map(function(l, i){
+    return '<tr><td>' + esc(l.description) + '</td><td>' + money(l.unit_price) +
+           '</td><td><button class="btn" data-deline="' + i + '">Remove</button></td></tr>';
+  }).join('');
+  var lineTotalSum = DE_LINES.reduce(function(a, l){ return a + Number(l.unit_price || 0); }, 0);
+  out += panel('Record a visit',
+    row() + select('de_cust', custs, 'Existing customer') +
+      inp('de_newname', 'Or new customer name', 'text', 170) + inp('de_newphone', 'Phone', 'tel', 130) + '</div>' +
+    row() + select('de_svc', svcs, 'Service') + inp('de_price', 'Price', 'number', 110) +
+      '<button class="btn" id="de_addline">Add service</button></div>' +
+    (DE_LINES.length ? '<div class="tbl-wrap"><table><thead><tr><th>Service</th><th>Price</th><th></th></tr></thead><tbody>' +
+      lines + '</tbody></table></div><div class="card-note" style="margin:6px 0">Total ' + money(lineTotalSum) + '</div>' : '') +
+    row() + inp('de_disc', 'Discount', 'number', 110) + inp('de_recv', 'Amount received', 'number', 140) +
+      '<select class="fld" id="de_method" style="min-width:110px"><option value="cash">Cash</option><option value="card">Card</option>' +
+      '<option value="bank">Bank</option><option value="online">Online</option><option value="other">Other</option></select>' +
+      select('de_staff', items('staff'), 'Performed by') + '</div>' +
+    row() + inp('de_notes', 'Notes', 'text', 220) + '<button class="btn primary" id="de_save">Save visit</button></div>' + actbar());
+
+  if (!dayInv.length) {
+    out += panel('Visits on ' + DE_DAY, empty('Nothing recorded', 'Record the first visit of the day above.'));
+  } else {
+    out += panel('Visits on ' + DE_DAY, '<div class="tbl-wrap"><table><thead><tr><th>Invoice</th><th>Customer</th>' +
+      '<th>Total</th><th>Status</th><th>Notes</th></tr></thead><tbody>' +
+      dayInv.map(function(i){
+        return '<tr><td>' + esc(i.number) + '</td><td>' + esc(nameOf(custs, i.customer_id) || '—') + '</td><td>' +
+               money(i.total, i.currency) + '</td><td><span class="tag">' + esc(i.status || '') + '</span></td><td>' +
+               esc(i.notes || '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>', '<span class="pill count">' + dayInv.length + '</span>');
+  }
+
+  setTimeout(function(){
+    var dd = document.getElementById('de_day');
+    if (dd) { dd.value = DE_DAY; dd.onchange = function(){ DE_DAY = dd.value || todayISO(); renderShell(); }; }
+    var sv = document.getElementById('de_svc');
+    if (sv) sv.onchange = function(){
+      for (var i = 0; i < svcs.length; i++) if (String(svcs[i].id) === sv.value && svcs[i].price != null)
+        document.getElementById('de_price').value = svcs[i].price;
+    };
+    document.querySelectorAll('[data-deline]').forEach(function(b){
+      b.onclick = function(){ DE_LINES.splice(Number(b.getAttribute('data-deline')), 1); renderShell(); };
+    });
+    var add = document.getElementById('de_addline');
+    if (add) add.onclick = function(){
+      var sid = val('de_svc'), price = numv('de_price');
+      if (!sid) { say('Pick a service first.'); return; }
+      if (price === null || price < 0) { say('Enter the price charged.'); return; }
+      DE_LINES.push({ service_id: sid, description: nameOf(svcs, sid) || 'Service', quantity: 1, unit_price: price });
+      renderShell();
+    };
+    var save = document.getElementById('de_save');
+    if (!save) return;
+    save.onclick = function(){
+      if (!DE_LINES.length) { say('Add at least one service.'); return; }
+      var cust = val('de_cust'), nm = val('de_newname'), ph = val('de_newphone');
+      var recv = numv('de_recv') || 0, disc = numv('de_disc') || 0, staffName = nameOf(items('staff'), val('de_staff'));
+      var notes = [staffName ? 'Performed by ' + staffName : '', val('de_notes')].filter(Boolean).join('. ');
+      save.disabled = true;
+      var getCust = (!cust && nm)
+        ? act('/business/customers', {method:'POST', body:{name: nm, phone: ph || null, source: 'walk-in'}}, 'Customer added.')
+            .then(function(r){ if (!r.ok) throw new Error('customer'); return r.data && (r.data.id || (r.data.item && r.data.item.id)); })
+        : Promise.resolve(cust || null);
+      getCust.then(function(cid){
+        return act('/operations/invoices', {method:'POST', body:{
+          customer_id: cid, issued_on: DE_DAY, discount: disc, notes: notes || null, items: DE_LINES
+        }}, 'Visit saved.');
+      }).then(function(r){
+        if (!r.ok) throw new Error('invoice');
+        if (recv > 0) return act('/operations/invoices/' + r.data.invoice_id + '/pay',
+          {method:'POST', body:{amount: Math.min(recv, r.data.total), method: val('de_method') || 'cash'}}, 'Visit and payment saved.');
+        return r;
+      }).then(function(){
+        DE_LINES = [];
+        need('invoices', '/business/invoices', true); need('payments', '/business/payments', true);
+        need('customers', '/business/customers', true);
+      }).catch(function(){ save.disabled = false; });
+    };
+  }, 0);
+  return out;
+};
+
+/* -------------------------------------------------------- WhatsApp Inbox */
+var IBX = { data: undefined, loading: false, sel: null, msgs: null };
+function ibxLoad(force){
+  if (IBX.loading || (IBX.data !== undefined && !force)) return;
+  IBX.loading = true;
+  api('/whatsapp/chats').then(function(r){
+    IBX.loading = false;
+    IBX.data = r.ok ? r.data : { error: (r.data && r.data.detail) || ('The inbox returned ' + r.status + '.') };
+    renderShell();
+  });
+}
+function ibxOpen(sid){
+  IBX.sel = sid; IBX.msgs = null; renderShell();
+  api('/whatsapp/chats/' + encodeURIComponent(sid)).then(function(r){
+    if (IBX.sel !== sid) return;
+    IBX.msgs = r.ok ? (r.data.messages || []) : { error: (r.data && r.data.detail) || 'Could not open this chat.' };
+    renderShell();
+  });
+}
+VIEWS.inbox = function(){
+  var out = '<h1>WhatsApp Inbox</h1><p class="sub">Every WhatsApp conversation your AI agent has had with customers.</p>';
+  ibxLoad(false);
+  if (IBX.data === undefined) return out + panel('Conversations', loading('Reading your conversations...'));
+  if (IBX.data.error) return out + panel('Conversations', errState(IBX.data.error +
+    ' If your number is not connected yet, open WhatsApp in the menu and scan the QR code.'));
+  var chats = IBX.data.chats || [];
+  var head = '<button class="btn" id="ibx_ref">Refresh</button>';
+  if (!chats.length) return out + panel('Conversations', empty('No conversations yet',
+    IBX.data.connected ? 'When customers message your WhatsApp, their chats appear here.'
+                       : 'Connect your WhatsApp number first: open WhatsApp in the menu and scan the QR code.'), head) + ibxWire();
+  var list = chats.map(function(c){
+    return '<div class="ibx-item' + (IBX.sel === c.session_id ? ' sel' : '') + '" data-sid="' + esc(c.session_id) + '">' +
+      '<div style="display:flex;justify-content:space-between;gap:8px"><strong>' + esc(c.phone ? '+' + c.phone : 'Unknown number') +
+      '</strong><span class="card-note">' + esc(c.messages) + ' msgs</span></div>' +
+      '<div class="card-note" style="margin-top:4px">' + esc(c.last || '') + '</div>' +
+      '<div class="card-note">' + (c.last_at ? when(c.last_at) : '') + '</div></div>';
+  }).join('');
+  var chat;
+  if (!IBX.sel) chat = empty('Select a conversation', 'Tap a chat on the left to read it.');
+  else if (IBX.msgs === null) chat = loading('Opening the chat...');
+  else if (IBX.msgs.error) chat = errState(IBX.msgs.error);
+  else chat = IBX.msgs.map(function(m){
+    return '<div class="bub ' + (m.role === 'assistant' ? 'assistant' : 'user') + '">' + esc(m.content) +
+           '<div class="t">' + (m.role === 'assistant' ? 'Your agent' : 'Customer') + (m.at ? ' · ' + when(m.at) : '') + '</div></div>';
+  }).join('') || empty('Empty chat', '');
+  out += panel('Conversations', '<div class="ibx"><div class="ibx-list">' + list + '</div><div class="ibx-chat" id="ibx_chat">' +
+    chat + '</div></div>', '<span class="pill count">' + chats.length + '</span> ' + head);
+  return out + ibxWire();
+};
+function ibxWire(){
+  setTimeout(function(){
+    var r = document.getElementById('ibx_ref');
+    if (r) r.onclick = function(){ IBX.data = undefined; ibxLoad(true); if (IBX.sel) ibxOpen(IBX.sel); };
+    document.querySelectorAll('[data-sid]').forEach(function(el){
+      el.onclick = function(){ ibxOpen(el.getAttribute('data-sid')); };
+    });
+    var box = document.getElementById('ibx_chat');
+    if (box) box.scrollTop = box.scrollHeight;
+  }, 0);
+  return '';
+}
+
+/* ------------------------------------------------------------ Marketing */
+VIEWS.marketing = function(){
+  var out = '<h1>Marketing</h1><p class="sub">Where your leads come from, your ad campaigns, and your social posts.</p>';
+  if (!need('mkt', '/marketing/summary') | !need('social_acc', '/social/accounts'))
+    return out + panel('Marketing', loading('Loading marketing...'));
+  if (S.mkt === null) return out + panel('Marketing', errState('The marketing service did not respond.'));
+  var m = S.mkt, acc = S.social_acc || {};
+  var posts = m.posts || {};
+  out += tiles([statTile('Leads, last 30 days', esc(m.leads_30_days)), statTile('Leads, all time', esc(m.leads_all_time)),
+                statTile('Posts published', esc(posts.published || 0)), statTile('Drafts waiting', esc(posts.draft || 0)),
+                statTile('Ad spend recorded', money(m.spend_total))]);
+  out += panel('Facebook & Instagram', acc.connected
+    ? '<div>Connected: ' + esc((acc.pages || []).map(function(p){ return p.name; }).join(', ')) + '</div>'
+    : '<div class="sub" style="margin-bottom:8px">Not connected yet. Connect so Jarvis can publish the posts you approve.</div>' +
+      '<a class="btn primary" href="/connect/meta">Connect Facebook &amp; Instagram</a>');
+  var max = 1;
+  (m.sources || []).forEach(function(s){ max = Math.max(max, Number(s.all_time) || 0); });
+  out += panel('Lead sources', (m.sources || []).length
+    ? '<div class="tbl-wrap"><table><thead><tr><th>Source</th><th>Last 30 days</th><th>All time</th><th style="width:40%"></th></tr></thead><tbody>' +
+      m.sources.map(function(s){
+        return '<tr><td>' + esc(s.source) + '</td><td>' + esc(s.last_30_days) + '</td><td>' + esc(s.all_time) +
+               '</td><td><div class="bar" style="width:' + Math.round(100 * (Number(s.all_time) || 0) / max) + '%"></div></td></tr>';
+      }).join('') + '</tbody></table></div>'
+    : empty('No leads yet', 'Leads from WhatsApp, ads and walk-ins will be counted here by source.'));
+  out += panel('Campaigns', (m.campaigns || []).length
+    ? '<div class="tbl-wrap"><table><thead><tr><th>Campaign</th><th>Platform</th><th>Status</th><th>Spend</th><th>Leads</th><th>Cost per lead</th></tr></thead><tbody>' +
+      m.campaigns.map(function(c){
+        var cpl = (Number(c.leads) > 0) ? money(Number(c.spend || 0) / Number(c.leads)) : '—';
+        return '<tr><td>' + esc(c.name || c.objective || '—') + '</td><td>' + esc(c.platform || '') + '</td><td><span class="tag">' +
+               esc(c.status || '') + '</span></td><td>' + money(c.spend) + '</td><td>' + esc(c.leads || 0) + '</td><td>' + cpl + '</td></tr>';
+      }).join('') + '</tbody></table></div>'
+    : empty('No campaigns yet', 'When TechDeva runs ads for you, each campaign with its spend and leads shows here.'));
+  out += panel('Make a post', '<div class="sub">Ask Jarvis: "Make a post about our Hair PRP offer". ' +
+    'It drafts the post, and nothing goes public until you press Approve.</div>' +
+    '<a class="btn" href="#/console" style="margin-top:8px;display:inline-block">Open Jarvis</a>');
+  return out;
+};
+
+/* ------------------------------------------------------------ Attendance */
+var ATT_DAY = null;
+var ATT_LABEL = { present: 'Present', late: 'Late', half_day: 'Half day', leave: 'Leave', absent: 'Absent' };
+VIEWS.attendance = function(){
+  if (!ATT_DAY) ATT_DAY = todayISO();
+  var key = 'att_' + ATT_DAY, mkey = 'attm_' + ATT_DAY.slice(0, 7);
+  var out = '<h1>Attendance</h1><p class="sub">Mark who came in, and when. Tap a status, add times if you want, then Save.</p>';
+  if (!need(key, '/team/attendance?day=' + ATT_DAY) | !need(mkey, '/team/attendance/summary?month=' + ATT_DAY.slice(0, 7)))
+    return out + panel('Attendance', loading('Loading the register...'));
+  if (S[key] === null) return out + panel('Attendance', errState('The attendance service did not respond.'));
+  var d = S[key];
+  out += row() + inp('att_day', 'Day', 'date', 150) + '</div>';
+  out += tiles([statTile('Staff', d.staff.length), statTile('Marked', d.marked), statTile('Not marked yet', d.unmarked)]);
+  if (!d.staff.length) {
+    out += panel('Register', empty('No staff yet', 'Add your team under Team first, then mark attendance here.'));
+  } else {
+    out += panel('Register for ' + ATT_DAY, '<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Status</th><th>In</th><th>Out</th><th></th></tr></thead><tbody>' +
+      d.staff.map(function(s, i){
+        var btns = Object.keys(ATT_LABEL).map(function(k){
+          return '<button class="btn att-btn' + (s.status === k ? ' on' : '') + '" data-att="' + i + '" data-st="' + k + '">' + ATT_LABEL[k] + '</button>';
+        }).join(' ');
+        return '<tr><td>' + esc(s.name) + '<div class="card-note">' + esc(s.role || '') + '</div></td><td>' + btns + '</td>' +
+          '<td><input class="fld" type="time" id="att_in_' + i + '" value="' + esc(s.check_in || '') + '" style="width:110px"></td>' +
+          '<td><input class="fld" type="time" id="att_out_' + i + '" value="' + esc(s.check_out || '') + '" style="width:110px"></td>' +
+          '<td><button class="btn primary" data-attsave="' + i + '">Save</button></td></tr>';
+      }).join('') + '</tbody></table></div>' + actbar());
+  }
+  var ms = S[mkey];
+  if (ms && ms.staff && ms.staff.length) {
+    out += panel('This month (' + esc(ms.month) + ')', '<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Present</th><th>Late</th><th>Half day</th><th>Leave</th><th>Absent</th></tr></thead><tbody>' +
+      ms.staff.map(function(s){
+        return '<tr><td>' + esc(s.name) + '</td><td>' + s.present + '</td><td>' + s.late + '</td><td>' + s.half_day + '</td><td>' + s.leave + '</td><td>' + s.absent + '</td></tr>';
+      }).join('') + '</tbody></table></div>');
+  }
+  setTimeout(function(){
+    var dd = document.getElementById('att_day');
+    if (dd) { dd.value = ATT_DAY; dd.onchange = function(){ ATT_DAY = dd.value || todayISO(); renderShell(); }; }
+    var picked = {};
+    document.querySelectorAll('[data-att]').forEach(function(b){
+      b.onclick = function(){
+        var i = b.getAttribute('data-att');
+        picked[i] = b.getAttribute('data-st');
+        document.querySelectorAll('[data-att="' + i + '"]').forEach(function(x){ x.classList.toggle('on', x === b); });
+        if (picked[i] === 'present' && !document.getElementById('att_in_' + i).value) {
+          var n = new Date();
+          document.getElementById('att_in_' + i).value = String(n.getHours()).padStart(2, '0') + ':' + String(n.getMinutes()).padStart(2, '0');
+        }
+      };
+    });
+    document.querySelectorAll('[data-attsave]').forEach(function(b){
+      b.onclick = function(){
+        var i = b.getAttribute('data-attsave'), s = d.staff[i];
+        var status = picked[i] || s.status;
+        if (!status) { say('Pick a status for ' + s.name + ' first.'); return; }
+        act('/team/attendance', {method:'POST', body:{staff_id: s.staff_id, day: ATT_DAY, status: status,
+          check_in: document.getElementById('att_in_' + i).value || null,
+          check_out: document.getElementById('att_out_' + i).value || null}}, s.name + ' marked ' + ATT_LABEL[status] + '.')
+        .then(function(r){ if (r.ok) { need(key, '/team/attendance?day=' + ATT_DAY, true); need(mkey, '/team/attendance/summary?month=' + ATT_DAY.slice(0, 7), true); } });
+      };
+    });
+  }, 0);
+  return out;
+};
+
+/* -------------------------------------------------------------- Calendar */
+var CAL_MONTH = null, CAL_DAY = null;
+VIEWS.calendar = function(){
+  var out = '<h1>Calendar</h1><p class="sub">Every appointment on a month view. Tap a day to see who is booked.</p>';
+  if (!need('appts_all', '/operations/appointments?when=all&limit=500'))
+    return out + panel('Calendar', loading('Loading the diary...'));
+  if (S.appts_all === null) return out + panel('Calendar', errState('The appointments service did not respond.'));
+  var now = new Date();
+  if (!CAL_MONTH) { CAL_MONTH = new Date(now.getFullYear(), now.getMonth(), 1); CAL_DAY = now.getDate(); }
+  var y = CAL_MONTH.getFullYear(), m = CAL_MONTH.getMonth();
+  var byDay = {};
+  (S.appts_all.appointments || []).forEach(function(a){
+    var d = new Date(a.starts_at);
+    if (isNaN(d) || d.getFullYear() !== y || d.getMonth() !== m) return;
+    (byDay[d.getDate()] = byDay[d.getDate()] || []).push(a);
+  });
+  var first = new Date(y, m, 1).getDay(), days = new Date(y, m + 1, 0).getDate();
+  var cells = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(function(x){ return '<div class="cal-h">' + x + '</div>'; }).join('');
+  for (var i = 0; i < first; i++) cells += '<div class="cal-c off"></div>';
+  for (var dd = 1; dd <= days; dd++) {
+    var n = (byDay[dd] || []).length;
+    var today = y === now.getFullYear() && m === now.getMonth() && dd === now.getDate();
+    cells += '<div class="cal-c' + (today ? ' today' : '') + (CAL_DAY === dd ? ' sel' : '') + '" data-cday="' + dd + '">' +
+             '<div class="cal-n">' + dd + '</div>' + (n ? '<div class="cal-b">' + n + ' booked</div>' : '') + '</div>';
+  }
+  var title = CAL_MONTH.toLocaleString('en-GB', { month: 'long', year: 'numeric' });
+  out += panel(title, '<div style="display:flex;gap:8px;margin-bottom:10px"><button class="btn" id="cal_prev">&larr; Previous</button>' +
+    '<button class="btn" id="cal_today">This month</button><button class="btn" id="cal_next">Next &rarr;</button>' +
+    '<a class="btn primary" href="#/appointments" style="margin-left:auto">+ Book</a></div><div class="cal-grid">' + cells + '</div>');
+  var list = (byDay[CAL_DAY] || []).slice().sort(function(a, b){ return new Date(a.starts_at) - new Date(b.starts_at); });
+  var label = CAL_DAY ? new Date(y, m, CAL_DAY).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }) : '';
+  out += panel(label || 'Pick a day', list.length
+    ? '<div class="tbl-wrap"><table><thead><tr><th>Time</th><th>Customer</th><th>Service</th><th>Staff</th><th>Status</th></tr></thead><tbody>' +
+      list.map(function(a){
+        return '<tr><td>' + hhmm(a.starts_at) + '</td><td>' + esc(a.customer_name || '—') + '<div class="card-note">' + esc(a.customer_phone || '') +
+               '</div></td><td>' + esc(a.service_name || a.service_text || '—') + '</td><td>' + esc(a.staff_name || '—') +
+               '</td><td><span class="tag">' + esc(a.status || '') + '</span></td></tr>';
+      }).join('') + '</tbody></table></div>'
+    : empty('Nothing booked', 'No appointments on this day.'));
+  setTimeout(function(){
+    function go(k){ CAL_MONTH = new Date(y, m + k, 1); CAL_DAY = null; renderShell(); }
+    var p = document.getElementById('cal_prev'), t = document.getElementById('cal_today'), nx = document.getElementById('cal_next');
+    if (p) p.onclick = function(){ go(-1); };
+    if (nx) nx.onclick = function(){ go(1); };
+    if (t) t.onclick = function(){ CAL_MONTH = null; renderShell(); };
+    document.querySelectorAll('[data-cday]').forEach(function(c){
+      c.onclick = function(){ CAL_DAY = Number(c.getAttribute('data-cday')); renderShell(); };
+    });
+  }, 0);
+  return out;
+};
+
+/* ------------------------------------------------------------- Hermes AI */
+VIEWS.hermes = function(){
+  var out = '<h1>Hermes AI</h1><p class="sub">Your WhatsApp sales agent: its status, what it has been taught, and a box to teach it more.</p>';
+  if (!need('wa_status', '/whatsapp') | !need('lessons', '/console/lessons'))
+    return out + panel('Your agent', loading('Checking your agent...'));
+  ibxLoad(false);
+  var w = S.wa_status, L = (S.lessons && (S.lessons.lessons || S.lessons.items)) || [];
+  var chats = (IBX.data && IBX.data.chats) || [];
+  out += tiles([
+    statTile('Status', w ? (w.connected ? '<span style="color:var(--growth)">Online</span>' : 'Not connected') : 'Not assigned'),
+    statTile('WhatsApp number', w && w.phone_number ? esc('+' + String(w.phone_number).replace(/^\+/, '')) : '—'),
+    statTile('Conversations', IBX.data === undefined ? '…' : chats.length),
+    statTile('Things taught', L.length)]);
+  if (!w || !w.connected)
+    out += panel('Connect', '<div class="sub">Your agent is ready but not on WhatsApp yet.</div>' +
+      '<a class="btn primary" href="#/whatsapp" style="margin-top:8px;display:inline-block">Connect WhatsApp</a>');
+  out += panel('Teach your agent',
+    '<textarea id="hm_teach" rows="3" style="width:100%;padding:10px;border-radius:10px;font:inherit" ' +
+    'placeholder="e.g. Hair PRP is 25,000 per session. Always ask the patient\'s name before quoting."></textarea>' +
+    row() + '<button class="btn primary" id="hm_go">Teach</button><button class="btn" id="hm_sync">Re-send everything to the agent</button></div>' + actbar());
+  out += panel('What your agent has been taught', L.length
+    ? '<ul style="margin:0;padding-left:18px">' + L.map(function(l){ return '<li style="margin:6px 0">' + esc(l.lesson || l) + '</li>'; }).join('') + '</ul>' +
+      '<div class="card-note" style="margin-top:8px">To remove one, open Jarvis.</div>'
+    : empty('Nothing taught yet', 'Anything you teach here is what your agent will say to customers.'));
+  out += panel('Recent conversations', chats.length
+    ? chats.slice(0, 5).map(function(c){ return '<div style="padding:6px 0;border-bottom:1px solid var(--line)"><strong>' +
+        esc(c.phone ? '+' + c.phone : 'Unknown') + '</strong> <span class="card-note">' + esc(c.last || '') + '</span></div>'; }).join('') +
+      '<a class="btn" href="#/inbox" style="margin-top:8px;display:inline-block">Open WhatsApp Inbox</a>'
+    : empty('No conversations yet', ''));
+  setTimeout(function(){
+    var go = document.getElementById('hm_go');
+    if (go) go.onclick = function(){
+      var t = val('hm_teach');
+      if (!t) { say('Write what the agent should know.'); return; }
+      go.disabled = true;
+      act('/console', {method:'POST', body:{message: 'Teach my WhatsApp agent: ' + t}}, 'Taught.').then(function(r){
+        go.disabled = false;
+        if (r.ok && r.data && r.data.kind !== 'teach') say(r.data.reply || 'That was not saved as a lesson. Try saying it as a rule.');
+        if (r.ok) need('lessons', '/console/lessons', true);
+      });
+    };
+    var sy = document.getElementById('hm_sync');
+    if (sy) sy.onclick = function(){ act('/whatsapp/sync-lessons', {method:'POST'}, 'Your agent has everything it was taught.'); };
+  }, 0);
+  return out;
+};
+
+/* ------------------------------------------------------------------ Team */
+VIEWS.team = function(){
+  var out = '<h1>Team</h1><p class="sub">Everyone who works here. Add people, change their role, or mark them inactive when they leave.</p>';
+  if (!need('staff', '/business/staff')) return out + panel('Team', loading('Loading your team...'));
+  if (S.staff === null) return out + panel('Team', errState('The team service did not respond.'));
+  var list = items('staff');
+  out += panel('Add a team member', row() + inp('tm_name', 'Name', 'text', 160) + inp('tm_role', 'Role (e.g. Doctor, Receptionist)', 'text', 200) +
+    inp('tm_dept', 'Department', 'text', 130) + '</div>' + row() + inp('tm_phone', 'Phone', 'tel', 140) + inp('tm_email', 'Email', 'email', 180) +
+    '<button class="btn primary" id="tm_add">Add</button></div>' + actbar());
+  out += panel('Your team', list.length
+    ? '<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Role</th><th>Department</th><th>Phone</th><th>Status</th><th></th></tr></thead><tbody>' +
+      list.map(function(s){
+        return '<tr><td>' + esc(s.name) + '</td><td>' + esc(s.role || '') + '</td><td>' + esc(s.department || '') + '</td><td>' + esc(s.phone || '') +
+          '</td><td><span class="tag">' + (s.active === false ? 'Inactive' : 'Active') + '</span></td><td><button class="btn" data-tmtog="' + esc(s.id) +
+          '" data-on="' + (s.active === false ? '1' : '0') + '">' + (s.active === false ? 'Make active' : 'Mark inactive') + '</button></td></tr>';
+      }).join('') + '</tbody></table></div>'
+    : empty('No team members yet', 'Add your doctors, receptionists and staff above.'), '<span class="pill count">' + list.length + '</span>');
+  setTimeout(function(){
+    var add = document.getElementById('tm_add');
+    if (add) add.onclick = function(){
+      if (!val('tm_name')) { say('A team member needs a name.'); return; }
+      act('/business/staff', {method:'POST', body:{name: val('tm_name'), role: val('tm_role') || null, department: val('tm_dept') || null,
+        phone: val('tm_phone') || null, email: val('tm_email') || null, active: true}}, 'Added to your team.')
+      .then(function(r){ if (r.ok) need('staff', '/business/staff', true); });
+    };
+    document.querySelectorAll('[data-tmtog]').forEach(function(b){
+      b.onclick = function(){
+        act('/business/staff/' + b.getAttribute('data-tmtog'), {method:'PATCH', body:{active: b.getAttribute('data-on') === '1'}}, 'Updated.')
+        .then(function(r){ if (r.ok) need('staff', '/business/staff', true); });
+      };
+    });
+  }, 0);
+  return out;
+};
+
+/* -------------------------------------------------------------------- HR */
+VIEWS.hr = function(){
+  var out = '<h1>HR</h1><p class="sub">Employee records: salary, joining date, emergency contact and address. Only the owner can see this.</p>';
+  if (!need('hr', '/team/hr')) return out + panel('HR', loading('Loading employee records...'));
+  if (S.hr === null) return out + panel('HR', errState('Only the business owner can see HR records.'));
+  var list = S.hr.staff || [];
+  if (!list.length) return out + panel('HR', empty('No employees yet', 'Add your team under Team first.'));
+  out += tiles([statTile('Employees', list.filter(function(s){ return s.active !== false; }).length),
+                statTile('Monthly payroll', money(S.hr.monthly_payroll))]);
+  out += panel('Update a record', row() + select('hr_who', list, 'Choose employee') + '</div>' +
+    row() + inp('hr_salary', 'Monthly salary', 'number', 140) + inp('hr_join', 'Joining date', 'date', 150) +
+    inp('hr_emerg', 'Emergency contact', 'tel', 160) + '</div>' +
+    row() + inp('hr_addr', 'Address', 'text', 260) + inp('hr_notes', 'Notes', 'text', 200) +
+    '<button class="btn primary" id="hr_save">Save</button></div>' + actbar());
+  out += panel('Employees', '<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Role</th><th>Salary</th><th>Joined</th><th>Emergency</th><th>Address</th></tr></thead><tbody>' +
+    list.map(function(s){
+      return '<tr><td>' + esc(s.name) + (s.active === false ? ' <span class="tag">Inactive</span>' : '') + '</td><td>' + esc(s.role || '') +
+        '</td><td>' + (s.salary != null ? money(s.salary) : '—') + '</td><td>' + esc(s.joining_date ? String(s.joining_date).slice(0, 10) : '—') +
+        '</td><td>' + esc(s.emergency_contact || '—') + '</td><td>' + esc(s.address || '—') + '</td></tr>';
+    }).join('') + '</tbody></table></div>');
+  setTimeout(function(){
+    var who = document.getElementById('hr_who');
+    if (who) who.onchange = function(){
+      var s = null;
+      for (var i = 0; i < list.length; i++) if (String(list[i].id) === who.value) s = list[i];
+      if (!s) return;
+      document.getElementById('hr_salary').value = s.salary != null ? s.salary : '';
+      document.getElementById('hr_join').value = s.joining_date ? String(s.joining_date).slice(0, 10) : '';
+      document.getElementById('hr_emerg').value = s.emergency_contact || '';
+      document.getElementById('hr_addr').value = s.address || '';
+      document.getElementById('hr_notes').value = s.hr_notes || '';
+    };
+    var sv = document.getElementById('hr_save');
+    if (sv) sv.onclick = function(){
+      if (!val('hr_who')) { say('Choose an employee first.'); return; }
+      act('/team/hr/' + val('hr_who'), {method:'PATCH', body:{salary: val('hr_salary'), joining_date: val('hr_join'),
+        emergency_contact: val('hr_emerg'), address: val('hr_addr'), hr_notes: val('hr_notes')}}, 'Record saved.')
+      .then(function(r){ if (r.ok) need('hr', '/team/hr', true); });
+    };
+  }, 0);
+  return out;
+};
+
+/* ---- Menu, laid out like the Beauty clinic CRM ---- */
+(function(){
+  function it(id, icon, name, sub){ return { id: id, name: icon + '  ' + name, sub: !!sub }; }
+  NAV.length = 0;
+  NAV.push(
+    { label: null, items: [
+      it('overview', '🏠', 'Dashboard'),
+      it('leads', '👥', 'Leads CRM'),
+      it('appointments', '📅', 'Appointments'),
+      it('dailyentry', '📝', 'Daily Entry'),
+      it('customers', '👤', 'Customers'),
+      it('inbox', '💬', 'WhatsApp Inbox'),
+      it('catalogue', '🛠️', 'Services'),
+      it('packages', '🎁', 'Packages', true) ]},
+    { label: 'Business', items: [
+      it('revenue', '💰', 'Finance'),
+      it('invoices', '', 'Invoices', true),
+      it('expenses', '', 'Expenses', true),
+      it('dayclose', '', 'Day Close', true),
+      it('pnl', '', 'Profit & Loss', true),
+      it('marketing', '📈', 'Marketing'),
+      it('inventory', '📦', 'Inventory') ]},
+    { label: 'Management', items: [
+      it('attendance', '📋', 'Attendance'),
+      it('calendar', '📆', 'Calendar'),
+      it('hermes', '🤖', 'Hermes AI'),
+      it('team', '🤝', 'Team'),
+      it('hr', '🏢', 'HR') ]},
+    { label: 'AI', items: [
+      it('console', '🎙️', 'Jarvis'),
+      it('ai', '⚙️', 'AI Workforce'),
+      it('needshuman', '', 'Needs Human', true) ]},
+    { label: 'Settings', items: [
+      it('whatsapp', '📱', 'WhatsApp'),
+      it('integrations', '🔗', 'Integrations'),
+      it('reports', '📊', 'Reports'),
+      it('settings', '⚙️', 'Business Settings') ]}
+  );
+  NAV.forEach(function(g){ g.items.forEach(function(x){ x.name = x.name.replace(/^\s+/, ''); }); });
+})();
+
 function renderShell(){
   var v = currentView();
   var id = bizIdentity();

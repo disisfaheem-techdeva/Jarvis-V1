@@ -18,6 +18,8 @@ Three rules shape this module:
 
 import json
 import os
+import re
+import urllib.parse
 import urllib.error
 import urllib.request
 
@@ -112,6 +114,48 @@ def _pairctl(url, path, method="GET"):
         raise HTTPException(503, "The pairing service for this business is not reachable.")
 
 
+def _pairctl_json(url, path, method="GET", payload=None):
+    """Like _pairctl, but carries a JSON body and keeps a 404 a 404."""
+    key = _key()
+    if not key:
+        raise HTTPException(503, "WhatsApp is not configured on this server.")
+    data = json.dumps(payload).encode() if payload is not None else (b"" if method == "POST" else None)
+    req = urllib.request.Request(url.rstrip("/") + path, method=method, data=data,
+                                 headers={"x-internal-key": key,
+                                          "content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=PAIRCTL_TIMEOUT) as resp:
+            return json.loads(resp.read().decode() or "{}")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise HTTPException(404, "That conversation is not there.")
+        raise HTTPException(502, "The WhatsApp service refused the request (%s)." % e.code)
+    except Exception:
+        raise HTTPException(503, "The WhatsApp service for this business is not reachable right now.")
+
+
+def sync_lessons(tid, role):
+    """Write this business's active lessons into its own WhatsApp agent's SOUL.md.
+
+    Never raises: teaching must not fail because the agent is down. Returns
+    'no_agent', 'failed' or 'synced:<n>'."""
+    try:
+        with tenant_session(tid, role) as cur:
+            cur.execute("SELECT pairctl_url FROM whatsapp_connections WHERE tenant_id = %s", (tid,))
+            r = cur.fetchone()
+            if not r:
+                return "no_agent"
+            cur.execute("""SELECT lesson FROM agent_lessons
+                            WHERE tenant_id = %s AND active AND agent = 'whatsapp'
+                            ORDER BY created_at ASC LIMIT 200""", (tid,))
+            lessons = [x["lesson"] for x in cur.fetchall()]
+        out = _pairctl_json(r["pairctl_url"], "/soul/lessons", "POST", {"lessons": lessons})
+        return "synced:%s" % out.get("count", len(lessons))
+    except Exception as e:
+        print("[whatsapp] lesson sync failed: %s" % getattr(e, "detail", e), flush=True)
+        return "failed"
+
+
 def make_whatsapp_router():
     router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 
@@ -201,6 +245,48 @@ def make_whatsapp_router():
                    resource_id=str(r["id"]), actor=str(uid), actor_type="human",
                    status="ok", detail={"agent": r["agent_key"]}, error=None)
         return {"status": "disconnected"}
+
+    @router.get("/chats")
+    def chats(x_tenant_id: str | None = Header(None),
+              x_role: str | None = Header(None),
+              authorization: str | None = Header(None),
+              td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """The business's WhatsApp conversations, newest first."""
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        with tenant_session(tid, role) as cur:
+            r = _row(cur, tid)
+        data = _pairctl_json(r["pairctl_url"], "/chats")
+        return {"connected": r["status"] == "connected", "chats": data.get("chats", [])}
+
+    @router.get("/chats/{session_id}")
+    def chat(session_id: str,
+             x_tenant_id: str | None = Header(None),
+             x_role: str | None = Header(None),
+             authorization: str | None = Header(None),
+             td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        if not re.fullmatch(r"[\w.:@+\-]{1,200}", session_id or ""):
+            raise HTTPException(400, "That is not a conversation id.")
+        with tenant_session(tid, role) as cur:
+            r = _row(cur, tid)
+        data = _pairctl_json(r["pairctl_url"], "/chats/" + urllib.parse.quote(session_id, safe=""))
+        return {"messages": data.get("messages", [])}
+
+    @router.post("/sync-lessons")
+    def sync(x_tenant_id: str | None = Header(None),
+             x_role: str | None = Header(None),
+             authorization: str | None = Header(None),
+             td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Re-send everything the owner has taught to their WhatsApp agent."""
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        if role not in ("owner", "techdeva_admin"):
+            raise HTTPException(403, "Only the business owner can change what the agent knows.")
+        s = sync_lessons(tid, role)
+        if s == "no_agent":
+            raise HTTPException(409, "No WhatsApp agent has been assigned to this business yet.")
+        if s == "failed":
+            raise HTTPException(503, "Could not reach your WhatsApp agent. Try again in a minute.")
+        return {"ok": True, "status": s}
 
     @router.post("/assign")
     def assign(body: dict,

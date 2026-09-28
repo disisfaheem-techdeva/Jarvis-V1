@@ -17,6 +17,9 @@
 
 import http from 'http';
 import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import { DatabaseSync } from 'node:sqlite';
 
 const PORT        = parseInt(process.env.PAIRCTL_PORT || '3010', 10);
 const BRIDGE_PORT = parseInt(process.env.PAIRCTL_BRIDGE_PORT || '3011', 10);
@@ -68,6 +71,111 @@ function bridgeSession() {
   });
 }
 
+// ---- WhatsApp inbox + owner lessons -------------------------------------
+// The agent keeps every WhatsApp conversation in its own state.db. This
+// sidecar already has the agent's volume, so it is the one place that can
+// hand those chats to the platform (read-only) and write the owner's
+// standing instructions into SOUL.md -- without the platform needing the
+// Docker socket.
+const DATA_DIR = process.env.PAIRCTL_DATA_DIR || '/opt/data';
+const STATE_DB = path.join(DATA_DIR, 'state.db');
+const SOUL = path.join(DATA_DIR, 'SOUL.md');
+const L_START = '<!-- TECHDEVA-LESSONS-START -->';
+const L_END = '<!-- TECHDEVA-LESSONS-END -->';
+
+function openDb() {
+  if (!fs.existsSync(STATE_DB)) return null;
+  return new DatabaseSync(STATE_DB, { readOnly: true });
+}
+
+function iso(ts) { return ts ? new Date(ts * 1000).toISOString() : null; }
+
+function resolvePhone(uid) {
+  const s = String(uid || '');
+  const digits = s.replace(/\D/g, '');
+  if (!s.includes('@lid')) return digits;
+  try {
+    const p = path.join(SESSION_DIR, `lid-mapping-${digits}_reverse.json`);
+    if (fs.existsSync(p)) {
+      const v = String(JSON.parse(fs.readFileSync(p, 'utf8'))).replace(/\D/g, '');
+      if (v.length >= 7 && v.length <= 15) return v;
+    }
+  } catch (e) { /* unresolved is shown as unresolved */ }
+  return '';
+}
+
+function listChats() {
+  const d = openDb();
+  if (!d) return [];
+  try {
+    const rows = d.prepare(`SELECT id, user_id, message_count, started_at FROM sessions
+                            WHERE source = 'whatsapp' ORDER BY started_at DESC LIMIT 150`).all();
+    const lastQ = d.prepare(`SELECT content, timestamp FROM messages
+                             WHERE session_id = ? AND role IN ('user','assistant')
+                               AND content IS NOT NULL AND content <> ''
+                             ORDER BY id DESC LIMIT 1`);
+    return rows.map(r => {
+      const l = lastQ.get(r.id) || {};
+      return {
+        session_id: r.id,
+        phone: resolvePhone(r.user_id) || null,
+        messages: r.message_count || 0,
+        last: String(l.content || '').replace(/\s+/g, ' ').slice(0, 140),
+        last_at: iso(l.timestamp),
+        started_at: iso(r.started_at),
+      };
+    });
+  } finally { d.close(); }
+}
+
+function chatMessages(sid) {
+  const d = openDb();
+  if (!d) return null;
+  try {
+    if (!d.prepare(`SELECT id FROM sessions WHERE id = ? AND source = 'whatsapp'`).get(sid)) return null;
+    return d.prepare(`SELECT role, content, timestamp FROM messages
+                      WHERE session_id = ? AND role IN ('user','assistant')
+                        AND content IS NOT NULL AND content <> ''
+                      ORDER BY id ASC LIMIT 400`).all(sid)
+      .map(m => ({ role: m.role, content: String(m.content).slice(0, 4000), at: iso(m.timestamp) }));
+  } finally { d.close(); }
+}
+
+function readBody(req) {
+  return new Promise((ok, bad) => {
+    let b = '';
+    req.on('data', c => { b += c; if (b.length > 300000) { bad(new Error('too big')); req.destroy(); } });
+    req.on('end', () => ok(b));
+    req.on('error', bad);
+  });
+}
+
+function writeLessons(lessons) {
+  if (!Array.isArray(lessons)) throw new Error('lessons must be a list');
+  const clean = lessons.slice(0, 200)
+    .map(x => String(x || '').replace(/<!--|-->/g, '').replace(/\s+/g, ' ').trim().slice(0, 500))
+    .filter(Boolean);
+  const soul = fs.existsSync(SOUL) ? fs.readFileSync(SOUL, 'utf8') : '';
+  const block = [
+    L_START,
+    '## Standing instructions from the business owner',
+    'The owner set these in their TechDeva dashboard. Follow them exactly; where they conflict with anything above, these win.',
+    ...(clean.length ? clean.map(l => '- ' + l) : ['- (none yet)']),
+    L_END,
+  ].join('\n');
+  const a = soul.indexOf(L_START);
+  const b = soul.indexOf(L_END);
+  const next = (a !== -1 && b > a)
+    ? soul.slice(0, a) + block + soul.slice(b + L_END.length)
+    : soul.replace(/\s*$/, '') + '\n\n' + block + '\n';
+  if (soul && !fs.existsSync(SOUL + '.pre-lessons')) fs.writeFileSync(SOUL + '.pre-lessons', soul);
+  const tmp = SOUL + '.tmp-' + process.pid;
+  fs.writeFileSync(tmp, next);
+  fs.renameSync(tmp, SOUL);
+  log('wrote', clean.length, 'owner lessons into SOUL.md');
+  return { count: clean.length };
+}
+
 function send(res, code, obj) {
   const b = JSON.stringify(obj);
   res.writeHead(code, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(b) });
@@ -107,6 +215,27 @@ const server = http.createServer(async (req, res) => {
                               number: s.number, name: s.name, qr: null });
     }
     return send(res, 200, { agent: AGENT, running: true, ...s });
+  }
+
+  if (req.method === 'GET' && url === '/chats') {
+    try { return send(res, 200, { agent: AGENT, chats: listChats() }); }
+    catch (e) { log('chats failed', e.message); return send(res, 500, { error: 'could not read chats' }); }
+  }
+
+  if (req.method === 'GET' && url.startsWith('/chats/')) {
+    let msgs;
+    try { msgs = chatMessages(decodeURIComponent(url.slice(7))); }
+    catch (e) { log('chat failed', e.message); return send(res, 500, { error: 'could not read chat' }); }
+    if (msgs === null) return send(res, 404, { error: 'no such conversation' });
+    return send(res, 200, { agent: AGENT, messages: msgs });
+  }
+
+  if (req.method === 'POST' && url === '/soul/lessons') {
+    let body;
+    try { body = JSON.parse((await readBody(req)) || '{}'); }
+    catch (e) { return send(res, 400, { error: 'bad json' }); }
+    try { return send(res, 200, { agent: AGENT, ...writeLessons(body.lessons) }); }
+    catch (e) { log('lesson write failed', e.message); return send(res, 500, { error: 'could not write SOUL.md' }); }
   }
 
   if (req.method === 'GET' && url === '/health') {

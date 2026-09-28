@@ -34,6 +34,7 @@ from .social import make_social_router
 from .founder import router as founder_router
 from .policy import make_policy_router
 from .whatsapp import make_whatsapp_router
+from .team import make_team_router
 
 # API docs (/docs, /redoc, /openapi.json) hand anyone on the internet the
 # full route surface and request/response schema. Off by default; set
@@ -69,6 +70,7 @@ app.include_router(make_policy_router())
 app.include_router(make_brand_router())
 app.include_router(make_console_router())
 app.include_router(make_social_router())
+app.include_router(make_team_router())
 app.include_router(founder_router)
 
 # The two client-facing pages. The API image is built from ./app, so web/ is

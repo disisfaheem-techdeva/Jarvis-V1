@@ -30,6 +30,7 @@ from .ai import AIUnavailable, generate_json
 from .audit import record
 from .auth import AuthError, SESSION_COOKIE, resolve_scope
 from .db import tenant_session
+from .whatsapp import sync_lessons as wa_sync_lessons
 
 # What the console is allowed to change on a dashboard. A closed list on
 # purpose: an open one is a way to write arbitrary values into a config blob
@@ -342,7 +343,10 @@ def make_console_router():
                 record(cur, action="console.teach", resource="agent_lessons",
                        resource_id=str(row["id"]), actor=str(uid), actor_type="human",
                        status="ok", detail={"lesson": lesson[:200]}, error=None)
-            return {"kind": "teach", "reply": reply,
+            # The platform's own agents read agent_lessons directly; the
+            # client's WhatsApp agent reads SOUL.md, so push it there too.
+            agent_sync = wa_sync_lessons(tid, role)
+            return {"kind": "teach", "reply": reply, "agent_sync": agent_sync,
                     "lesson": row["lesson"], "lesson_id": str(row["id"])}
 
         if kind == "dashboard":
@@ -476,7 +480,7 @@ def make_console_router():
             record(cur, action="console.retire", resource="agent_lessons",
                    resource_id=lesson_id, actor=str(uid), actor_type="human",
                    status="ok", detail={}, error=None)
-        return {"ok": True}
+        return {"ok": True, "agent_sync": wa_sync_lessons(tid, role)}
 
     @router.get("/prefs")
     def prefs(tenant: str | None = None,
