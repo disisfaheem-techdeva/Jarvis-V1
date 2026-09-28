@@ -465,7 +465,7 @@ class SignupIn(BaseModel):
 @app.post("/signup")
 def public_signup(body: SignupIn, request: Request):
     """PUBLIC self-serve signup on techdeva.net. No auth: this is the front door.
-    Records the intake, provisions a 14-day trial tenant, creates the client's own
+    Records the intake, provisions a 1-month (30-day) trial tenant, creates the client's own
     login, and kicks off analysis. The owner does nothing — the pipeline runs
     itself from here.
 

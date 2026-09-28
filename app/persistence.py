@@ -685,7 +685,7 @@ class Persistence:
             if not s:
                 raise ValueError("signup not found")
             cur.execute("""INSERT INTO tenants (name, industry, status, trial_ends_at, is_test)
-                           VALUES (%s,%s,'trial', now() + interval '14 days', %s) RETURNING id""",
+                           VALUES (%s,%s,'trial', now() + interval '30 days', %s) RETURNING id""",
                         (s["business_name"], s["industry"], _looks_like_test(s.get("contact_email"))))
             tid = str(cur.fetchone()["id"])
             brand = {"website": s["website_url"], "social": s["social_links"]}

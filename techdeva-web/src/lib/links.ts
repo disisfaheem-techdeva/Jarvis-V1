@@ -1,10 +1,10 @@
 import { API_BASE } from "@/lib/api";
 
 // The self-serve signup lives on the API host: it creates the business, the
-// owner's login and a 14-day trial, then opens onboarding.
+// owner's login and a 30-day (1 month) trial, then opens onboarding.
 export const SIGNUP_URL = `${API_BASE}/`;
 export const DASHBOARD_URL = `${API_BASE}/dashboard`;
-export const TRIAL_DAYS = 14;
+export const TRIAL_DAYS = 30;
 
 export const NAV = [
   { href: "/platform", label: "Platform" },
