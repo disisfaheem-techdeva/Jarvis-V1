@@ -78,7 +78,8 @@ def counts(tid):
 def cleanup(tid):
     # children first; only ids this run created, only in the QA tenant
     order = ["payments", "invoice_items", "stock_movements", "package_items", "appointments",
-             "invoices", "expenses", "packages", "products", "services", "customers", "staff"]
+             "invoices", "expenses", "packages", "products", "services", "customers", "staff",
+             "locations", "business_policies"]
     for t in order:
         ids = CREATED.get(t)
         if t == "payments":
@@ -204,6 +205,91 @@ def staff_and_rest(ctx, O, OP, tid, tag):
         check("RLS", "another tenant cannot read this customer", s == 404, "HTTP %s" % s)
 
 
+def phase2(ctx):
+    O, OP = ctx["owner"], ctx["operator"]
+    tag = uuid.uuid4().hex[:6]
+    def item(r): return (r.get("item") or {}) if isinstance(r, dict) else {}
+    # #6 services
+    s, r = call(O, "POST", "/business/services", {"name": "QA Svc " + tag, "price": 5000, "duration_minutes": 15, "category": "injection"})
+    sid = item(r).get("id"); track("services", sid)
+    check("#6", "add service", s == 200 and sid, "HTTP %s" % s)
+    s, r = call(O, "PATCH", "/business/services/%s" % sid, {"name": "QA Svc edited " + tag, "price": 18000})
+    s2, L = call(O, "GET", "/business/services")
+    got = [x for x in L.get("items", []) if x.get("id") == sid]
+    check("#6", "edit service persists", s == 200 and got and got[0]["price"] == 18000 and got[0]["name"].startswith("QA Svc edited"), "HTTP %s price=%s" % (s, got[0]["price"] if got else None))
+    s, r = call(O, "POST", "/business/services/import-onboarding")
+    for x in (r.get("saved") or []) if isinstance(r, dict) else []:
+        track("services", x["id"])
+    s2, r2 = call(O, "POST", "/business/services/import-onboarding")
+    check("#6/A5", "import onboarding services is idempotent", s == 200 and s2 == 200 and r2.get("count") == 0, "first saved %s, second saved %s" % (r.get("count") if isinstance(r, dict) else r, r2.get("count") if isinstance(r2, dict) else r2))
+    # #10 packages with contents, then FK-safe delete of the service
+    s, r = call(O, "POST", "/business/packages", {"name": "QA Pack " + tag, "price": 30000, "validity_days": 90})
+    pk = item(r).get("id"); track("packages", pk)
+    s2, r2 = call(O, "POST", "/business/package_items", {"package_id": pk, "service_id": sid, "quantity": 3})
+    pit = item(r2).get("id")
+    s3, r3 = call(O, "PATCH", "/business/packages/%s" % pk, {"price": 28000})
+    s4, r4 = call(O, "PATCH", "/business/package_items/%s" % pit, {"quantity": 4})
+    s5, L = call(O, "GET", "/business/package_items")
+    q = [x["quantity"] for x in L.get("items", []) if x.get("id") == pit]
+    check("#10", "package create, add item, edit price and quantity", s == 200 and s2 == 200 and s3 == 200 and s4 == 200 and q == [4], "HTTP %s/%s/%s/%s qty=%s" % (s, s2, s3, s4, q))
+    s, r = call(O, "POST", "/business/package_items", {"package_id": pk, "quantity": 1})
+    check("#10", "package line with no service or product refused", s == 400, "HTTP %s" % s)
+    s, r = call(O, "POST", "/business/package_items", {"package_id": pk, "service_id": sid, "quantity": 0})
+    check("#10", "package quantity 0 refused", s == 400, "HTTP %s" % s)
+    s, r = call(O, "DELETE", "/business/services/%s" % sid)
+    check("#6", "service inside a package cannot be deleted (FK-safe)", s == 409, "HTTP %s %s" % (s, r.get("detail") if isinstance(r, dict) else r))
+    s, r = call(O, "DELETE", "/business/package_items/%s" % pit)
+    s2, r2 = call(O, "DELETE", "/business/packages/%s" % pk)
+    check("#10", "remove item, then delete an unsold package", s == 200 and s2 == 200, "HTTP %s/%s" % (s, s2))
+    s, r = call(O, "DELETE", "/business/services/%s" % sid)
+    check("#6", "unused service deletes", s == 200, "HTTP %s" % s)
+    # #7 products
+    s, r = call(O, "POST", "/business/products", {"name": "QA Prod " + tag, "price": 2200, "track_stock": True})
+    prid = item(r).get("id"); track("products", prid)
+    s2, r2 = call(O, "PATCH", "/business/products/%s" % prid, {"price": 2400, "sku": "QA-" + tag})
+    s3, L = call(O, "GET", "/business/products")
+    got = [x for x in L.get("items", []) if x.get("id") == prid]
+    check("#7", "add + edit product persists", s == 200 and s2 == 200 and got and got[0]["price"] == 2400, "HTTP %s/%s price=%s" % (s, s2, got[0]["price"] if got else None))
+    call(O, "POST", "/business/stock_movements", {"product_id": prid, "kind": "opening", "quantity_delta": 5})
+    s, r = call(O, "DELETE", "/business/products/%s" % prid)
+    check("#7", "product with stock history cannot be deleted", s == 409, "HTTP %s" % s)
+    s, r = call(O, "PATCH", "/business/products/%s" % prid, {"active": False})
+    check("#7", "product can be deactivated instead", s == 200 and item(r).get("active") is False, "HTTP %s" % s)
+    # #8 expenses
+    s, r = call(OP, "POST", "/business/expenses", {"description": "QA gloves " + tag, "amount": 1500, "category": "supplies", "method": "cash", "spent_on": "2026-09-30"})
+    eid = item(r).get("id"); track("expenses", eid)
+    check("#8/#11", "operator can record an expense", s == 200, "HTTP %s" % s)
+    s, r = call(OP, "PATCH", "/business/expenses/%s" % eid, {"amount": 1})
+    check("#11", "operator cannot edit an expense", s == 403, "HTTP %s" % s)
+    s, r = call(O, "PATCH", "/business/expenses/%s" % eid, {"amount": 1800})
+    s2, L = call(O, "GET", "/business/expenses")
+    got = [x for x in L.get("items", []) if x.get("id") == eid]
+    check("#8", "owner edit expense persists", s == 200 and got and got[0]["amount"] == 1800, "HTTP %s amount=%s" % (s, got[0]["amount"] if got else None))
+    s, r = call(OP, "DELETE", "/business/expenses/%s" % eid)
+    check("#11", "operator cannot delete an expense", s == 403, "HTTP %s" % s)
+    s, r = call(O, "DELETE", "/business/expenses/%s" % eid)
+    s2, L = call(O, "GET", "/business/expenses")
+    check("#8", "owner delete expense, gone on re-read", s == 200 and not [x for x in L.get("items", []) if x.get("id") == eid], "HTTP %s" % s)
+    # #11 rights: every owner-only write refused for the operator
+    for res, body in (("services", {"name": "QA op " + tag}), ("products", {"name": "QA op " + tag}), ("packages", {"name": "QA op " + tag}),
+                      ("staff", {"name": "QA op " + tag}), ("locations", {"name": "QA op " + tag}),
+                      ("business_policies", {"kind": "x", "title": "x", "body": "x"})):
+        s, r = call(OP, "POST", "/business/" + res, body)
+        if s == 200:
+            track(res, item(r).get("id"))
+        check("#11", "operator POST /business/%s refused" % res, s == 403, "HTTP %s" % s)
+    s, r = call(OP, "POST", "/business/services/import-onboarding")
+    check("#11", "operator cannot import services", s == 403, "HTTP %s" % s)
+    s, r = call(OP, "GET", "/operations/pnl")
+    check("#11", "operator cannot read profit & loss", s == 403, "HTTP %s" % s)
+    s, r = call(OP, "GET", "/team/hr")
+    check("#11", "operator cannot read HR records", s == 403, "HTTP %s" % s)
+    s, r = call(OP, "POST", "/business/customers", {"name": "QA op cust " + tag})
+    cid = item(r).get("id"); track("customers", cid)
+    s2, r2 = call(OP, "DELETE", "/business/customers/%s" % cid)
+    check("#11", "operator can add a customer but not delete one", s == 200 and s2 == 403, "HTTP %s/%s" % (s, s2))
+
+
 def a4_readonly():
     rows = sql("SELECT i.number, i.issued_on, i.total, i.status, coalesce(i.notes,''), i.created_at::timestamp(0), "
                "coalesce(c.name,'(no customer)') FROM invoices i LEFT JOIN customers c ON c.id=i.customer_id "
@@ -217,6 +303,17 @@ def a4_readonly():
     print("  audit trail for those tables:")
     for r in audit:
         print("   ", " | ".join(r))
+
+
+def a5_readonly():
+    rows = sql("SELECT name, price, duration_minutes, category, active FROM services WHERE tenant_id='%s' ORDER BY name" % IRFAN)
+    cfg = sql("SELECT services::text, price_list::text FROM tenant_config WHERE tenant_id='%s'" % IRFAN)
+    print("\nA5 (read-only, Dr Irfan): services table has %d row(s):" % len(rows))
+    for r in rows:
+        print("   ", " | ".join(r))
+    if cfg:
+        print("  onboarding services:", cfg[0][0][:300])
+        print("  onboarding prices:  ", cfg[0][1][:300])
 
 
 def main():
@@ -233,8 +330,8 @@ def main():
     before = counts(qa)
     try:
         for ph in phases:
-            if ph == "a4":
-                a4_readonly(); continue
+            if ph in ("a4", "a5"):
+                globals()[ph + "_readonly"](); continue
             globals()[ph](ctx)
     finally:
         cleanup(qa)

@@ -209,6 +209,31 @@ IN_USE = {
 }
 _DEACTIVATE = {"services", "products", "packages", "staff", "locations"}
 
+# Who may change what. Reading is open to everyone in the business; these are
+# the writes an operator (front desk) is refused. Defining what the business
+# sells and at what price, its people, places and rules is the owner's call,
+# as is removing or rewriting a record of money that already went out.
+OWNER_ROLES = ("owner", "techdeva_admin")
+OWNER_ONLY = {
+    "services": {"POST", "PATCH", "DELETE"},
+    "products": {"POST", "PATCH", "DELETE"},
+    "packages": {"POST", "PATCH", "DELETE"},
+    "package_items": {"POST", "PATCH", "DELETE"},
+    "staff": {"POST", "PATCH", "DELETE"},
+    "staff_services": {"POST", "PATCH", "DELETE"},
+    "locations": {"POST", "PATCH", "DELETE"},
+    "business_hours": {"POST", "PATCH", "DELETE"},
+    "business_policies": {"POST", "PATCH", "DELETE"},
+    "business_goals": {"POST", "PATCH", "DELETE"},
+    "expenses": {"PATCH", "DELETE"},
+    "customers": {"DELETE"},
+}
+
+
+def _allowed(resource, verb, role):
+    if verb in OWNER_ONLY.get(resource, ()) and role not in OWNER_ROLES:
+        raise HTTPException(403, "Only the business owner can do this.")
+
 
 @contextmanager
 def _readable_db_errors(resource):
@@ -351,6 +376,17 @@ def _onboarding_fallback(resource, cfg):
     return None
 
 
+def _unsaved_onboarding(P, tid, saved_rows):
+    """Onboarding services whose name is not in the services table yet."""
+    try:
+        cfg = P.load_config(tid) or {}
+    except Exception:
+        return []
+    items = _onboarding_fallback("services", cfg) or []
+    have = {str(r.get("name") or "").strip().lower() for r in saved_rows}
+    return [i for i in items if str(i["name"]).strip().lower() not in have]
+
+
 def make_business_router(P=None):
     router = APIRouter()
 
@@ -383,7 +419,45 @@ def make_business_router(P=None):
             if fallback:
                 return {"resource": resource, "count": len(fallback), "items": fallback,
                         "note": "from onboarding, not yet saved as editable records"}
-        return {"resource": resource, "count": len(rows), "items": rows}
+        out = {"resource": resource, "count": len(rows), "items": rows}
+        if resource == "services" and rows and P is not None:
+            pend = _unsaved_onboarding(P, tid, rows)
+            if pend:
+                out["pending_onboarding"] = pend
+        return out
+
+    @router.post("/business/services/import-onboarding")
+    def import_onboarding(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                          authorization: str | None = Header(None),
+                          td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Save the services the client listed during onboarding as real, editable
+        rows in the services table -- the one list appointments, bills and the AI
+        read. Idempotent: a name already saved is skipped, never duplicated."""
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        _allowed("services", "POST", role)
+        with tenant_session(tid, role) as cur:
+            cur.execute("SELECT name FROM services")
+            have = cur.fetchall()
+        todo = _unsaved_onboarding(P, tid, have) if P is not None else []
+        saved = []
+        with _readable_db_errors("services"), tenant_session(tid, role) as cur:
+            for s in todo:
+                price = s.get("price")
+                try:
+                    price = float(str(price).replace(",", "")) if price not in (None, "") else None
+                except ValueError:
+                    price = None
+                cur.execute(
+                    "INSERT INTO services (tenant_id, name, category, price, currency, duration_minutes, sort_order) "
+                    "VALUES (current_tenant(), %s, %s, %s, COALESCE(%s, 'PKR'), %s, %s) RETURNING id, name, price",
+                    (s["name"], s.get("category"), price, s.get("currency"),
+                     s.get("duration_minutes") if isinstance(s.get("duration_minutes"), int) else None,
+                     s.get("sort_order") or 0))
+                saved.append(cur.fetchone())
+            if saved:
+                record(cur, action="services.import_onboarding", resource="services", resource_id=None,
+                       actor=uid, detail={"saved": [x["name"] for x in saved]})
+        return {"saved": saved, "count": len(saved)}
 
     @router.post("/business/{resource}")
     def create_item(resource: str, body: dict = Body(...),
@@ -393,6 +467,7 @@ def make_business_router(P=None):
         spec = _spec(resource)
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
         _refuse_generic(resource, "POST")
+        _allowed(resource, "POST", role)
         data = _clean(spec, body, True)
         cols = ["tenant_id"] + list(data.keys())
         vals = [tid] + list(data.values())
@@ -413,6 +488,7 @@ def make_business_router(P=None):
         spec = _spec(resource)
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
         _refuse_generic(resource, "PATCH")
+        _allowed(resource, "PATCH", role)
         item_id = _uuid(item_id)
         data = _clean(spec, body, False)
         sets = ", ".join("{0} = %s".format(k) for k in data)
@@ -441,6 +517,7 @@ def make_business_router(P=None):
         spec = _spec(resource)
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
         _refuse_generic(resource, "DELETE")
+        _allowed(resource, "DELETE", role)
         item_id = _uuid(item_id)
         with tenant_session(tid, role) as cur:
             used = _in_use(cur, resource, item_id)

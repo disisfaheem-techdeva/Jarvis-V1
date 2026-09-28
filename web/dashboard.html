@@ -3379,6 +3379,342 @@ VIEWS.inventory = function(){
   return out;
 };
 
+/* ---------------------------------------------------------------- crudTable
+   One editable table for every simple catalogue/settings list: view, edit in
+   place, deactivate, delete. The server decides what is allowed (owner-only
+   writes, in-use rows refused); this only hides buttons an operator could not
+   use anyway and shows the server's reason when it says no.
+   spec: {key, resource, cols:[{f,label,type:'text'|'number'|'int'|'date'|'bool'|'select',opts,money}],
+          rows, ownerOnly:true, noDelete, empty:[title,msg], reload:fn} */
+var CRUD = { editing: {}, arm: {} };
+function crudCell(c, r){
+  var v = r[c.f];
+  if (c.type === 'bool') return v === false ? '<span class="tag">no</span>' : '<span class="tag">yes</span>';
+  if (c.money) return money(v, r.currency);
+  if (c.type === 'select' && c.opts) { for (var i = 0; i < c.opts.length; i++) if (String(c.opts[i][0]) === String(v)) return esc(c.opts[i][1]); }
+  if (c.type === 'date' && v) return esc(String(v).slice(0, 10));
+  return v === null || v === undefined || v === '' ? '—' : esc(v);
+}
+function crudInput(key, c, r){
+  var v = r[c.f], id = 'ce_' + key + '_' + c.f;
+  if (c.type === 'bool') return '<input type="checkbox" id="' + id + '"' + (v === false ? '' : ' checked') + '>';
+  if (c.type === 'select') return '<select class="fld" id="' + id + '">' + (c.blank ? '<option value="">' + esc(c.blank) + '</option>' : '') +
+    c.opts.map(function(o){ return '<option value="' + esc(o[0]) + '"' + (String(o[0]) === String(v) ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select>';
+  var t = c.type === 'number' || c.type === 'int' ? 'number' : (c.type === 'date' ? 'date' : 'text');
+  var val_ = v === null || v === undefined ? '' : (c.type === 'date' ? String(v).slice(0, 10) : v);
+  return '<input class="fld" id="' + id + '" type="' + t + '" value="' + esc(val_) + '" style="min-width:' + (t === 'number' ? 80 : 120) + 'px">';
+}
+function crudRead(key, c){
+  var e = document.getElementById('ce_' + key + '_' + c.f);
+  if (!e) return undefined;
+  if (c.type === 'bool') return e.checked;
+  var v = String(e.value).trim();
+  if (v === '') return null;
+  if (c.type === 'number') return Number(v);
+  if (c.type === 'int') return parseInt(v, 10);
+  return v;
+}
+function crudTable(sp){
+  var own = isOwner(), canWrite = own || !sp.ownerOnly;
+  var ed = CRUD.editing[sp.key];
+  if (!sp.rows.length) return '<div id="cm_' + sp.key + '" class="card-note" style="min-height:0"></div>' + empty(sp.empty ? sp.empty[0] : 'Nothing here yet', sp.empty ? sp.empty[1] : '');
+  var hasActive = sp.cols.some(function(c){ return c.f === 'active'; });
+  return '<div id="cm_' + sp.key + '" class="card-note" style="min-height:18px;padding:6px 16px"></div><div class="tbl-wrap"><table><thead><tr>' +
+    sp.cols.map(function(c){ return '<th>' + esc(c.label) + '</th>'; }).join('') + (canWrite ? '<th></th>' : '') + '</tr></thead><tbody>' +
+    sp.rows.map(function(r){
+      if (!r.id) return '<tr>' + sp.cols.map(function(c){ return '<td>' + crudCell(c, r) + '</td>'; }).join('') + (canWrite ? '<td><span class="card-note">not saved yet</span></td>' : '') + '</tr>';
+      if (ed === r.id) return '<tr>' + sp.cols.map(function(c){ return '<td>' + (c.readonly ? crudCell(c, r) : crudInput(sp.key, c, r)) + '</td>'; }).join('') +
+        '<td><button class="btn primary" data-cs="' + sp.key + '" data-id="' + esc(r.id) + '">Save</button> <button class="btn" data-cc="' + sp.key + '">Cancel</button></td></tr>';
+      var btns = '';
+      if (canWrite) {
+        btns = '<button class="btn" data-ce="' + sp.key + '" data-id="' + esc(r.id) + '">Edit</button>' +
+          (hasActive ? ' <button class="btn" data-ca="' + sp.key + '" data-id="' + esc(r.id) + '" data-on="' + (r.active === false ? '1' : '0') + '">' + (r.active === false ? 'Activate' : 'Deactivate') + '</button>' : '') +
+          (sp.noDelete || (sp.deleteOwnerOnly && !own) ? '' : ' <button class="btn" data-cd="' + sp.key + '" data-id="' + esc(r.id) + '">' + (CRUD.arm[sp.key] === r.id ? 'Tap again to delete' : 'Delete') + '</button>');
+      }
+      return '<tr' + (r.active === false ? ' style="opacity:.6"' : '') + '>' + sp.cols.map(function(c){ return '<td>' + crudCell(c, r) + '</td>'; }).join('') +
+        (canWrite ? '<td style="white-space:nowrap">' + btns + '</td>' : '') + '</tr>';
+    }).join('') + '</tbody></table></div>';
+}
+function crudWire(sp){
+  var msg = function(m, bad){ var e = document.getElementById('cm_' + sp.key); if (e) { e.textContent = m; e.style.color = bad ? 'var(--danger)' : 'var(--growth)'; } };
+  var after = function(r, okMsg){
+    if (!r.ok) { var why = (r.data && r.data.detail) || ('Refused (' + r.status + ').'); renderShell(); setTimeout(function(){ msg(why, true); }, 0); return; }
+    CRUD.editing[sp.key] = null; CRUD.arm[sp.key] = null;
+    sp.reload(); setTimeout(function(){ msg(okMsg); }, 60);
+  };
+  document.querySelectorAll('[data-ce="' + sp.key + '"]').forEach(function(b){ b.onclick = function(){ CRUD.editing[sp.key] = b.getAttribute('data-id'); CRUD.arm[sp.key] = null; renderShell(); }; });
+  document.querySelectorAll('[data-cc="' + sp.key + '"]').forEach(function(b){ b.onclick = function(){ CRUD.editing[sp.key] = null; renderShell(); }; });
+  document.querySelectorAll('[data-cs="' + sp.key + '"]').forEach(function(b){
+    b.onclick = function(){
+      var body = {};
+      sp.cols.forEach(function(c){ if (c.readonly) return; var v = crudRead(sp.key, c); if (v !== undefined) body[c.f] = v; });
+      var bad = sp.cols.filter(function(c){ return c.required && (body[c.f] === null || body[c.f] === ''); });
+      if (bad.length) { msg(bad.map(function(c){ return c.label; }).join(', ') + ' cannot be empty.', true); return; }
+      if (sp.cols.some(function(c){ return (c.type === 'number' || c.type === 'int') && body[c.f] !== null && (isNaN(body[c.f]) || body[c.f] < 0); })) { msg('Numbers cannot be negative.', true); return; }
+      b.disabled = true;
+      api('/business/' + sp.resource + '/' + b.getAttribute('data-id'), { method: 'PATCH', body: body }).then(function(r){ after(r, 'Saved.'); });
+    };
+  });
+  document.querySelectorAll('[data-ca="' + sp.key + '"]').forEach(function(b){
+    b.onclick = function(){
+      b.disabled = true;
+      api('/business/' + sp.resource + '/' + b.getAttribute('data-id'), { method: 'PATCH', body: { active: b.getAttribute('data-on') === '1' } })
+        .then(function(r){ after(r, b.getAttribute('data-on') === '1' ? 'Activated.' : 'Deactivated. It stays on old records but is no longer offered.'); });
+    };
+  });
+  document.querySelectorAll('[data-cd="' + sp.key + '"]').forEach(function(b){
+    b.onclick = function(){
+      var id = b.getAttribute('data-id');
+      if (CRUD.arm[sp.key] !== id) { CRUD.arm[sp.key] = id; renderShell(); return; }
+      b.disabled = true;
+      api('/business/' + sp.resource + '/' + id, { method: 'DELETE' }).then(function(r){ after(r, 'Deleted.'); });
+    };
+  });
+}
+
+/* ----------------------------------------------- Services & Products (one list)
+   The services table is the single source of truth: appointments, bills,
+   packages and the AI all read it. Services the client typed during onboarding
+   and never saved are shown with a one-click "save as editable" (A5). */
+var SVC_COLS = [{f:'name', label:'Name', required:true}, {f:'category', label:'Category'}, {f:'price', label:'Price', type:'number', money:true},
+                {f:'duration_minutes', label:'Minutes', type:'int'}, {f:'active', label:'Active', type:'bool'}];
+var PRD_COLS = [{f:'name', label:'Name', required:true}, {f:'sku', label:'SKU'}, {f:'category', label:'Category'},
+                {f:'price', label:'Price', type:'number', money:true}, {f:'track_stock', label:'Track stock', type:'bool'},
+                {f:'low_stock_threshold', label:'Warn at', type:'number'}, {f:'active', label:'Active', type:'bool'}];
+function svcSpec(){ return { key:'svc', resource:'services', ownerOnly:true, cols:SVC_COLS, rows: items('services'),
+  empty:['No services yet', 'Add the ones you sell most often first.'], reload:function(){ need('services', '/business/services', true); } }; }
+function prdSpec(){ return { key:'prd', resource:'products', ownerOnly:true, cols:PRD_COLS, rows: items('products'),
+  empty:['No products yet', 'Add anything the business sells over the counter.'], reload:function(){ need('products', '/business/products', true); need('inventory', '/operations/inventory', true); } }; }
+function pendingOnboardingHTML(){
+  var d = S.services || {}, pend = d.pending_onboarding || [];
+  var fromFallback = (d.items || []).filter(function(x){ return !x.id; });
+  var list = pend.length ? pend : fromFallback;
+  if (!list.length) return '';
+  return '<div class="banner"><div class="banner-txt"><strong>' + list.length + ' service' + (list.length === 1 ? '' : 's') + ' from your onboarding ' +
+    (list.length === 1 ? 'is' : 'are') + ' not saved as editable services yet</strong><span>' +
+    esc(list.map(function(x){ return x.name + (x.price != null ? ' (' + Number(x.price).toLocaleString() + ')' : ''); }).join(', ')) +
+    '. Until saved they cannot be edited, booked with a price, or put in a package.</span></div>' +
+    (isOwner() ? '<button class="btn primary" id="svc_import">Save them as services</button>' : '<span class="card-note">The owner can save them.</span>') + '</div>';
+}
+VIEWS.catalogue = function(){
+  var out = '<h1>Services &amp; Products</h1><p class="sub">What the business sells. Appointments, bills, packages and your AI all use this one list.</p>';
+  if (!need('services', '/business/services') | !need('products', '/business/products'))
+    return out + panel('Services', loading('Loading the catalogue...'));
+  if (S.services === null || S.products === null) return out + panel('Services', errState('The catalogue service did not respond.'));
+  var own = isOwner();
+  out += pendingOnboardingHTML() + actbar();
+  if (own) out += panel('Add a service', '<div style="padding:12px 16px">' + row() + inp('svname', 'Service name *', 'text', 180) + inp('svprice', 'Price', 'number', 110) +
+    inp('svmins', 'Minutes', 'number', 100) + inp('svcat', 'Category', 'text', 130) + '<button class="btn primary" id="svadd">Add service</button></div></div>');
+  out += panel('Services', crudTable(svcSpec()), '<span class="pill count">' + items('services').filter(function(x){ return x.id; }).length + '</span>');
+  out += '<h2>Products</h2>';
+  if (own) out += panel('Add a product', '<div style="padding:12px 16px">' + row() + inp('prname', 'Product name *', 'text', 180) + inp('prprice', 'Price', 'number', 110) +
+    inp('prsku', 'SKU', 'text', 110) + inp('prcat', 'Category', 'text', 130) + '</div>' + row() +
+    '<label class="card-note" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="prtrack" checked> Track stock</label>' +
+    inp('prlow', 'Warn below', 'number', 120) + '<button class="btn primary" id="pradd">Add product</button></div>' +
+    '<div class="card-note">Opening stock is recorded on the Inventory page.</div></div>');
+  out += panel('Products', crudTable(prdSpec()), '<span class="pill count">' + items('products').length + '</span>');
+  if (!own) out += '<div class="card-note" style="margin-top:8px">Only the owner can change what the business sells or its prices.</div>';
+  setTimeout(function(){
+    crudWire(svcSpec()); crudWire(prdSpec());
+    var g = function(id){ return document.getElementById(id); };
+    if (g('svc_import')) g('svc_import').onclick = function(){
+      g('svc_import').disabled = true;
+      act('/business/services/import-onboarding', { method: 'POST' }, '').then(function(r){
+        if (r.ok) { need('services', '/business/services', true); setTimeout(function(){ say(r.data.count + ' service(s) saved. You can edit them now.'); }, 60); }
+        else g('svc_import').disabled = false;
+      });
+    };
+    if (g('svadd')) g('svadd').onclick = function(){
+      var n = val('svname'), p = numv('svprice'), m = numv('svmins');
+      if (!n) { say('A service needs a name.'); return; }
+      if ((p !== null && (isNaN(p) || p < 0)) || (m !== null && (isNaN(m) || m < 0))) { say('Price and minutes cannot be negative.'); return; }
+      g('svadd').disabled = true;
+      act('/business/services', {method:'POST', body:{ name: n, price: p, duration_minutes: m === null ? null : Math.round(m), category: val('svcat') || null }}, 'Service added.')
+        .then(function(r){ g('svadd') && (g('svadd').disabled = false); if (r.ok) need('services', '/business/services', true); });
+    };
+    if (g('pradd')) g('pradd').onclick = function(){
+      var n = val('prname'), p = numv('prprice'), low = numv('prlow');
+      if (!n) { say('A product needs a name.'); return; }
+      if ([p, low].some(function(x){ return x !== null && (isNaN(x) || x < 0); })) { say('Numbers cannot be negative.'); return; }
+      g('pradd').disabled = true;
+      act('/business/products', {method:'POST', body:{ name: n, price: p, sku: val('prsku') || null, category: val('prcat') || null,
+        track_stock: !!g('prtrack').checked, low_stock_threshold: low }}, 'Product added.')
+        .then(function(r){ g('pradd') && (g('pradd').disabled = false); if (r.ok) { need('products', '/business/products', true); need('inventory', '/operations/inventory', true); } });
+    };
+  }, 0);
+  return out;
+};
+
+/* --------------------------------------------------------------- Expenses */
+var EXP_METHODS = [['cash','Cash'],['card','Card'],['bank','Bank'],['online','Online'],['other','Other']];
+var EXP_COLS = [{f:'spent_on', label:'Date', type:'date', required:true}, {f:'description', label:'Description', required:true},
+                {f:'category', label:'Category'}, {f:'amount', label:'Amount', type:'number', money:true, required:true},
+                {f:'method', label:'Paid by', type:'select', opts:EXP_METHODS, blank:'—'}, {f:'notes', label:'Notes'}];
+function expSpec(){ return { key:'exp', resource:'expenses', ownerOnly:true, cols:EXP_COLS, rows: items('expenses'),
+  empty:['No expenses recorded', 'Record one above.'], reload:function(){ need('expenses', '/business/expenses', true); } }; }
+VIEWS.expenses = function(){
+  var out = '<h1>Expenses</h1><p class="sub">What the business spent, and on what.</p>';
+  if (!need('expenses', '/business/expenses')) return out + panel('Expenses', loading('Loading expenses...'));
+  if (S.expenses === null) return out + panel('Expenses', errState('The expense service did not respond.'));
+  out += panel('Record an expense', '<div style="padding:12px 16px">' + row() + inp('exdesc', 'What was it for? *', 'text', 200) + inp('examt', 'Amount *', 'number', 110) +
+    inp('excat', 'Category', 'text', 130) + inp('exdate', 'Date', 'date', 150) +
+    '<select class="fld" id="exmeth" style="min-width:110px"><option value="">Paid by…</option>' + EXP_METHODS.map(function(m){ return '<option value="' + m[0] + '">' + m[1] + '</option>'; }).join('') + '</select>' +
+    '<button class="btn primary" id="exadd">Record</button></div></div>' + actbar());
+  var list = items('expenses'), total = list.reduce(function(a, e){ return a + Number(e.amount || 0); }, 0);
+  out += panel('Expenses', crudTable(expSpec()) + (list.length ? '<div class="card-note" style="padding:8px 16px">' + list.length + ' recorded, ' + money(total) + ' in total.</div>' : ''),
+    '<span class="pill count">' + list.length + '</span>');
+  if (!isOwner()) out += '<div class="card-note" style="margin-top:8px">You can record expenses. Only the owner can change or delete one.</div>';
+  setTimeout(function(){
+    crudWire(expSpec());
+    var b = document.getElementById('exadd');
+    if (b) b.onclick = function(){
+      var desc = val('exdesc'), amt = numv('examt');
+      if (!desc) { say('An expense needs a description.'); return; }
+      if (amt === null || isNaN(amt) || !(amt > 0)) { say('An expense needs an amount above zero.'); return; }
+      b.disabled = true;
+      act('/business/expenses', {method:'POST', body:{ description: desc, amount: amt, category: val('excat') || 'general',
+        spent_on: val('exdate') || todayISO(), method: val('exmeth') || null }}, 'Expense recorded.')
+        .then(function(r){ b.disabled = false; if (r.ok) need('expenses', '/business/expenses', true); });
+    };
+  }, 0);
+  return out;
+};
+
+/* --------------------------------------------------------------- Packages
+   A package is a price plus real rows pointing at real services/products (the
+   database refuses a line that is both or neither, or a quantity under 1). A
+   package already sold on a bill cannot be deleted, only deactivated. */
+var PKG_COLS = [{f:'name', label:'Name', required:true}, {f:'description', label:'Description'}, {f:'price', label:'Price', type:'number', money:true},
+                {f:'validity_days', label:'Valid (days)', type:'int'}, {f:'terms', label:'Terms'}, {f:'active', label:'Active', type:'bool'}];
+function pkgSpec(){ return { key:'pkg', resource:'packages', ownerOnly:true, cols:PKG_COLS, rows: items('packages'),
+  empty:['No packages yet', 'Create one above, then add what it includes.'], reload:function(){ need('packages', '/business/packages', true); } }; }
+VIEWS.packages = function(){
+  var out = '<h1>Packages</h1><p class="sub">Bundles sold at one price. What is inside is listed, not implied.</p>';
+  if (!need('packages', '/business/packages') | !need('pkgitems', '/business/package_items') |
+      !need('services', '/business/services') | !need('products', '/business/products'))
+    return out + panel('Packages', loading('Loading packages...'));
+  if (S.packages === null) return out + panel('Packages', errState('The catalogue service did not respond.'));
+  var own = isOwner(), pkgs = items('packages');
+  if (own) out += panel('Create a package', '<div style="padding:12px 16px">' + row() + inp('pkname', 'Package name *', 'text', 180) + inp('pkprice', 'Price', 'number', 110) +
+    inp('pkdays', 'Valid for (days)', 'number', 140) + '</div>' + row() + inp('pkdesc', 'Description', 'text', 220) + inp('pkterms', 'Terms', 'text', 180) +
+    '<button class="btn primary" id="pkadd">Create</button></div></div>');
+  out += actbar();
+  out += panel('Packages', crudTable(pkgSpec()), '<span class="pill count">' + pkgs.length + '</span>');
+  var svcs = realItems('services'), prods = realItems('products'), all = items('pkgitems');
+  pkgs.forEach(function(p){
+    var its = all.filter(function(i){ return i.package_id === p.id; });
+    var inner = its.length ? '<div class="tbl-wrap"><table><thead><tr><th>Item</th><th>Kind</th><th>Quantity</th>' + (own ? '<th></th>' : '') + '</tr></thead><tbody>' +
+      its.map(function(i){
+        var isS = !!i.service_id;
+        return '<tr><td>' + esc(isS ? nameOf(svcs, i.service_id) : nameOf(prods, i.product_id)) + '</td><td><span class="tag">' + (isS ? 'service' : 'product') + '</span></td>' +
+          '<td>' + (own ? '<input class="fld" type="number" min="1" value="' + esc(i.quantity) + '" id="pq_' + esc(i.id) + '" style="width:80px"> <button class="btn" data-pqs="' + esc(i.id) + '">Save</button>' : esc(i.quantity)) + '</td>' +
+          (own ? '<td><button class="btn" data-pqd="' + esc(i.id) + '">Remove</button></td>' : '') + '</tr>';
+      }).join('') + '</tbody></table></div>'
+      : '<div class="card-note" style="padding:8px 16px">Nothing inside yet. A package with no contents is a price with nothing behind it.</div>';
+    if (own) inner += '<div style="padding:8px 16px">' + row() + select('pki_' + p.id, svcs.map(function(x){ return {id:'s:' + x.id, name:x.name}; })
+        .concat(prods.map(function(x){ return {id:'p:' + x.id, name:x.name + ' (product)'}; })), 'Add a service or product') +
+      '<input class="fld" type="number" min="1" value="1" id="pkq_' + esc(p.id) + '" style="width:80px"><button class="btn primary" data-pkadd="' + esc(p.id) + '">Add</button></div></div>';
+    out += panel('Inside ' + p.name + (p.active === false ? ' (inactive)' : ''), inner, '<span class="tag">' + money(p.price, p.currency) + '</span>');
+  });
+  setTimeout(function(){
+    crudWire(pkgSpec());
+    var reloadItems = function(){ need('pkgitems', '/business/package_items', true); };
+    var g = function(id){ return document.getElementById(id); };
+    if (g('pkadd')) g('pkadd').onclick = function(){
+      var n = val('pkname'), pr = numv('pkprice'), d = numv('pkdays');
+      if (!n) { say('A package needs a name.'); return; }
+      if (pr !== null && (isNaN(pr) || pr < 0)) { say('Price cannot be negative.'); return; }
+      if (d !== null && (isNaN(d) || d < 1)) { say('Validity must be at least 1 day, or left empty.'); return; }
+      g('pkadd').disabled = true;
+      act('/business/packages', {method:'POST', body:{ name: n, price: pr, validity_days: d === null ? null : Math.round(d),
+        description: val('pkdesc') || null, terms: val('pkterms') || null }}, 'Package created. Now add what it includes.')
+        .then(function(r){ g('pkadd') && (g('pkadd').disabled = false); if (r.ok) need('packages', '/business/packages', true); });
+    };
+    document.querySelectorAll('[data-pkadd]').forEach(function(b){
+      b.onclick = function(){
+        var pid = b.getAttribute('data-pkadd'), sel = val('pki_' + pid), q = parseInt(val('pkq_' + pid), 10);
+        if (!sel) { say('Pick a service or product to add.'); return; }
+        if (!(q >= 1)) { say('Quantity must be at least 1.'); return; }
+        var body = { package_id: pid, quantity: q };
+        if (sel.indexOf('s:') === 0) body.service_id = sel.slice(2); else body.product_id = sel.slice(2);
+        b.disabled = true;
+        act('/business/package_items', {method:'POST', body: body}, 'Added to the package.').then(function(r){ b.disabled = false; if (r.ok) reloadItems(); });
+      };
+    });
+    document.querySelectorAll('[data-pqs]').forEach(function(b){
+      b.onclick = function(){
+        var id = b.getAttribute('data-pqs'), q = parseInt(val('pq_' + id), 10);
+        if (!(q >= 1)) { say('Quantity must be at least 1.'); return; }
+        act('/business/package_items/' + id, {method:'PATCH', body:{ quantity: q }}, 'Quantity saved.').then(function(r){ if (r.ok) reloadItems(); });
+      };
+    });
+    document.querySelectorAll('[data-pqd]').forEach(function(b){
+      b.onclick = function(){ act('/business/package_items/' + b.getAttribute('data-pqd'), {method:'DELETE'}, 'Removed from the package.').then(function(r){ if (r.ok) reloadItems(); }); };
+    });
+  }, 0);
+  return out;
+};
+
+/* ------------------------------------------------------- Business Settings
+   Same tabs, now editable in place. Services live on the Services page only,
+   so there is one list to keep right (A5). */
+var SET_TABS = [
+  {key:'staff', label:'Staff', cols:[{f:'name',label:'Name',required:true},{f:'role',label:'Role'},{f:'department',label:'Department'},{f:'phone',label:'Phone'},{f:'email',label:'Email'},{f:'active',label:'Active',type:'bool'}]},
+  {key:'locations', label:'Locations', cols:[{f:'name',label:'Name',required:true},{f:'address',label:'Address'},{f:'city',label:'City'},{f:'phone',label:'Phone'},{f:'is_primary',label:'Primary',type:'bool'},{f:'active',label:'Active',type:'bool'}]},
+  {key:'business_hours', label:'Opening hours', cols:[{f:'day_of_week',label:'Day',type:'select',opts:[[0,'Sunday'],[1,'Monday'],[2,'Tuesday'],[3,'Wednesday'],[4,'Thursday'],[5,'Friday'],[6,'Saturday']],required:true},{f:'opens',label:'Opens'},{f:'closes',label:'Closes'},{f:'is_closed',label:'Closed all day',type:'bool'}]},
+  {key:'business_policies', label:'Policies', cols:[{f:'kind',label:'Kind',required:true},{f:'title',label:'Title',required:true},{f:'body',label:'Policy',required:true},{f:'active',label:'Active',type:'bool'}]},
+  {key:'business_goals', label:'Goals', cols:[{f:'metric',label:'Metric',required:true},{f:'label',label:'Label'},{f:'target',label:'Target',type:'number',required:true},{f:'period',label:'Period'},{f:'active',label:'Active',type:'bool'}]}
+];
+var SET_TAB = 'staff';
+VIEWS.settings = function(){
+  var out = '<h1>Business Settings</h1><p class="sub">What your AI workforce knows about this business. It only ever uses what you save here.</p>';
+  var sec = SET_TABS.filter(function(t){ return t.key === SET_TAB; })[0] || SET_TABS[0];
+  out += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px"><a class="btn" href="#/catalogue">Services &amp; prices →</a>' +
+    SET_TABS.map(function(t){ return '<button class="btn settab' + (t.key === sec.key ? ' primary' : '') + '" data-tab="' + t.key + '">' + esc(t.label) + '</button>'; }).join('') + '</div>';
+  var k = 'biz_' + sec.key;
+  if (!need(k, '/business/' + sec.key)) return out + panel(sec.label, loading('Loading ' + sec.label.toLowerCase() + '...'));
+  if (S[k] === null) return out + panel(sec.label, errState('Could not load ' + sec.label.toLowerCase() + '.'));
+  var sp = { key: 'set_' + sec.key, resource: sec.key, ownerOnly: true, cols: sec.cols, rows: (S[k].items || []),
+             empty: ['Nothing added yet', isOwner() ? 'Add the first one above.' : ''], reload: function(){ need(k, '/business/' + sec.key, true); } };
+  if (isOwner()) {
+    out += panel('Add ' + sec.label.toLowerCase(), '<div style="padding:12px 16px">' + row() + sec.cols.filter(function(c){ return c.type !== 'bool'; }).map(function(c){
+      if (c.type === 'select') return '<select class="fld setf" data-f="' + c.f + '">' + c.opts.map(function(o){ return '<option value="' + o[0] + '">' + esc(o[1]) + '</option>'; }).join('') + '</select>';
+      return '<input class="fld setf" data-f="' + c.f + '" data-t="' + (c.type || '') + '" placeholder="' + esc(c.label + (c.required ? ' *' : '')) + '"' +
+        (c.type === 'number' ? ' type="number"' : '') + ' style="flex:1;min-width:120px">';
+    }).join('') + '<button class="btn primary" id="setadd">Add</button></div></div>');
+  }
+  out += actbar() + panel(sec.label, crudTable(sp), '<span class="pill count">' + sp.rows.length + '</span>');
+  out += '<h2>Publish to your AI workforce</h2><div class="panel"><div style="padding:16px"><div class="card-note" style="margin-bottom:10px">Publishing makes the saved details authoritative: ' +
+    'your agents will quote these prices and hours.</div><button class="btn primary" id="pubbtn">Publish business brain</button><div id="pubout" class="card-note" style="margin-top:10px"></div></div></div>';
+  setTimeout(function(){
+    crudWire(sp);
+    document.querySelectorAll('.settab').forEach(function(b){ b.onclick = function(){ SET_TAB = b.getAttribute('data-tab'); renderShell(); }; });
+    var add = document.getElementById('setadd');
+    if (add) add.onclick = function(){
+      var body = {};
+      document.querySelectorAll('.setf').forEach(function(f){
+        var v = String(f.value).trim(); if (v === '') return;
+        var c = sec.cols.filter(function(x){ return x.f === f.getAttribute('data-f'); })[0];
+        body[c.f] = c.type === 'number' ? Number(v) : (c.type === 'select' ? parseInt(v, 10) : v);
+      });
+      var miss = sec.cols.filter(function(c){ return c.required && (body[c.f] === undefined || (typeof body[c.f] === 'number' && isNaN(body[c.f]))); });
+      if (miss.length) { say(miss.map(function(c){ return c.label; }).join(' and ') + ' required.'); return; }
+      add.disabled = true;
+      act('/business/' + sec.key, {method:'POST', body: body}, 'Saved.').then(function(r){ add.disabled = false; if (r.ok) need(k, '/business/' + sec.key, true); });
+    };
+    var pub = document.getElementById('pubbtn');
+    if (pub) pub.onclick = function(){
+      var o = document.getElementById('pubout'); o.textContent = 'Publishing...';
+      api('/brain/publish', {method:'POST', body:{}}).then(function(r){
+        if (!r.ok) { o.textContent = (r.data && r.data.detail) || 'Could not publish.'; o.style.color = 'var(--danger)'; return; }
+        var w = r.data.written || [];
+        o.innerHTML = '<span style="color:var(--growth)">' + esc(r.data.message || 'Published.') + '</span>' + (w.length ? '<br>Updated: ' + esc(w.join(', ')) : '');
+      });
+    };
+  }, 0);
+  return out;
+};
+
 function renderShell(){
   var v = currentView();
   var id = bizIdentity();
