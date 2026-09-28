@@ -221,6 +221,7 @@ var NAV = [
   { label:null, items:[ {id:'overview', name:'Overview'} ] },
   { label:'CRM', items:[
       {id:'leads', name:'Leads'},
+      {id:'whatsapp', name:'WhatsApp'},
       {id:'customers', name:'Customers', soon:true},
       {id:'appointments', name:'Appointments', soon:true},
       {id:'revenue', name:'Sales / Revenue', soon:true}
@@ -532,6 +533,14 @@ function waMount(){
     if (d.status === 'pairing') { waPoll(); waStop(); WA_POLL = setInterval(waPoll, 3000); }
   });
 }
+
+VIEWS.whatsapp = function(){
+  var out = '<h1>WhatsApp</h1><p class="sub">Connect your business WhatsApp number to your AI agent. '
+    + 'Tap Connect, then scan the QR code with the phone that has your business WhatsApp.</p>';
+  out += panel('Your WhatsApp number', '<div id="wa">' + loading('Checking your number...') + '</div>');
+  waMount();
+  return out;
+};
 
 VIEWS.integrations = function(){
   var out = '<h1>Integrations</h1><p class="sub">What this business is actually connected to. A channel is shown as connected only when a credential is stored for it.</p>';
