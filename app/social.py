@@ -8,10 +8,15 @@ Publishing uses the Meta connection the owner made through /connect/meta: the
 page access tokens captured at connect time live, encrypted, in
 integrations.credentials['pages'].
 """
+import base64
+import binascii
+import os
 import re
+import secrets
 
 import requests
 from fastapi import APIRouter, Body, Cookie, Header, HTTPException
+from fastapi.responses import Response
 
 from .audit import record
 from .auth import SESSION_COOKIE
@@ -19,6 +24,21 @@ from .crypto import decrypt_json
 from .db import tenant_session
 
 GRAPH = "https://graph.facebook.com/v21.0"
+# Pictures for posts are served from this API's public address so Meta can fetch them.
+PUBLIC_BASE = os.environ.get("OAUTH_REDIRECT_BASE", "https://api.techdeva.net").strip().rstrip("/")
+MEDIA_MAX = 4 * 1024 * 1024
+_TOKEN = re.compile(r"^[0-9a-f]{40}$")
+
+
+def media_url(token):
+    return "%s/media/%s.jpg" % (PUBLIC_BASE, token)
+
+
+def is_our_media(url):
+    """A picture link this platform issued (the only kind Jarvis attaches)."""
+    url = (url or "").strip()
+    pre = PUBLIC_BASE + "/media/"
+    return url.startswith(pre) and bool(_TOKEN.match(url[len(pre):].replace(".jpg", "", 1)))
 PLATFORMS = ("facebook", "instagram")
 COLS = ("id, platforms, caption, image_url, status, results, source, created_by, "
         "approved_by, created_at, updated_at, published_at")
@@ -153,6 +173,36 @@ def make_social_router():
                            "instagram": p.get("ig_username") or (True if p.get("ig_id") else None)}
                           for p in pages]}
 
+    @router.post("/media")
+    def upload_media(body: dict = Body(...),
+                     x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                     authorization: str | None = Header(None),
+                     td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Store a picture for a post and return the public link Meta will fetch.
+        JPEG only (Instagram accepts nothing else); the browser converts first."""
+        tid, role, uid = _ident(x_tenant_id, x_role, authorization, td_session)
+        _owner_only(role)
+        data = str(body.get("image") or "")
+        if not data.startswith("data:image/jpeg;base64,"):
+            raise HTTPException(400, "Send the picture as a JPEG from the dashboard.")
+        try:
+            raw = base64.b64decode(data.split(",", 1)[1], validate=True)
+        except (ValueError, binascii.Error):
+            raise HTTPException(400, "That picture could not be read.")
+        if not raw.startswith(b"\xff\xd8"):
+            raise HTTPException(400, "That is not a JPEG picture.")
+        if len(raw) > MEDIA_MAX:
+            raise HTTPException(413, "That picture is larger than 4 MB. Try a smaller one.")
+        token = secrets.token_hex(20)
+        with tenant_session(tid, role) as cur:
+            cur.execute("INSERT INTO social_media (tenant_id, token, mime, bytes, byte_size, created_by) "
+                        "VALUES (current_tenant(), %s, 'image/jpeg', %s, %s, %s) RETURNING id",
+                        (token, raw, len(raw), str(uid) if uid else None))
+            mid = cur.fetchone()["id"]
+            record(cur, action="social.media", resource="social_media", resource_id=str(mid),
+                   actor=str(uid), actor_type="human", status="ok", detail={"bytes": len(raw)}, error=None)
+        return {"id": str(mid), "url": media_url(token), "bytes": len(raw)}
+
     @router.get("/posts")
     def list_posts(tenant: str | None = None,
                    x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
@@ -268,5 +318,29 @@ def make_social_router():
                    status="ok" if status == "published" else "error",
                    detail=results, error=None if all(oks) else "not every platform posted")
         return {"post": row, "status": status, "results": results}
+
+    return router
+
+
+def make_media_router():
+    """GET /media/<token>.jpg -- public on purpose: Facebook and Instagram fetch
+    the picture from here when a post is published. The 160-bit token is the
+    only way to name a picture; nothing lists them."""
+    router = APIRouter(tags=["social"])
+
+    @router.get("/media/{name}")
+    def media(name: str):
+        token = name[:-4] if name.endswith(".jpg") else name
+        if not _TOKEN.match(token):
+            raise HTTPException(404, "Not found.")
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("SELECT bytes FROM social_media WHERE token = %s", (token,))
+            row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "Not found.")
+        return Response(content=bytes(row["bytes"]), media_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=86400",
+                                 "X-Content-Type-Options": "nosniff",
+                                 "Content-Security-Policy": "default-src 'none'"})
 
     return router

@@ -19,6 +19,7 @@ import base64
 import io
 import json
 import re
+import time
 import uuid
 import wave
 
@@ -26,7 +27,7 @@ import requests
 from fastapi import APIRouter, Body, Cookie, Header, HTTPException, Response
 
 from . import business as biz
-from .ai import AIUnavailable, generate_json
+from .ai import AIUnavailable, generate_json, fast as ai_fast, last_model as ai_last_model
 from .audit import record
 from .auth import AuthError, SESSION_COOKIE, resolve_scope
 from .db import tenant_session
@@ -57,6 +58,12 @@ BUSINESS_MATCH_COLUMN = {
     "business_policies": "title", "business_goals": "label",
     "business_hours": "day_of_week",
 }
+
+VOICE_RULE = """
+
+VOICE MODE: the owner is speaking to you and will HEAR your reply. Make "reply"
+one or two short spoken sentences (under 35 words), no lists, no markdown, no
+symbols. Still do the full action they asked for."""
 
 CLASSIFY = """You turn a business owner's instruction into one action for their
 AI business platform. Answer with JSON only.
@@ -251,6 +258,11 @@ def _with_facts(tid, role, message):
 # speech models. Tried in order; a busy model falls through to the next.
 _TTS_MODELS = ("gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts",
                "gemini-2.5-flash-preview-tts")
+# A voice that takes longer than this is worse than the browser's own voice,
+# which the dashboard falls back to. Was 25 s per model (up to 75 s of silence).
+TTS_TIMEOUT = 8
+TTS_BUDGET = 12
+_TTS_CACHE = {}          # text -> wav, last 64 phrases ("Done.", repeated answers)
 
 
 def _pcm_to_wav(pcm: bytes, rate: int) -> bytes:
@@ -272,7 +284,11 @@ def _tts(text: str, urdu: bool) -> bytes:
     style = ("Read this aloud in natural, warm Pakistani Urdu, like a friendly assistant: "
              if urdu else "Read this aloud in a warm, friendly, clear voice: ")
     last = "no model tried"
+    started = time.time()
     for m in _TTS_MODELS:
+        if time.time() - started > TTS_BUDGET:
+            last += "; out of time after %ds" % TTS_BUDGET
+            break
         try:
             r = requests.post(
                 f'{base_url("gemini")}/v1beta/models/{m}:generateContent',
@@ -282,7 +298,7 @@ def _tts(text: str, urdu: bool) -> bytes:
                           "responseModalities": ["AUDIO"],
                           "speechConfig": {"voiceConfig": {
                               "prebuiltVoiceConfig": {"voiceName": "Kore"}}}}},
-                timeout=25)
+                timeout=(4, TTS_TIMEOUT))
             if r.status_code >= 400:
                 last = "%s_%s" % (m, r.status_code)
                 continue
@@ -302,7 +318,7 @@ def make_console_router():
     router = APIRouter(prefix="/console", tags=["console"])
 
     @router.post("")
-    def ask(body: dict = Body(...),
+    def ask(response: Response, body: dict = Body(...),
             x_tenant_id: str | None = Header(None),
             x_role: str | None = Header(None),
             authorization: str | None = Header(None),
@@ -315,12 +331,23 @@ def make_console_router():
         if len(message) > 2000:
             raise HTTPException(400, "That is too long. Say it in a sentence or two.")
 
+        # Voice conversation: the answer is spoken, so keep it to what a person
+        # can listen to. Timing goes back in headers so a slow turn can be
+        # pinned on the model or the voice, not guessed at.
+        voice = bool(body.get("voice"))
+        if body.get("image_url"):
+            message += "\n[The owner attached a picture to this message, for a social media post.]"
+        system = CLASSIFY + LANG_RULE + FACTS_RULE + (VOICE_RULE if voice else "")
+        t0 = time.time()
         try:
             # No retry here on purpose. A person is sitting in front of this
             # box: a second full pass through the model chain turns a slow
             # answer into a minute of silence, and silence reads as broken.
-            out = generate_json(CLASSIFY + LANG_RULE + FACTS_RULE, _with_facts(tid, role, message),
-                                required_keys=("kind",), _retry=False)
+            with ai_fast():
+                out = generate_json(system, _with_facts(tid, role, message),
+                                    required_keys=("kind",), _retry=False)
+            response.headers["Server-Timing"] = "think;dur=%d" % int((time.time() - t0) * 1000)
+            response.headers["X-Jarvis-Model"] = ai_last_model() or ""
         except AIUnavailable as e:
             # Better to say the console is deaf than to guess at an instruction
             # that might change what the business says to its customers.
@@ -374,10 +401,13 @@ def make_console_router():
         if kind == "post":
             if role not in ("owner", "techdeva_admin"):
                 raise HTTPException(403, "Only the business owner can post for the business.")
-            from .social import create_draft
+            from .social import create_draft, is_our_media
+            # A picture the owner attached in Jarvis wins over any link the
+            # model extracted; only links this platform issued are accepted.
+            attached = body.get("image_url") if is_our_media(body.get("image_url")) else None
             with tenant_session(tid, role) as cur:
                 draft = create_draft(cur, tid, uid, out.get("caption") or message,
-                                     out.get("platforms"), out.get("image_url") or None)
+                                     out.get("platforms"), attached or out.get("image_url") or None)
             return {"kind": "post", "post": draft,
                     "reply": "I drafted this post. Check it, then press Approve & post."}
         if kind == "business":
@@ -554,7 +584,16 @@ def make_console_router():
         if not text:
             raise HTTPException(400, "Nothing to say.")
         urdu = body.get("lang") == "ur" or any("\u0600" <= c <= "\u06ff" for c in text)
-        return Response(content=_tts(text, urdu), media_type="audio/wav",
-                        headers={"Cache-Control": "no-store"})
+        t0 = time.time()
+        key = ("ur:" if urdu else "en:") + text
+        wav = _TTS_CACHE.get(key)
+        if wav is None:
+            wav = _tts(text, urdu)
+            if len(_TTS_CACHE) >= 64:
+                _TTS_CACHE.pop(next(iter(_TTS_CACHE)))
+            _TTS_CACHE[key] = wav
+        return Response(content=wav, media_type="audio/wav",
+                        headers={"Cache-Control": "no-store",
+                                 "Server-Timing": "voice;dur=%d" % int((time.time() - t0) * 1000)})
 
     return router

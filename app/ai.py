@@ -34,6 +34,8 @@ import requests
 
 # Set while generate_json runs, so providers that can be asked for strict JSON are.
 _JSON_MODE = threading.local()
+_FAST = threading.local()
+_LAST = threading.local()     # set by fast(): short, low-thinking replies for a person waiting
 
 DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-5",
@@ -56,12 +58,16 @@ def _run_capped(fn, *a):
         _POOL = cf.ThreadPoolExecutor(max_workers=16, thread_name_prefix="ai")
     json_on = getattr(_JSON_MODE, "on", False)
 
+    fast_on = getattr(_FAST, "on", False)
+
     def call():
-        _JSON_MODE.on = json_on   # thread-local: carry the caller's mode across
+        _JSON_MODE.on = json_on   # thread-local: carry the caller's modes across
+        _FAST.on = fast_on
         try:
             return fn(*a)
         finally:
             _JSON_MODE.on = False
+            _FAST.on = False
 
     fut = _POOL.submit(call)
     try:
@@ -144,17 +150,37 @@ def _call_anthropic(system: str, prompt: str) -> str:
     return "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
 
 
+def _gemini_fast_thinking(model: str):
+    """Least thinking the model allows. Gemini 2.5/3 Flash models reason before
+    answering by default, which adds seconds a person waiting on Jarvis can hear.
+    Only used in fast mode (the console); other AI work is unchanged."""
+    m = (model or "").lower()
+    if m.startswith("gemini-2.5") and "pro" not in m:
+        return {"thinkingBudget": 0}
+    if m.startswith("gemini-3"):
+        return {"thinkingLevel": "low"}
+    return None
+
+
 def _call_gemini(system: str, prompt: str) -> str:
+    model = model_name()
     url = (f'{base_url("gemini")}/v1beta/models/'
-           f"{model_name()}:generateContent")
-    r = requests.post(url, params={"key": _key()},
-                      json={"system_instruction": {"parts": [{"text": system}]},
-                            "contents": [{"parts": [{"text": prompt}]}],
-                            "generationConfig": dict(
-                                {"maxOutputTokens": AI_MAX_TOKENS},
-                                **({"responseMimeType": "application/json"}
-                                   if getattr(_JSON_MODE, "on", False) else {}))},
-                      timeout=AI_TIMEOUT)
+           f"{model}:generateContent")
+    fast = getattr(_FAST, "on", False)
+    cfg = {"maxOutputTokens": 800 if fast else AI_MAX_TOKENS}
+    if getattr(_JSON_MODE, "on", False):
+        cfg["responseMimeType"] = "application/json"
+    think = _gemini_fast_thinking(model) if fast else None
+    if think:
+        cfg["thinkingConfig"] = think
+    body = {"system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": cfg}
+    r = requests.post(url, params={"key": _key()}, json=body, timeout=AI_TIMEOUT)
+    if r.status_code == 400 and think and "thinking" in r.text.lower():
+        # this model does not take that setting: ask again without it
+        cfg.pop("thinkingConfig", None)
+        r = requests.post(url, params={"key": _key()}, json=body, timeout=AI_TIMEOUT)
     if r.status_code >= 400:
         raise AIUnavailable(f"gemini_{r.status_code}: {r.text[:200]}")
     cands = r.json().get("candidates", [])
@@ -360,6 +386,7 @@ def generate(system: str, prompt: str) -> str:
                 raise AIUnavailable(f"{key} returned an empty response")
             if (p, m) != chain[0]:
                 print(f"[ai] served by fallback {key}", flush=True)
+            _LAST.key = "%s:%s" % (p, m or DEFAULT_MODELS.get(p))
             return text
         except requests.RequestException as e:
             why = f"{key} unreachable: {type(e).__name__}"
@@ -395,6 +422,22 @@ def _extract_json(text: str):
         except json.JSONDecodeError:
             pass
     raise AIUnavailable("model did not return parseable JSON")
+
+
+class fast:
+    """with ai.fast(): ... -- a person is waiting (Jarvis): least thinking, short output."""
+    def __enter__(self):
+        _FAST.on = True
+        return self
+
+    def __exit__(self, *exc):
+        _FAST.on = False
+        return False
+
+
+def last_model():
+    """Which provider:model answered the last call on this thread (for timing)."""
+    return getattr(_LAST, "key", None)
 
 
 def generate_json(system: str, prompt: str, required_keys: tuple = (), _retry=True) -> dict:

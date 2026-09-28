@@ -30,7 +30,7 @@ from .brain import make_brain_router
 from .operations import make_operations_router
 from .brand import make_brand_router
 from .console import make_console_router
-from .social import make_social_router
+from .social import make_social_router, make_media_router
 from .founder import router as founder_router
 from .policy import make_policy_router
 from .whatsapp import make_whatsapp_router
@@ -71,6 +71,7 @@ app.include_router(make_policy_router())
 app.include_router(make_brand_router())
 app.include_router(make_console_router())
 app.include_router(make_social_router())
+app.include_router(make_media_router())
 app.include_router(make_team_router())
 app.include_router(make_booking_router())
 app.include_router(founder_router)

@@ -4228,6 +4228,253 @@ VIEWS.settings = function(){
   document.head.appendChild(st);
 })();
 
+/* ======================================================== Jarvis, conversation
+   ONE button. Press it once: Jarvis listens, answers, speaks, and listens again
+   by itself until you press it again (or stay silent twice).
+   Speed: the answer is spoken sentence by sentence (the first sentence starts
+   while the rest is still being voiced), and if the server voice is slow the
+   browser's own voice speaks instead of leaving silence. Each turn shows where
+   the time went (thinking vs voice) so a slow turn can be pinned down.
+   Pictures: 📎 attaches a photo; it is uploaded (JPEG, for Instagram) and the
+   post Jarvis drafts uses it. Nothing is published until Approve & post. */
+var JV = { state: 'idle', msg: '', rec: null, heard: '', audio: null, conv: false, silent: 0,
+           img: null, imgUrl: null, abort: null, timing: '' };
+var JV_LABEL = { idle: 'Ready', listening: 'Listening…', processing: 'Thinking…', responding: 'Speaking…', error: 'Something went wrong' };
+var JV_VOICE_WAIT_MS = 5000;   // after this, the browser voice speaks instead
+
+function jvSet(state, msg){
+  JV.state = state; if (msg !== undefined) JV.msg = msg || '';
+  var orb = document.getElementById('jv-orb'), lab = document.getElementById('jv-state'), m = document.getElementById('jv-msg'),
+      b = document.getElementById('con-mic'), t = document.getElementById('jv-time');
+  if (orb) orb.className = 'jv-orb ' + state;
+  if (lab) lab.textContent = JV.conv && state === 'idle' ? 'Conversation on' : JV_LABEL[state];
+  if (m) { m.textContent = JV.msg; m.style.color = state === 'error' ? 'var(--danger)' : 'var(--muted)'; }
+  if (t) t.textContent = JV.timing;
+  if (b) {
+    b.textContent = JV.conv ? '■  End conversation' : '●  Start conversation';
+    b.classList.toggle('stop', JV.conv);
+  }
+}
+function jvStopAudio(){
+  try { if (JV.abort) JV.abort.abort(); } catch (e) {}
+  try { if (JV.audio) { JV.audio.onended = null; JV.audio.pause(); } } catch (e) {}
+  try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {}
+}
+function jvSentences(text){
+  var parts = String(text).match(/[^.!?؟۔\n]+[.!?؟۔]*\s*/g) || [String(text)];
+  var first = parts.shift().trim(), rest = parts.join('').trim();
+  // A very short first sentence ("Done.") joins the next so the voice is not choppy.
+  if (first.length < 25 && rest) { var nx = (rest.match(/[^.!?؟۔\n]+[.!?؟۔]*\s*/) || [''])[0]; first += ' ' + nx.trim(); rest = rest.slice(nx.length).trim(); }
+  return [first, rest].filter(Boolean);
+}
+function jvBrowserVoice(text, urdu){
+  return new Promise(function(done){
+    try {
+      if (!window.speechSynthesis || !text) return done();
+      var u = new SpeechSynthesisUtterance(text); u.lang = urdu ? 'ur-PK' : 'en-US';
+      u.onend = done; u.onerror = done; window.speechSynthesis.speak(u);
+    } catch (e) { done(); }
+  });
+}
+/* Fetch one piece of speech; resolves to a blob URL, or null if slow/failed. */
+function jvFetchVoice(text, urdu, signal){
+  var t0 = Date.now();
+  return fetch('/console/speak', { method: 'POST', credentials: 'include', signal: signal,
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text, lang: urdu ? 'ur' : 'en' }) })
+    .then(function(r){ if (!r.ok) throw new Error('voice ' + r.status); return r.blob(); })
+    .then(function(b){ return { url: URL.createObjectURL(b), ms: Date.now() - t0 }; })
+    .catch(function(){ return null; });
+}
+function jvPlay(url){
+  return new Promise(function(done){
+    var a = new Audio(url); JV.audio = a; a.onended = done; a.onerror = done;
+    a.play().catch(done);
+  });
+}
+function jvSpeak(text){
+  jvStopAudio();
+  text = String(text || '').slice(0, 600);
+  JARVIS_LAST = text;
+  if (!text) return Promise.resolve();
+  var urdu = JARVIS_LANG === 'ur' || /[؀-ۿ]/.test(text);
+  var ctl = new AbortController(); JV.abort = ctl;
+  var parts = jvSentences(text);
+  var jobs = parts.map(function(p){ return jvFetchVoice(p, urdu, ctl.signal); });   // all start now
+  var first = Promise.race([jobs[0], new Promise(function(r){ setTimeout(function(){ r('slow'); }, JV_VOICE_WAIT_MS); })]);
+  return first.then(function(v){
+    if (ctl.signal.aborted) return;
+    if (!v || v === 'slow') {                          // server voice too slow: speak now in the browser
+      ctl.abort(); JV.timing += ' · voice: browser (server voice slow)';
+      jvSet(JV.state); return jvBrowserVoice(text, urdu);
+    }
+    JV.timing += ' · voice ' + (v.ms / 1000).toFixed(1) + 's'; jvSet(JV.state);
+    var chain = jvPlay(v.url);
+    for (var i = 1; i < jobs.length; i++) (function(job, part){
+      chain = chain.then(function(){ return ctl.signal.aborted ? null : job; })
+                   .then(function(w){ if (ctl.signal.aborted) return; return w ? jvPlay(w.url) : jvBrowserVoice(part, urdu); });
+    })(jobs[i], parts[i]);
+    return chain;
+  });
+}
+function jvListen(){
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { JV.conv = false; jvSet('error', 'Voice needs Chrome or Edge. You can type below instead.'); return; }
+  var rec; try { rec = new SR(); } catch (e) { JV.conv = false; jvSet('error', 'This browser would not start the microphone. Type below instead.'); return; }
+  JV.rec = rec; JV.heard = '';
+  var box = document.getElementById('con-in'), failed = null;
+  rec.lang = jarvisRecLang(); rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+  rec.onresult = function(ev){ JV.heard = jarvisHeard(ev); if (box) box.value = JV.heard; };
+  rec.onerror = function(ev){ failed = ev.error || 'unknown'; };
+  rec.onend = function(){
+    JV.rec = null;
+    if (!JV.conv) return;
+    if (failed && failed !== 'no-speech' && failed !== 'aborted') { JV.conv = false; jvSet('error', jvMicError(failed)); return; }
+    if (JV.heard.trim()) { JV.silent = 0; JARVIS_SPOKEN = true; consoleSend(); return; }
+    JV.silent++;
+    if (JV.silent >= 2) { JV.conv = false; jvSet('idle', 'Conversation ended: I did not hear anything.'); return; }
+    jvListen();
+  };
+  try { rec.start(); jvSet('listening', 'Speak now. I reply when you pause.'); }
+  catch (e) { JV.conv = false; jvSet('error', jvMicError('start-failed')); }
+}
+function wireConsoleMic(){
+  var mic = document.getElementById('con-mic');
+  if (!mic) return;
+  var lb = document.getElementById('con-lang'); if (lb) lb.textContent = jarvisLangLabel();
+  mic.style.display = '';
+  jvSet(JV.state === 'processing' ? 'processing' : (JV.conv ? JV.state : 'idle'));
+  mic.onclick = function(){
+    if (JV.conv) {                                      // end everything
+      JV.conv = false; JV.silent = 0; jvStopAudio();
+      try { if (JV.rec) JV.rec.abort(); } catch (e) {}
+      jvSet('idle', 'Conversation ended.'); return;
+    }
+    JV.conv = true; JV.silent = 0; jvStopAudio(); jvListen();
+  };
+}
+/* Photo -> JPEG (Instagram accepts only JPEG), longest side 1600 px. */
+function jvToJpeg(file){
+  return new Promise(function(ok, bad){
+    if (!file || !/^image\/(png|jpeg|webp|gif|heic|heif)$/.test(file.type)) return bad(new Error('Pick a photo (JPG, PNG or WEBP).'));
+    var rd = new FileReader();
+    rd.onerror = function(){ bad(new Error('That photo could not be read.')); };
+    rd.onload = function(){
+      var img = new Image();
+      img.onerror = function(){ bad(new Error('That photo could not be opened here. Try a JPG or PNG.')); };
+      img.onload = function(){
+        var k = Math.min(1, 1600 / Math.max(img.width, img.height));
+        var c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        var x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(img, 0, 0, c.width, c.height);
+        ok(c.toDataURL('image/jpeg', 0.86));
+      };
+      img.src = rd.result;
+    };
+    rd.readAsDataURL(file);
+  });
+}
+function jvAttachHTML(){
+  if (!JV.img) return '';
+  return '<div class="jv-att"><img src="' + JV.img + '" alt=""><span class="card-note">' + (JV.imgUrl ? 'Picture ready for the post' : 'Uploading picture…') +
+    '</span><button class="btn" id="jv-att-x" title="Remove picture">✕</button></div>';
+}
+function jvRenderAttach(){ var el = document.getElementById('jv-attach'); if (el) { el.innerHTML = jvAttachHTML(); var x = document.getElementById('jv-att-x'); if (x) x.onclick = function(){ JV.img = JV.imgUrl = null; jvRenderAttach(); }; } }
+function consoleSend(){
+  var box = document.getElementById('con-in'), out = document.getElementById('con-out');
+  if (!box || !box.value.trim() || JV.state === 'processing') return;
+  if (JV.img && !JV.imgUrl) { jvSet('error', 'The picture is still uploading. Try again in a moment.'); return; }
+  var msg = box.value.trim(), spoken = JARVIS_SPOKEN; JARVIS_SPOKEN = false;
+  var t0 = Date.now(); JV.timing = '';
+  jvSet('processing', '“' + msg.slice(0, 80) + (msg.length > 80 ? '…' : '') + '”');
+  var body = { message: msg, voice: !!(spoken || JV.conv) };
+  if (JV.imgUrl) body.image_url = JV.imgUrl;
+  fetch('/console', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function(r){
+      var st = r.headers.get('Server-Timing') || '', m = /think;dur=(\d+)/.exec(st);
+      JV.timing = 'thinking ' + (m ? (m[1] / 1000).toFixed(1) + 's' : ((Date.now() - t0) / 1000).toFixed(1) + 's') +
+                  (r.headers.get('X-Jarvis-Model') ? ' (' + r.headers.get('X-Jarvis-Model').split(':').pop() + ')' : '');
+      return r.text().then(function(t){ var d = null; try { d = JSON.parse(t); } catch (e) {} return { ok: r.ok, status: r.status, data: d }; });
+    })
+    .catch(function(){ return { ok: false, status: 0, data: null }; })
+    .then(function(r){
+      if (!r.ok) {
+        var why = (r.data && r.data.detail) || ('Jarvis could not do that (HTTP ' + r.status + ').');
+        if (out) out.innerHTML = errState(why);
+        jvSet('error', why);
+        if (spoken || JV.conv) jvSpeak(why).then(function(){ if (JV.conv) jvListen(); });
+        return;
+      }
+      var d = r.data || {}, extra = '';
+      box.value = '';
+      if (d.kind === 'teach') { extra = '<div class="sub" style="margin-top:8px">Your agent will now follow: <em>' + esc(d.lesson || '') + '</em></div>'; loadLessons(); }
+      if (d.kind === 'dashboard') { PREFS = d.prefs || PREFS; applyBrand(); extra = '<div class="sub" style="margin-top:8px">Applied: ' + esc(JSON.stringify(d.changed || {})) + '</div>'; }
+      if (d.kind === 'post') {
+        extra = '<div class="sub" style="margin-top:8px">Nothing is public yet. Review it under Social posts below' + (d.post && d.post.image_url ? ' (with your picture)' : '') + '.</div>';
+        JV.img = JV.imgUrl = null; jvRenderAttach(); loadPosts();
+      }
+      if (d.kind === 'business') {
+        need('biz_' + d.resource, '/business/' + d.resource, true);
+        extra = '<div class="sub" style="margin-top:8px">' + (d.action === 'create' ? 'Added to ' : 'Updated in ') + esc(d.resource || 'your business details') + '.</div>';
+      }
+      var reply = d.reply || 'Done.';
+      if (out) out.innerHTML = '<div class="jv-reply">' + esc(reply) + extra + jarvisListenBtn('btn') + '</div>';
+      JARVIS_LAST = reply;
+      if (spoken || JV.conv) {
+        jvSet('responding', 'Speaking. Press End conversation to stop.');
+        jvSpeak(reply).then(function(){
+          if (!JV.conv) { if (JV.state === 'responding') jvSet('idle', ''); return; }
+          jvListen();                                   // the conversation carries on
+        });
+      } else jvSet('idle', '');
+    });
+}
+VIEWS.console = function(){
+  var out = '<h1>Jarvis</h1><p class="sub">Talk to your business. Press <b>Start conversation</b> once and just speak: Jarvis answers out loud and keeps listening until you end it. ' +
+            'Ask about figures, change prices, services, staff and hours, teach your WhatsApp agent, or attach a picture and ask for a post.</p>';
+  out += '<div class="panel jv-panel"><div class="jv-head"><div id="jv-orb" class="jv-orb ' + JV.state + '"></div>' +
+    '<div style="flex:1;min-width:0"><div id="jv-state" class="jv-state">' + JV_LABEL[JV.state] + '</div><div id="jv-msg" class="card-note">' + esc(JV.msg) + '</div>' +
+    '<div id="jv-time" class="card-note" style="opacity:.8">' + esc(JV.timing) + '</div></div>' +
+    '<button id="con-mic" class="btn primary jv-mic" type="button">●  Start conversation</button>' +
+    '<button id="con-lang" class="btn" type="button" title="Voice language: English or Urdu" onclick="jarvisToggleLang(this)">EN</button></div>' +
+    '<div style="padding:0 16px 16px"><div id="jv-attach">' + jvAttachHTML() + '</div>' +
+    '<div class="jv-inrow"><button class="btn jv-clip" id="jv-clip" type="button" title="Attach a picture for a post">📎</button>' +
+    '<textarea id="con-in" class="fld" rows="2" placeholder="Or type here. Example: Post this on Facebook and Instagram: Hair PRP 20% off this week."></textarea>' +
+    '<button id="con-go" class="btn primary" type="button">Send</button></div>' +
+    '<input type="file" id="jv-file" accept="image/*" style="display:none">' +
+    '<div id="con-out" style="margin-top:14px"></div></div></div>';
+  out += '<h2>Social posts</h2>' + panel('Waiting for your approval', actbar() + '<div id="con-posts">' + loading('Loading posts...') + '</div>');
+  out += '<h2>What your WhatsApp agent has been taught</h2>' + panel('Lessons', '<div id="con-les">' + loading('Loading...') + '</div>');
+  setTimeout(function(){
+    var g = function(id){ return document.getElementById(id); };
+    if (g('con-go')) g('con-go').onclick = consoleSend;
+    if (g('con-in')) g('con-in').onkeydown = function(e){ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); consoleSend(); } };
+    if (g('jv-clip')) g('jv-clip').onclick = function(){ g('jv-file').click(); };
+    if (g('jv-file')) g('jv-file').onchange = function(){
+      var f = g('jv-file').files && g('jv-file').files[0]; if (!f) return;
+      if (!isOwner()) { jvSet('error', 'Only the business owner can post for the business.'); return; }
+      jvToJpeg(f).then(function(jpeg){
+        JV.img = jpeg; JV.imgUrl = null; jvRenderAttach();
+        return api('/social/media', { method: 'POST', body: { image: jpeg } });
+      }).then(function(r){
+        if (!r || !r.ok) throw new Error((r && r.data && r.data.detail) || 'The picture was not saved.');
+        JV.imgUrl = r.data.url; jvRenderAttach();
+        var box = g('con-in'); if (box && !box.value.trim()) box.placeholder = 'Say what the post should say, e.g. "Post this: Hair PRP 20% off this week"';
+      }).catch(function(e){ JV.img = JV.imgUrl = null; jvRenderAttach(); jvSet('error', e.message); });
+    };
+    jvRenderAttach(); wireConsoleMic(); loadPosts(); loadLessons();
+  }, 0);
+  return out;
+};
+(function(){
+  var st = document.createElement('style');
+  st.textContent =
+    '.jv-mic{min-width:190px;padding:10px 16px;font-size:14px}' +
+    '.jv-inrow{display:flex;gap:8px;align-items:flex-end}.jv-inrow textarea{flex:1;min-width:0;resize:vertical}' +
+    '.jv-clip{font-size:17px;padding:8px 11px}' +
+    '.jv-att{display:flex;align-items:center;gap:10px;margin-bottom:8px}.jv-att img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}' +
+    '@media(max-width:560px){.jv-mic{min-width:0;flex:1}.jv-head{gap:10px}}';
+  document.head.appendChild(st);
+})();
+
 /* The whole shell is redrawn whenever data arrives. Keep the sidebar where the
    person scrolled it (#17), keep the page where it was while the same section
    redraws, and go to the top only when the section changes. */

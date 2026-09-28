@@ -7,7 +7,7 @@ Reads other tenants (Dr Irfan) read-only. Sessions are short-lived tokens
 minted inside the api container; no password is typed or printed.
 Standard library only.
 """
-import json, os, subprocess, sys, urllib.parse, urllib.request, urllib.error, uuid
+import base64, json, os, subprocess, sys, urllib.parse, urllib.request, urllib.error, uuid
 
 API = os.environ.get("API", "https://api.techdeva.net")
 PORTAL = os.environ.get("PORTAL", "https://portal.techdeva.net")
@@ -291,6 +291,31 @@ def phase2(ctx):
     check("#11", "operator can add a customer but not delete one", s == 200 and s2 == 403, "HTTP %s/%s" % (s, s2))
 
 
+def phase6(ctx):
+    """Jarvis pictures: owner upload -> public JPEG link; operator refused. Cleaned up."""
+    O, OP, tid = ctx["owner"], ctx["operator"], ctx["qa"]
+    # a real 1x1 JPEG
+    jpg = base64.b64decode("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=")
+    data = "data:image/jpeg;base64," + base64.b64encode(jpg).decode()
+    s, r = call(OP, "POST", "/social/media", {"image": data})
+    check("#pics", "operator cannot upload post pictures", s == 403, "HTTP %s" % s)
+    s, r = call(O, "POST", "/social/media", {"image": data})
+    url = r.get("url") if isinstance(r, dict) else None
+    ok = False
+    if url:
+        try:
+            with urllib.request.urlopen(url, timeout=20) as resp:
+                ok = resp.status == 200 and resp.headers.get("content-type") == "image/jpeg"
+        except Exception as e:
+            print("  fetch failed:", e)
+    check("#pics", "owner upload gives a public JPEG link Meta can fetch", s == 200 and ok, "HTTP %s %s" % (s, url))
+    s2, r2 = call(O, "POST", "/social/media", {"image": "data:image/svg+xml;base64,PHN2Zy8+"})
+    check("#pics", "SVG (script-capable) refused", s2 == 400, "HTTP %s" % s2)
+    sql("DELETE FROM social_media WHERE tenant_id='%s'" % tid)
+    left = sql("SELECT count(*) FROM social_media WHERE tenant_id='%s'" % tid)[0][0]
+    check("DATA", "QA test pictures removed", left == "0", "left=%s" % left)
+
+
 def a4_readonly():
     rows = sql("SELECT i.number, i.issued_on, i.total, i.status, coalesce(i.notes,''), i.created_at::timestamp(0), "
                "coalesce(c.name,'(no customer)') FROM invoices i LEFT JOIN customers c ON c.id=i.customer_id "
@@ -395,6 +420,29 @@ def phase5(ctx):
     """Jarvis end to end on the live AI chain (a question: nothing is written),
     and the server voice that the Responding state plays."""
     O = ctx["owner"]
+    import time as _t
+    for i in range(3):
+        req = urllib.request.Request(API + "/console", method="POST",
+                                     data=json.dumps({"message": "How many customers do I have?", "voice": True}).encode(),
+                                     headers={"Content-Type": "application/json", "Authorization": "Bearer " + O})
+        t0 = _t.time()
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                resp.read()
+                print("  Jarvis turn %d: total %.1fs, server %s, model %s" % (i + 1, _t.time() - t0,
+                      resp.headers.get("Server-Timing"), resp.headers.get("X-Jarvis-Model")))
+        except urllib.error.HTTPError as e:
+            print("  Jarvis turn %d: HTTP %s after %.1fs %s" % (i + 1, e.code, _t.time() - t0, e.read()[:160]))
+    for txt in ("You have five customers.", "You have five customers and one appointment tomorrow at four. Would you like me to remind them?"):
+        req = urllib.request.Request(API + "/console/speak", method="POST", data=json.dumps({"text": txt, "lang": "en"}).encode(),
+                                     headers={"Content-Type": "application/json", "Authorization": "Bearer " + O})
+        t0 = _t.time()
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                n = len(resp.read())
+                print("  voice %d chars: total %.1fs, server %s, %d KB" % (len(txt), _t.time() - t0, resp.headers.get("Server-Timing"), n // 1024))
+        except urllib.error.HTTPError as e:
+            print("  voice %d chars: HTTP %s after %.1fs" % (len(txt), e.code, _t.time() - t0))
     s, r = call(O, "POST", "/console", {"message": "How many customers and appointments do I have? Answer in one sentence."})
     kind = r.get("kind") if isinstance(r, dict) else None
     check("#14", "Jarvis answers through the live AI chain", s == 200 and kind == "question" and r.get("reply"),
