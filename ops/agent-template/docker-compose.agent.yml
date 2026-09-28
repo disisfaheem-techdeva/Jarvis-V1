@@ -23,6 +23,13 @@ services:
       OPENROUTER_API_KEY: ""
       OPENAI_API_KEY: ""
       OPENAI_BASE_URL: ""
+      # A client agent speaks WhatsApp only. Blank any bot token the shared env
+      # carries, so a new agent can never poll (and steal) another agent's
+      # Telegram/Discord/Slack updates.
+      TELEGRAM_BOT_TOKEN: ""
+      DISCORD_BOT_TOKEN: ""
+      SLACK_BOT_TOKEN: ""
+      SLACK_APP_TOKEN: ""
       # T4: the owner's own chat is the home channel, so "No home channel is
       # set" never goes to a patient.
       WHATSAPP_HOME_CHANNEL: "__PHONE__@s.whatsapp.net"
