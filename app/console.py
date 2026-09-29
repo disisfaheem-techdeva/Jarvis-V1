@@ -556,6 +556,15 @@ def make_console_router():
             args = out.get("args") if isinstance(out.get("args"), dict) else {}
             if action not in ja.ACTIONS:
                 return {"kind": "question", "reply": reply}
+            # The model sometimes fills an optional detail nobody said (live, it
+            # added "saloon services" to a plain booking). A service or staff
+            # name with no word in what was said -- this turn or the recent
+            # ones -- is dropped instead of being booked or noted.
+            heard = (message + " " + _history(body.get("history"))).lower()
+            for k in ("service", "staff"):
+                v = str(args.get(k) or "").strip().lower()
+                if v and not any(w in heard for w in re.findall(r"[a-z0-9\u0600-\u06ff]{3,}", v)):
+                    args.pop(k, None)
             if action in ja.CONFIRM:
                 try:
                     question = ja.describe(tid, role, action, args, founder)
