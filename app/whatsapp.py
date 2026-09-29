@@ -70,20 +70,40 @@ def _identity(x_tenant_id, x_role, authorization, session):
     return tid, role, uid
 
 
-def _row(cur, tenant_id):
-    cur.execute("""SELECT id, agent_key, pairctl_url, status, phone_number,
-                          display_name, connected_at, disconnected_at, last_error
-                     FROM whatsapp_connections WHERE tenant_id = %s""", (tenant_id,))
-    r = cur.fetchone()
-    if not r:
+ROW_COLS = """id, agent_key, pairctl_url, status, phone_number, display_name,
+               connected_at, disconnected_at, last_error, created_at"""
+
+
+def _rows(cur, tenant_id):
+    """Every WhatsApp number this business has, first one first."""
+    cur.execute("SELECT " + ROW_COLS + " FROM whatsapp_connections WHERE tenant_id = %s "
+                "ORDER BY created_at, id", (tenant_id,))
+    return cur.fetchall()
+
+
+def _row(cur, tenant_id, conn=None):
+    """One number: the one named by `conn` (its id), else the business's first.
+    A business with a single number behaves exactly as before."""
+    if conn:
+        if not re.fullmatch(r"[0-9a-f-]{36}", conn):
+            raise HTTPException(400, "That is not a WhatsApp number id.")
+        cur.execute("SELECT " + ROW_COLS + " FROM whatsapp_connections WHERE tenant_id = %s AND id = %s",
+                    (tenant_id, conn))
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(404, "That WhatsApp number is not part of this business.")
+        return r
+    rows = _rows(cur, tenant_id)
+    if not rows:
         raise HTTPException(409, "No WhatsApp agent has been assigned to this business yet. "
                                  "TechDeva assigns one during onboarding.")
-    return r
+    return rows[0]
 
 
 def _public(r):
     """What the client is allowed to see. The pairctl URL is not in this."""
     return {
+        "id": str(r["id"]),
         "status": r["status"],
         "connected": r["status"] == "connected",
         "phone_number": r.get("phone_number"),
@@ -141,16 +161,18 @@ def sync_lessons(tid, role):
     'no_agent', 'failed' or 'synced:<n>'."""
     try:
         with tenant_session(tid, role) as cur:
-            cur.execute("SELECT pairctl_url FROM whatsapp_connections WHERE tenant_id = %s", (tid,))
-            r = cur.fetchone()
-            if not r:
+            conns = _rows(cur, tid)
+            if not conns:
                 return "no_agent"
             cur.execute("""SELECT lesson FROM agent_lessons
                             WHERE tenant_id = %s AND active AND agent = 'whatsapp'
                             ORDER BY created_at ASC LIMIT 200""", (tid,))
             lessons = [x["lesson"] for x in cur.fetchall()]
-        out = _pairctl_json(r["pairctl_url"], "/soul/lessons", "POST", {"lessons": lessons})
-        return "synced:%s" % out.get("count", len(lessons))
+        count = None
+        for r in conns:          # every number's agent learns the same lessons
+            out = _pairctl_json(r["pairctl_url"], "/soul/lessons", "POST", {"lessons": lessons})
+            count = out.get("count", len(lessons))
+        return "synced:%s" % count
     except Exception as e:
         print("[whatsapp] lesson sync failed: %s" % getattr(e, "detail", e), flush=True)
         return "failed"
@@ -160,16 +182,21 @@ def make_whatsapp_router():
     router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 
     @router.get("")
-    def status(x_tenant_id: str | None = Header(None),
+    def status(conn: str | None = None, x_tenant_id: str | None = Header(None),
                x_role: str | None = Header(None),
                authorization: str | None = Header(None),
                td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        from .plans import plan_for
         with tenant_session(tid, role) as cur:
-            return _public(_row(cur, tid))
+            out = _public(_row(cur, tid, conn))
+            out["numbers"] = [_public(x) for x in _rows(cur, tid)]
+        p = plan_for(tid)
+        out["plan"] = {"name": p["name"], "max_numbers": p["max_numbers"]}
+        return out
 
     @router.post("/connect")
-    def connect(x_tenant_id: str | None = Header(None),
+    def connect(conn: str | None = None, x_tenant_id: str | None = Header(None),
                 x_role: str | None = Header(None),
                 authorization: str | None = Header(None),
                 td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
@@ -179,25 +206,25 @@ def make_whatsapp_router():
         if role not in ("owner", "techdeva_admin"):
             raise HTTPException(403, "Only the business owner can connect a WhatsApp number.")
         with tenant_session(tid, role) as cur:
-            r = _row(cur, tid)
+            r = _row(cur, tid, conn)
             _pairctl(r["pairctl_url"], "/pair/start", "POST")
             cur.execute("""UPDATE whatsapp_connections
                               SET status = 'pairing', last_error = NULL, updated_at = now()
-                            WHERE tenant_id = %s""", (tid,))
+                            WHERE id = %s""", (r["id"],))
             record(cur, action="whatsapp.connect", resource="whatsapp_connections",
                    resource_id=str(r["id"]), actor=str(uid), actor_type="human",
                    status="ok", detail={"agent": r["agent_key"]}, error=None)
         return {"status": "pairing"}
 
     @router.get("/qr")
-    def qr(x_tenant_id: str | None = Header(None),
+    def qr(conn: str | None = None, x_tenant_id: str | None = Header(None),
            x_role: str | None = Header(None),
            authorization: str | None = Header(None),
            td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
         """Poll while the client has their phone out. Returns the live code."""
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
         with tenant_session(tid, role) as cur:
-            r = _row(cur, tid)
+            r = _row(cur, tid, conn)
             s = _pairctl(r["pairctl_url"], "/pair/status")
 
             state = s.get("state")
@@ -207,8 +234,8 @@ def make_whatsapp_router():
                                       display_name = %s, connected_at = now(),
                                       disconnected_at = NULL, last_error = NULL,
                                       updated_at = now()
-                                WHERE tenant_id = %s""",
-                            (s.get("number"), s.get("name"), tid))
+                                WHERE id = %s""",
+                            (s.get("number"), s.get("name"), r["id"]))
                 record(cur, action="whatsapp.paired", resource="whatsapp_connections",
                        resource_id=str(r["id"]), actor=str(uid), actor_type="human",
                        status="ok", detail={"number": s.get("number")}, error=None)
@@ -217,7 +244,7 @@ def make_whatsapp_router():
             if s.get("qr"):
                 cur.execute("""UPDATE whatsapp_connections
                                   SET last_qr_at = now(), updated_at = now()
-                                WHERE tenant_id = %s""", (tid,))
+                                WHERE id = %s""", (r["id"],))
 
         return {
             "state": state or "starting",
@@ -227,7 +254,7 @@ def make_whatsapp_router():
         }
 
     @router.post("/disconnect")
-    def disconnect(x_tenant_id: str | None = Header(None),
+    def disconnect(conn: str | None = None, x_tenant_id: str | None = Header(None),
                    x_role: str | None = Header(None),
                    authorization: str | None = Header(None),
                    td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
@@ -235,12 +262,12 @@ def make_whatsapp_router():
         if role not in ("owner", "techdeva_admin"):
             raise HTTPException(403, "Only the business owner can disconnect the WhatsApp number.")
         with tenant_session(tid, role) as cur:
-            r = _row(cur, tid)
+            r = _row(cur, tid, conn)
             _pairctl(r["pairctl_url"], "/pair/stop", "POST")
             cur.execute("""UPDATE whatsapp_connections
                               SET status = 'disconnected', disconnected_at = now(),
                                   updated_at = now()
-                            WHERE tenant_id = %s""", (tid,))
+                            WHERE id = %s""", (r["id"],))
             record(cur, action="whatsapp.disconnect", resource="whatsapp_connections",
                    resource_id=str(r["id"]), actor=str(uid), actor_type="human",
                    status="ok", detail={"agent": r["agent_key"]}, error=None)
@@ -251,15 +278,31 @@ def make_whatsapp_router():
               x_role: str | None = Header(None),
               authorization: str | None = Header(None),
               td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
-        """The business's WhatsApp conversations, newest first."""
+        """The business's WhatsApp conversations across all its numbers, newest
+        first. Each chat says which number (`conn`) it belongs to."""
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
         with tenant_session(tid, role) as cur:
-            r = _row(cur, tid)
-        data = _pairctl_json(r["pairctl_url"], "/chats")
-        return {"connected": r["status"] == "connected", "chats": data.get("chats", [])}
+            _row(cur, tid)                      # 409 when there is no number at all
+            conns = _rows(cur, tid)
+        chats, problems = [], []
+        for r in conns:
+            try:
+                data = _pairctl_json(r["pairctl_url"], "/chats")
+            except HTTPException as e:
+                if len(conns) == 1:
+                    raise
+                problems.append({"number": r["phone_number"], "error": e.detail})
+                continue
+            for c in data.get("chats", []):
+                c["conn"] = str(r["id"])
+                c["number"] = r["phone_number"]
+                chats.append(c)
+        chats.sort(key=lambda c: c.get("last_at") or c.get("started_at") or "", reverse=True)
+        return {"connected": any(r["status"] == "connected" for r in conns), "chats": chats,
+                "numbers": len(conns), "unreachable": problems}
 
     @router.get("/chats/{session_id}")
-    def chat(session_id: str,
+    def chat(session_id: str, conn: str | None = None,
              x_tenant_id: str | None = Header(None),
              x_role: str | None = Header(None),
              authorization: str | None = Header(None),
@@ -268,7 +311,7 @@ def make_whatsapp_router():
         if not re.fullmatch(r"[\w.:@+\-]{1,200}", session_id or ""):
             raise HTTPException(400, "That is not a conversation id.")
         with tenant_session(tid, role) as cur:
-            r = _row(cur, tid)
+            r = _row(cur, tid, conn)
         data = _pairctl_json(r["pairctl_url"], "/chats/" + urllib.parse.quote(session_id, safe=""))
         msgs = data.get("messages", [])
         # The agent stores its own retry nudges ("[System: Your previous
@@ -292,7 +335,7 @@ def make_whatsapp_router():
         return {"messages": msgs}
 
     @router.post("/chats/{session_id}/send")
-    def send_reply(session_id: str, body: dict,
+    def send_reply(session_id: str, body: dict, conn: str | None = None,
                    x_tenant_id: str | None = Header(None),
                    x_role: str | None = Header(None),
                    authorization: str | None = Header(None),
@@ -312,7 +355,7 @@ def make_whatsapp_router():
         if len(text) > 4000:
             raise HTTPException(400, "That message is too long (4000 characters at most).")
         with tenant_session(tid, role) as cur:
-            r = _row(cur, tid)
+            r = _row(cur, tid, conn)
         if r["status"] != "connected":
             raise HTTPException(409, "This WhatsApp number is not connected, so nothing can be sent. "
                                      "Open WhatsApp in the menu and connect it.")
@@ -392,7 +435,7 @@ def make_whatsapp_router():
         with tenant_session(tid, role) as cur:
             cur.execute("""INSERT INTO whatsapp_connections (tenant_id, agent_key, pairctl_url)
                            VALUES (%s, %s, %s)
-                           ON CONFLICT (tenant_id) DO UPDATE
+                           ON CONFLICT (tenant_id, agent_key) DO UPDATE
                              SET agent_key = EXCLUDED.agent_key,
                                  pairctl_url = EXCLUDED.pairctl_url,
                                  updated_at = now()

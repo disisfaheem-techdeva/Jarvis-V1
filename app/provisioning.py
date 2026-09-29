@@ -97,10 +97,17 @@ def make_provisioning_router():
         home = _safe_name(body.get("home_name"), "")
         assistant = re.sub(r"[^A-Za-z]", "", str(body.get("assistant") or "Zara"))[:20]
         assistant = assistant if len(assistant) >= 2 else "Zara"
+        from .plans import plan_for
+        plan = plan_for(tid)
         with tenant_session(tid, role) as cur:
-            cur.execute("SELECT 1 FROM whatsapp_connections WHERE tenant_id = current_tenant()")
-            if cur.fetchone():
-                raise HTTPException(409, "Your business already has a WhatsApp agent. Connect it below.")
+            # the plan decides how many numbers a business may have (hard limit)
+            cur.execute("SELECT count(*) AS n FROM whatsapp_connections WHERE tenant_id = current_tenant()")
+            have = cur.fetchone()["n"]
+            if have >= plan["max_numbers"]:
+                raise HTTPException(409, "Your %s plan includes %d WhatsApp number%s, and you have %d. "
+                                         "Upgrade your plan to add another." % (
+                                             plan["name"], plan["max_numbers"],
+                                             "" if plan["max_numbers"] == 1 else "s", have))
             cur.execute("SELECT name FROM tenants WHERE id = current_tenant()")
             business = _safe_name((cur.fetchone() or {}).get("name"), "Business")
             if len(home) < 2:
@@ -163,7 +170,19 @@ def make_provisioning_router():
             r = cur.fetchone()
         if not r:
             raise HTTPException(404, "No such request.")
-        key = r["agent_key"] or agent_key_for(r["business_name"], r["tenant_id"])
+        key = r["agent_key"]
+        if not key:
+            # a business's 2nd..5th number gets its own agent: base, base-2, base-3 ...
+            base = agent_key_for(r["business_name"], r["tenant_id"])[:27]
+            with tenant_session(None, "techdeva_admin") as cur:
+                cur.execute("""SELECT agent_key FROM whatsapp_connections WHERE agent_key LIKE %s
+                               UNION SELECT agent_key FROM agent_requests WHERE agent_key LIKE %s""",
+                            (base + "%", base + "%"))
+                taken = {x["agent_key"] for x in cur.fetchall()}
+            key, n = base, 1
+            while key in taken:
+                n += 1
+                key = "%s-%d" % (base, n)
         return {"request": _move(rid, str(uid), ("requested", "failed"), "approved",
                                  agent_key=key, decided_by=str(uid), error=None)}
 

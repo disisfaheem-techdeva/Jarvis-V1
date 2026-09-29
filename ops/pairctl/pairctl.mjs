@@ -268,6 +268,23 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { agent: AGENT, running: true, ...s });
   }
 
+  // Plan limits: how many different customers wrote to this number since a
+  // moment (the start of the month). Counts people, not messages; the agent's
+  // own retry nudges are stored as 'user' and are left out.
+  if (req.method === 'GET' && url === '/usage') {
+    const since = Math.max(0, Number(new URL(req.url, 'http://x').searchParams.get('since')) || 0);
+    const d = openDb();
+    if (!d) return send(res, 200, { agent: AGENT, since, customers: 0 });
+    try {
+      const row = d.prepare(`SELECT COUNT(DISTINCT s.user_id) AS n FROM sessions s
+                             JOIN messages m ON m.session_id = s.id
+                             WHERE s.source = 'whatsapp' AND m.role = 'user' AND m.timestamp >= ?
+                               AND m.content NOT LIKE '[System%'`).get(since);
+      return send(res, 200, { agent: AGENT, since, customers: Number(row && row.n) || 0 });
+    } catch (e) { log('usage failed', e.message); return send(res, 500, { error: 'could not count' }); }
+    finally { d.close(); }
+  }
+
   if (req.method === 'GET' && url === '/chats') {
     try { return send(res, 200, { agent: AGENT, chats: listChats() }); }
     catch (e) { log('chats failed', e.message); return send(res, 500, { error: 'could not read chats' }); }

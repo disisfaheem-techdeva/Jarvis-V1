@@ -39,6 +39,7 @@ from .booking import make_booking_router
 from .account import make_account_router
 from .billing import make_billing_router
 from .provisioning import make_provisioning_router
+from .plans import make_plans_router
 from . import trial
 
 # API docs (/docs, /redoc, /openapi.json) hand anyone on the internet the
@@ -82,6 +83,7 @@ app.include_router(founder_router)
 app.include_router(make_account_router())
 app.include_router(make_billing_router())
 app.include_router(make_provisioning_router())
+app.include_router(make_plans_router())
 trial.install(app)
 
 # The two client-facing pages. The API image is built from ./app, so web/ is

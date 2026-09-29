@@ -560,6 +560,47 @@ def phase8(ctx):
         check("DATA", "QA status and trial date restored exactly", list(now) == list(orig), "%s" % (now,))
 
 
+def phase9(ctx):
+    """Plans and several WhatsApp numbers. Read-only except one QA plan change,
+    which is put back exactly."""
+    O, OP, tid = ctx["owner"], ctx["operator"], ctx["qa"]
+    ADM = token(None, "techdeva_admin", "live-check")
+    s, r = call(None, "GET", "/plans")
+    got = {p["key"]: (p["price_pkr"], p["max_numbers"], p["max_conversations"]) for p in (r.get("plans") or [])} if s == 200 else {}
+    check("PLAN", "public price list has the three plans", set(got) >= {"starter", "growth", "pro"}, json.dumps(got))
+    s, r = call(OP, "GET", "/plan")
+    check("PLAN", "staff cannot see the plan", s == 403, "HTTP %s" % s)
+    s, r = call(O, "GET", "/plan")
+    ok = s == 200 and "usage" in r and "plan" in r
+    check("PLAN", "owner sees plan and this month's conversations", ok,
+          "HTTP %s %s" % (s, {"plan": r["plan"]["name"], "conversations": r["usage"]["conversations"], "numbers": r["usage"]["numbers"],
+                               "approximate": r["usage"]["approximate"], "not counted": r["usage"]["incomplete"]} if ok else r))
+    s, r = call(O, "PUT", "/techdeva/plans/pro", {"price_pkr": 1})
+    check("PLAN", "a client cannot change prices", s == 403, "HTTP %s" % s)
+    orig = sql("SELECT coalesce(plan_key,'-'), monthly_fee::text FROM client_accounts WHERE tenant_id='%s'" % tid)
+    try:
+        s, r = call(ADM, "PUT", "/techdeva/clients/%s/plan" % tid, {"plan_key": "growth"})
+        s2, r2 = call(O, "GET", "/plan")
+        check("PLAN", "founder puts a client on Growth; fee and limits follow", s == 200 and (r2.get("plan") or {}).get("max_numbers") == 2,
+              "fee %s, limits %s" % (r.get("monthly_fee"), (r2.get("plan") or {}).get("max_numbers")))
+    finally:
+        if orig:
+            sql("UPDATE client_accounts SET plan_key=%s, monthly_fee=%s WHERE tenant_id='%s'"
+                % (("'%s'" % orig[0][0]) if orig[0][0] != "-" else "NULL", orig[0][1], tid))
+        else:
+            sql("DELETE FROM client_accounts WHERE tenant_id='%s'" % tid)
+        now = sql("SELECT coalesce(plan_key,'-'), monthly_fee::text FROM client_accounts WHERE tenant_id='%s'" % tid)
+        check("DATA", "QA plan and fee restored exactly", now == orig, "%s" % now)
+    s, r = call(ADM, "GET", "/techdeva/usage")
+    check("PLAN", "founder sees every client's usage", s == 200 and "clients" in r, "HTTP %s, %d clients" % (s, len(r.get("clients") or {})))
+    ir = sql("SELECT id FROM tenants WHERE id='%s'" % IRFAN)
+    if ir:
+        u = (r.get("clients") or {}).get(IRFAN) or {}
+        print("  Irfan this month (read-only): %s" % json.dumps({"plan": (u.get("plan") or {}).get("name"),
+              "conversations": (u.get("usage") or {}).get("conversations"), "approximate": (u.get("usage") or {}).get("approximate"),
+              "not counted": (u.get("usage") or {}).get("incomplete")}))
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)

@@ -188,7 +188,7 @@ function show(){
 function current(){ return (location.hash.replace('#/','') || 'overview'); }
 
 async function load(){
-  const [book, health, ops, ai, inc, over, invoices, agents, claims, resets] = await Promise.all([
+  const [book, health, ops, ai, inc, over, invoices, agents, claims, resets, plans] = await Promise.all([
     api('/techdeva/book'),
     api('/techdeva/health').catch(() => null),
     api('/techdeva/operations').catch(() => null),
@@ -198,9 +198,12 @@ async function load(){
     api('/techdeva/invoices').catch(() => null),
     api('/techdeva/agent-requests').catch(() => null),
     api('/techdeva/payment-claims').catch(() => null),
-    api('/techdeva/password-resets').catch(() => null)
+    api('/techdeva/password-resets').catch(() => null),
+    api('/plans').catch(() => null)
   ]);
-  D = {book, health, ops, ai, inc, over, invoices, agents, claims, resets};
+  D = {book, health, ops, ai, inc, over, invoices, agents, claims, resets, plans, usage: D.usage};
+  // conversation counts ask every agent, so they arrive after the page
+  api('/techdeva/usage').then(u => { D.usage = u; if (current() === 'clients' || current() === 'overview') paint(); }).catch(() => {});
   renderNav(); paint();
 }
 
@@ -391,6 +394,19 @@ function chart(months){
     '%"></i><span>' + esc(String(m.month).slice(5)) + '</span></div>').join('') +
     '</div><div class="sub">Tallest bar ' + money(max) + '.</div>';
 }
+function planCell(c){
+  const u = D.usage && D.usage.clients && D.usage.clients[c.id], plans = (D.plans && D.plans.plans) || [];
+  const cur = u && u.plan && u.plan.chosen ? u.plan.key : '';
+  let h = '<select class="plan-pick" data-plan="' + esc(c.id) + '"><option value="">' + (cur ? 'no plan' : 'no plan (Starter limits)') + '</option>' +
+    plans.map(p => '<option value="' + esc(p.key) + '"' + (p.key === cur ? ' selected' : '') + '>' + esc(p.name) +
+      (p.price_pkr != null ? ' · ' + Math.round(p.price_pkr).toLocaleString('en-US') : '') + '</option>').join('') + '</select>';
+  if (u) {
+    const w = u.warning === 'over' ? 'bad' : u.warning === 'near' ? 'warn' : 'dim';
+    h += '<div class="k-note ' + w + '">' + (u.usage.conversations || 0).toLocaleString('en-US') + (u.usage.approximate ? '~' : '') + ' / ' +
+      u.plan.max_conversations.toLocaleString('en-US') + ' chats · ' + u.usage.numbers + '/' + u.plan.max_numbers + ' numbers</div>';
+  } else h += '<div class="k-note dim">usage loading…</div>';
+  return h;
+}
 function isLocked(c){ return c.status === 'trial' && c.trial_ends_at && new Date(c.trial_ends_at) < new Date(); }
 function clientRows(rows){
   return rows.map(c => {
@@ -400,6 +416,7 @@ function clientRows(rows){
       '<div class="k-note">' + esc(c.industry || '') + '</div></td>' +
       '<td><span class="pill ' + esc(c.status) + '">' + esc(isLocked(c) ? 'locked (trial ended)' : c.status) + '</span>' +
         (c.status === 'trial' && c.trial_ends_at ? '<div class="k-note">trial ' + (isLocked(c) ? 'ended ' : 'ends ') + esc(String(c.trial_ends_at).slice(0,10)) + '</div>' : '') + '</td>' +
+      '<td>' + planCell(c) + '</td>' +
       '<td class="num"><input class="fee" data-fee="' + esc(c.id) + '" value="' + (fee||'') + '" placeholder="0"></td>' +
       '<td class="num ' + (owes?'warn':'') + '">' + (paidThis ? money(paidThis) : '-') + '</td>' +
       '<td class="num">' + (Number(c.paid_total) ? money(c.paid_total) : '-') + '</td>' +
@@ -446,7 +463,7 @@ const VIEWS = {
       '</div>' +
       '<section><h2>What clients have paid you</h2><div class="card">' + chart(b.months) + '</div></section>' +
       '<section><h2>Clients</h2><div class="card" style="padding:6px 8px">' +
-        tbl('<th>Business</th><th>Status</th><th class="num">Fee</th><th class="num">Paid this month</th>' +
+        tbl('<th>Business</th><th>Status</th><th>Plan &amp; WhatsApp</th><th class="num">Fee</th><th class="num">Paid this month</th>' +
             '<th class="num">Paid all time</th><th>Last paid</th><th class="num">Leads</th>' +
             '<th class="num">AI 7d</th><th class="num">Waiting</th><th>Activity</th><th></th>',
             clientRows(b.clients)) + '</div></section>';
@@ -459,12 +476,21 @@ const VIEWS = {
       kpi('On trial', b.trials, 'not yet converted') +
       kpi('Hidden', b.hidden_test_tenants, 'marked test, never deleted') + '</div>' +
       '<section><div class="card" style="padding:6px 8px">' +
-        tbl('<th>Business</th><th>Status</th><th class="num">Fee</th><th class="num">Paid this month</th>' +
+        tbl('<th>Business</th><th>Status</th><th>Plan &amp; WhatsApp</th><th class="num">Fee</th><th class="num">Paid this month</th>' +
             '<th class="num">Paid all time</th><th>Last paid</th><th class="num">Leads</th>' +
             '<th class="num">AI 7d</th><th class="num">Waiting</th><th>Activity</th><th></th>',
             clientRows(b.clients)) + '</div>' +
-      '<div class="sub" style="margin-top:8px">Type a fee and press Tab to save it. Hide removes a ' +
-      'client from this book without deleting anything.</div></section>';
+      '<div class="sub" style="margin-top:8px">Pick a plan and the fee becomes the plan price (type a different fee after, for a discount). ' +
+      'Type a fee and press Tab to save it. Hide removes a client from this book without deleting anything.</div></section>' +
+      '<section><h2>Plans</h2><div class="card" style="padding:6px 8px">' +
+      tbl('<th>Plan</th><th class="num">Price (PKR / month)</th><th class="num">WhatsApp numbers</th><th class="num">Conversations / month</th><th></th>',
+        ((D.plans && D.plans.plans) || []).map(p => '<tr><td class="name">' + esc(p.name) + '</td>' +
+          '<td class="num"><input class="fee" data-pp="' + esc(p.key) + '" value="' + (p.price_pkr != null ? Math.round(p.price_pkr) : '') + '" placeholder="talk to us"></td>' +
+          '<td class="num"><input class="fee" data-pn="' + esc(p.key) + '" value="' + p.max_numbers + '"></td>' +
+          '<td class="num"><input class="fee" data-pc="' + esc(p.key) + '" value="' + p.max_conversations + '"></td>' +
+          '<td><button class="tiny primary" data-psave="' + esc(p.key) + '">Save</button></td></tr>')) +
+      '<div class="sub" style="margin-top:6px">Clients see these on their Plan &amp; Billing page and on the website. An empty price shows "Talk to us". ' +
+      'A conversation is one customer writing in a month. Going over is warned, never cut off.</div></div></section>';
   },
   requests(){
     const ag = (D.agents && D.agents.requests) || [], cl = (D.claims && D.claims.claims) || [],
@@ -670,6 +696,17 @@ function wireClients(){
     const id = b.getAttribute('data-save');
     try { await api('/techdeva/clients/' + id + '/payment', {method:'POST',
       body: JSON.stringify({amount: el.querySelector('[data-amt="' + id + '"]').value})}); load(); }
+    catch (e) { alert(e.message); }
+  });
+  el.querySelectorAll('[data-plan]').forEach(sel => sel.onchange = async () => {
+    try { await api('/techdeva/clients/' + sel.getAttribute('data-plan') + '/plan', {method:'PUT', body: JSON.stringify({plan_key: sel.value})});
+          D.usage = null; load(); }
+    catch (e) { alert(e.message); }
+  });
+  el.querySelectorAll('[data-psave]').forEach(b => b.onclick = async () => {
+    const k = b.getAttribute('data-psave'), v = a => el.querySelector('[' + a + '="' + k + '"]').value;
+    try { await api('/techdeva/plans/' + k, {method:'PUT', body: JSON.stringify({price_pkr: v('data-pp'), max_numbers: v('data-pn'), max_conversations: v('data-pc')})});
+          b.textContent = 'Saved'; load(); }
     catch (e) { alert(e.message); }
   });
   el.querySelectorAll('[data-trial]').forEach(b => b.onclick = async () => {

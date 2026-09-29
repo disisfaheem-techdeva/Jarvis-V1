@@ -37,6 +37,25 @@ Optional, for emailed reset links: add `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`,
 `SMTP_PASSWORD`, `MAIL_FROM` to `.env` (for example Gmail with an app password,
 or Brevo/Mailgun), then `docker compose up -d --no-deps api`.
 
+## Faheem's decisions, 29 Sep 2026
+
+| Decision | Built |
+|---|---|
+| Free trial is **7 days** | New signups get 7 days (`app/trial.py` TRIAL_DAYS). Website, signup page and terms say 7 days. |
+| When it ends unpaid, **lock the dashboard and ask them to pay** | 402 for the business's own logins; lock screen with fee, bank details and "I have paid". WhatsApp agent keeps answering patients. Unlocks when the founder presses Money arrived, "+7 days trial" or "Mark paying". `live_check.py wholocks` lists who would be locked before a deploy. |
+| Plans: **Starter PKR 20,000**, 1 number, 500 conversations; **Growth PKR 34,999**, 2 numbers, 1,500; **Pro** (price not given yet), 5 numbers, 4,000 | `plans` table (db/36), editable in founder console, Clients, Plans. Numbers are a hard limit (the request form refuses more). Conversations are counted per month and warned at 80% / 100%; the agent is never cut off mid-conversation. |
+| Payment details: TECH DEVA DIGITAL MARKETING AGENCY, JS Bank Cavalry Lahore, 0002923574, PK19JSBL9561000002923574 | db/37 fills "How clients pay you" when it is still empty (never overwrites). |
+
+A business may now have several WhatsApp numbers (one agent each): the WhatsApp
+Connection page has a tab per number and "+ Add another number" within the plan;
+the inbox shows every number's chats and replies through the number a chat came in on.
+
+A "conversation" = one customer who wrote to one of the business's numbers this
+calendar month (Pakistan time), counted by the agent's sidecar (`GET /usage`).
+Dr Irfan's sidecar is older and may not be restarted (hard rule), so his count comes
+from his chat list and is marked approximate (it sees the newest 150 chats) until
+his planned re-create.
+
 ## Still yours (code cannot do these)
 
 1. **Meta App Review**: submit it (docs/META-APP-REVIEW.md). Until Meta approves and you switch

@@ -3765,7 +3765,8 @@ VIEWS.inbox = function(){
       '<div style="display:flex;justify-content:space-between;gap:8px"><strong>' + esc(c.phone ? '+' + c.phone : 'Unknown number') +
       '</strong><span class="card-note">' + esc(c.messages) + ' msgs</span></div>' +
       '<div class="card-note" style="margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(c.last || '') + '</div>' +
-      '<div class="card-note">' + (c.last_at ? when(c.last_at) : '') + '</div></div>';
+      '<div class="card-note">' + (c.last_at ? when(c.last_at) : '') +
+      (IBX.data.numbers > 1 && c.number ? ' · to +' + esc(c.number) : '') + '</div></div>';
   }).join('');
   var chat, reply = '';
   if (!IBX.sel) chat = empty('Select a conversation', 'Tap a chat to read it and reply.');
@@ -4989,6 +4990,193 @@ boot = function(){
   var st = document.createElement('style');
   st.textContent = '.lock-box{max-width:460px}.lock-sec{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.02)}' +
     '.lock-fee{font-size:22px;font-weight:700;margin-top:2px}.lock-box .bil-pay .fld{max-width:none;flex:1 1 130px}';
+  document.head.appendChild(st);
+})();
+
+/* ======================================================== Several WhatsApp numbers
+   A plan allows 1 (Starter), 2 (Growth) or 5 (Pro) numbers. The WhatsApp page
+   shows one tab per number; every connect / QR / disconnect call names the
+   number (?conn=<id>). The inbox mixes all numbers, and a chat is opened and
+   answered through the number it came in on. */
+var WA_CONN = null, WA_LIST = [], WA_PLAN = null, WA_ADD = false;
+function waQ(){ return WA_CONN ? '?conn=' + encodeURIComponent(WA_CONN) : ''; }
+function waTabs(){
+  if (WA_LIST.length < 2 && !WA_ADD && !(WA_PLAN && WA_LIST.length < WA_PLAN.max_numbers && isOwner())) return '';
+  var t = WA_LIST.map(function(n, i){
+    var on = !WA_ADD && n.id === WA_CONN;
+    return '<button class="btn' + (on ? ' primary' : '') + '" data-waconn="' + esc(n.id) + '">' +
+      esc(n.phone_number ? '+' + n.phone_number : 'Number ' + (i + 1)) + (n.connected ? ' ✓' : '') + '</button>';
+  }).join('');
+  if (WA_PLAN && isOwner()) {
+    t += WA_LIST.length < WA_PLAN.max_numbers
+      ? '<button class="btn' + (WA_ADD ? ' primary' : '') + '" id="wa_add">+ Add another number</button>'
+      : '<span class="card-note">' + esc(WA_PLAN.name) + ' plan: ' + WA_PLAN.max_numbers + ' number' + (WA_PLAN.max_numbers === 1 ? '' : 's') + '. <a href="#/billing">Upgrade</a> for more.</span>';
+  }
+  return '<div class="wa-tabs">' + t + '</div>';
+}
+function waRenderAll(inner){
+  var el = document.getElementById('wa'); if (!el) { waStop(); return false; }
+  el.innerHTML = waTabs() + '<div id="wa_body">' + inner + '</div>';
+  document.querySelectorAll('[data-waconn]').forEach(function(b){
+    b.onclick = function(){ WA_ADD = false; WA_CONN = b.getAttribute('data-waconn'); waStop(); waMount(); };
+  });
+  var add = document.getElementById('wa_add');
+  if (add) add.onclick = function(){ WA_ADD = true; waStop(); arStop(); arMount(); };
+  return true;
+}
+/* keep the tabs when the single-number code redraws the card */
+function waRender(html){
+  if (!document.getElementById('wa')) { waStop(); return false; }
+  if (WA_ADD || !document.getElementById('wa_body')) return waRenderAll(html);
+  document.getElementById('wa_body').innerHTML = html;
+  return true;
+}
+function waWire(){
+  var on = document.getElementById('wa-on');
+  if (on) on.onclick = function(){
+    waRender(loading('Starting the pairing session...'));
+    act('/whatsapp/connect' + waQ(), { method: 'POST' }, 'Pairing started').then(function(r){
+      if (!r.ok) { waRender(errState((r.data && r.data.detail) || 'Could not start pairing.')); return; }
+      waPoll(); WA_POLL = setInterval(waPoll, 3000);
+    });
+  };
+  var off = document.getElementById('wa-off');
+  if (off) off.onclick = function(){
+    waRender(loading('Disconnecting...'));
+    act('/whatsapp/disconnect' + waQ(), { method: 'POST' }, 'Disconnected').then(function(){ waStop(); waMount(); });
+  };
+}
+function waPoll(){
+  api('/whatsapp/qr' + waQ()).then(function(r){
+    if (!r.ok) { waStop(); waRender(errState('The pairing service stopped responding.')); return; }
+    var d = r.data || {};
+    if (d.state === 'connected') { waStop(); waMount(); return; }
+    if (d.state === 'expired' || d.state === 'idle') {
+      waStop();
+      if (waRender('<div style="padding:16px"><p class="sub">The pairing window closed without a scan.</p><button id="wa-on" class="btn">Try again</button></div>')) waWire();
+      return;
+    }
+    if (!d.qr_svg) { waRender(loading('Waiting for the code...')); return; }
+    waRender('<div style="padding:16px;text-align:center"><div style="background:#fff;display:inline-block;padding:12px;border-radius:12px;max-width:280px">' +
+      d.qr_svg + '</div><p class="sub" style="margin-top:12px">WhatsApp on the phone with this number - Settings - Linked devices - Link a device, then scan this. The code refreshes on its own.</p></div>');
+  });
+}
+function waMount(){
+  arStop();
+  api('/whatsapp' + waQ()).then(function(r){
+    if (r.status === 409) { WA_LIST = []; WA_CONN = null; WA_ADD = true; arMount(); return; }
+    if (r.status === 404 && WA_CONN) { WA_CONN = null; waMount(); return; }
+    if (!r.ok) { waRender(errState('The WhatsApp service returned ' + r.status + '.')); return; }
+    var d = r.data || {};
+    WA_LIST = d.numbers || []; WA_PLAN = d.plan || null; WA_CONN = d.id || WA_CONN; WA_ADD = false;
+    if (waRenderAll(d.connected ? waConnected(d) : waIdle(d))) waWire();
+    if (d.status === 'pairing') { waPoll(); waStop(); WA_POLL = setInterval(waPoll, 3000); }
+  });
+}
+/* the request form draws inside the tab area when adding a second number */
+var _arFormFirst = arForm;
+arForm = function(){
+  var html = _arFormFirst();
+  if (!WA_LIST.length) return html;
+  return html.replace('Your business does not have its WhatsApp agent yet. Ask for one here:',
+                      'Add another WhatsApp number to your business. Each number gets its own agent:')
+             .replace('Request my WhatsApp agent', 'Request another number');
+};
+/* Adding a 2nd+ number: the business's latest request may be the (finished)
+   one for its first number, so only an OPEN request is shown as status. */
+var _arMountFirst = arMount, AR_WAITING = false;
+arMount = function(){
+  if (!WA_LIST.length) return _arMountFirst();
+  api('/whatsapp/agent-request').then(function(r){
+    var req = r.ok && r.data && r.data.request;
+    if (req && ['requested', 'approved', 'building', 'failed'].indexOf(req.status) !== -1) {
+      AR_WAITING = true; waRender(arStatus(req));
+      if (!AR_POLL) AR_POLL = setInterval(arMount, 15000);
+      return;
+    }
+    if (AR_WAITING && req && req.status === 'ready') { AR_WAITING = false; arStop(); WA_CONN = null; waMount(); return; }
+    arStop();
+    if (waRender(arForm())) arWire();
+  });
+};
+/* inbox: open and answer a chat through the number it belongs to */
+function ibxConn(sid){
+  var c = ((IBX.data && IBX.data.chats) || []).filter(function(x){ return x.session_id === sid; })[0];
+  return c && c.conn;
+}
+var _apiBeforeMulti = api;
+api = function(path, opts){
+  var m = /^\/whatsapp\/chats\/([^?\/]+)(\/send)?$/.exec(path);
+  if (m) { var cn = ibxConn(decodeURIComponent(m[1])); if (cn) path += '?conn=' + encodeURIComponent(cn); }
+  return _apiBeforeMulti(path, opts);
+};
+(function(){
+  var st = document.createElement('style');
+  st.textContent = '.wa-tabs{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:14px 16px 0}';
+  document.head.appendChild(st);
+})();
+
+/* ======================================================== Plan & usage
+   Which plan the business is on, this month's WhatsApp conversations against
+   its limit, its numbers, and the three plans. Owner only (the API refuses
+   staff). Warnings at 80% and 100%; the agent is never cut off. */
+function planBar(used, max){
+  var pct = max ? Math.min(100, Math.round(100 * used / max)) : 0;
+  var col = pct >= 100 ? 'var(--danger)' : pct >= 80 ? 'var(--warning,#F0A83C)' : 'var(--growth)';
+  return '<div class="plan-bar"><div style="width:' + pct + '%;background:' + col + '"></div></div>';
+}
+function planHTML(pl){
+  var p = pl.plan || {}, u = pl.usage || {}, cur = p.key;
+  var out = '<div style="padding:14px 16px">' +
+    '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><div><b>' + esc(p.name || 'Starter') + '</b>' +
+    (p.chosen ? '' : ' <span class="card-note">(free trial: Starter limits)</span>') + '</div>' +
+    '<div class="card-note">since ' + esc(u.since || '') + '</div></div>' +
+    '<div style="margin-top:10px">WhatsApp conversations this month: <b>' + esc((u.conversations || 0).toLocaleString('en-US')) + '</b> of ' +
+    esc((p.max_conversations || 0).toLocaleString('en-US')) + (u.approximate ? ' <span class="card-note">(about)</span>' : '') + '</div>' +
+    planBar(u.conversations || 0, p.max_conversations) +
+    '<div style="margin-top:10px">WhatsApp numbers: <b>' + esc(u.numbers || 0) + '</b> of ' + esc(p.max_numbers || 1) + '</div>' +
+    (pl.warning === 'over' ? '<div class="plan-warn">You have used your plan\'s conversations for this month. Your agent keeps answering; TechDeva will talk to you about moving up a plan.</div>'
+      : pl.warning === 'near' ? '<div class="plan-warn">You have used ' + esc(pl.percent) + '% of this month\'s conversations.</div>' : '') +
+    ((u.incomplete || []).length ? '<div class="card-note" style="margin-top:6px">Could not count one of your numbers right now: ' + esc(u.incomplete.join('; ')) + '</div>' : '') +
+    '<div class="card-note" style="margin-top:8px">A conversation is one customer who writes to your business on WhatsApp in a month, however many messages they send.</div></div>';
+  var plans = pl.plans || [];
+  if (plans.length) out += '<div class="plan-grid">' + plans.map(function(x){
+    return '<div class="plan-card' + (x.key === cur && p.chosen ? ' on' : '') + '"><div class="card-note">' + esc(x.name) + (x.key === cur && p.chosen ? ' · your plan' : '') + '</div>' +
+      '<div class="plan-price">' + (x.price_pkr != null ? 'PKR ' + esc(Math.round(x.price_pkr).toLocaleString('en-US')) + '<span class="card-note"> / month</span>' : 'Talk to us') + '</div>' +
+      '<div>' + esc(x.max_numbers) + ' WhatsApp number' + (x.max_numbers === 1 ? '' : 's') + '</div>' +
+      '<div>' + esc(x.max_conversations.toLocaleString('en-US')) + ' conversations / month</div>' +
+      '<div class="card-note">Full dashboard, Jarvis and posting included</div></div>';
+  }).join('') + '</div><div class="card-note" style="padding:0 16px 14px">To change plan, message TechDeva; your fee and limits change the same day.</div>';
+  return out;
+}
+var _billingBeforePlan = VIEWS.billing;
+VIEWS.billing = function(){
+  var html = _billingBeforePlan();
+  if (!isOwner() || !S.billing) return html;
+  var box = need('plan', '/plan') ? (S.plan ? planHTML(S.plan) : errState('Could not read your plan.')) : loading('Counting this month\'s conversations...');
+  var at = html.indexOf('<div class="panel');
+  var pn = panel('Plan & WhatsApp usage', box);
+  return at === -1 ? html + pn : html.slice(0, at) + pn + html.slice(at);
+};
+var _overviewBeforePlan = VIEWS.overview;
+VIEWS.overview = function(){
+  var html = _overviewBeforePlan();
+  if (!isOwner()) return html;
+  need('plan', '/plan');
+  var pl = S.plan;
+  if (!pl || !pl.warning) return html;
+  return '<div class="bil-note" style="border-left-color:' + (pl.warning === 'over' ? 'var(--danger)' : 'var(--warning,#F0A83C)') + '">' +
+    (pl.warning === 'over' ? 'You have used all ' : 'You have used ' + esc(pl.percent) + '% of ') +
+    esc(pl.plan.max_conversations.toLocaleString('en-US')) + ' WhatsApp conversations in your ' + esc(pl.plan.name) + ' plan this month. ' +
+    '<a href="#/billing">See your plan</a></div>' + html;
+};
+(function(){
+  var st = document.createElement('style');
+  st.textContent = '.plan-bar{height:8px;border-radius:6px;background:rgba(255,255,255,.08);margin-top:6px;overflow:hidden}.plan-bar div{height:100%}' +
+    '.plan-warn{margin-top:10px;padding:8px 12px;border-radius:8px;background:rgba(240,168,60,.12);border:1px solid rgba(240,168,60,.35)}' +
+    '.plan-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;padding:0 16px 12px}' +
+    '.plan-card{border:1px solid var(--line);border-radius:10px;padding:12px}.plan-card.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}' +
+    '.plan-price{font-size:20px;font-weight:700;margin:4px 0 6px}';
   document.head.appendChild(st);
 })();
 
