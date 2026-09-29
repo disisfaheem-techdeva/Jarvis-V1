@@ -27,6 +27,7 @@ import requests
 from fastapi import APIRouter, Body, Cookie, Header, HTTPException, Response
 
 from . import business as biz
+from . import jarvis_actions as ja
 from .ai import AIUnavailable, generate_json, fast as ai_fast, last_model as ai_last_model
 from .audit import record
 from .auth import AuthError, SESSION_COOKIE, resolve_scope
@@ -61,15 +62,39 @@ BUSINESS_MATCH_COLUMN = {
 
 VOICE_RULE = """
 
-VOICE MODE: the owner is speaking to you and will HEAR your reply. Make "reply"
-one or two short spoken sentences (under 35 words), no lists, no markdown, no
-symbols. Still do the full action they asked for."""
+VOICE MODE: the owner is talking to you out loud and will HEAR your reply, like
+a phone call. Make "reply" one or two short, natural spoken sentences (under 30
+words) -- the way a friendly assistant sitting next to them would say it. No
+lists, no markdown, no symbols, no reading out ids. Still do the full action."""
 
-CLASSIFY = """You turn a business owner's instruction into one action for their
+CLASSIFY = """You are Jarvis, the owner's personal assistant inside their business
+dashboard. You understand what they say and turn it into one step on their
 AI business platform. Answer with JSON only.
 
 Fields:
-  "kind": one of "dashboard", "teach", "business", "post", "question"
+  "kind": one of "action", "dashboard", "teach", "business", "post", "question"
+  "action": if kind is action, one of:
+            navigate (open a page of the dashboard),
+            book_appointment, reschedule_appointment, cancel_appointment,
+            complete_appointment (mark done), add_customer, add_lead,
+            add_expense, schedule_post (a post to go out at a later time)
+  "args": if kind is action, an object:
+            navigate: section (a section id from the list below)
+            book_appointment: name, phone, date (YYYY-MM-DD), time (HH:MM
+                24h), service (as named in BUSINESS FACTS services), staff,
+                notes
+            reschedule_appointment: appointment_id, date, time
+            cancel_appointment / complete_appointment: appointment_id
+            add_customer: name, phone, email, notes
+            add_lead: name, phone, service
+            add_expense: description, amount (number, PKR), category, method
+                (cash, card, bank, jazzcash, easypaisa), spent_on (YYYY-MM-DD)
+            schedule_post: caption (finished post text, as for kind post),
+                platforms, at (ISO time with +05:00, e.g.
+                2026-10-02T18:00:00+05:00), at_words (e.g. "Friday 6 pm")
+          appointment_id must be the "id" of one of upcoming_appointments in
+          BUSINESS FACTS. Turn "today", "tomorrow", "Friday" into a date with
+          next_7_days. Never invent a phone number, id, price or time.
   "lesson": if kind is teach, the single fact or rule to remember, written in
             plain words as an instruction to the sales agent. No preamble.
   "prefs": if kind is dashboard, an object using only these keys:
@@ -99,12 +124,32 @@ Fields:
             both if the owner did not say
   "image_url": if kind is post and the owner gave an https picture link, that
             link, otherwise empty
-  "reply": one short sentence, addressed to the owner, saying what you did or
-           answering their question. No emoji, no exclamation marks.
+  "reply": what you say back. Sound like a warm, switched-on human assistant
+           who knows this business, not a machine: natural, friendly, brief
+           (one or two sentences), contractions welcome, vary your wording,
+           never start with "Sure" or "Certainly" every time. Mention the
+           specifics (name, day, time, amount) so they can hear it is right.
+           For add_expense, cancel_appointment and schedule_post, ask for a
+           yes first ("Shall I record 5,000 for the electricity bill?").
+           No emoji, no markdown.
 
-Section ids available: overview, leads, customers, appointments, revenue,
-workforce, needshuman, inbox, invoices, expenses, dayclose, pnl, services,
-packages, inventory, integrations, reports, settings, console.
+If something needed to do what they asked is missing (for a booking: who and
+what time; for an expense: the amount), do NOT guess: kind is "question" and
+"reply" asks for just the missing piece, briefly. RECENT CONVERSATION shows
+what was said before, so a short follow-up ("5 pm", "make it Saturday", "yes
+her number is 0300...") continues that request.
+
+Section ids available: overview (home), leads, customers, appointments,
+calendar, dailyentry (daily entry), revenue, invoices, expenses, dayclose (day
+closing), pnl (profit and loss), services, products, packages, catalogue,
+inventory (stock), integrations, reports, settings, console (Jarvis), posts
+(social posts), billing (plan and billing), team (staff logins and PINs),
+whatsapp, inbox, needshuman (chats needing a human), marketing, attendance,
+hr, hermes (AI agents), ai.
+
+"Open/show/go to <page>" is action navigate. Booking, moving, cancelling or
+finishing an appointment, adding a customer, a lead or an expense, and posting
+at a LATER time are "action". Posting now or "make a post" is "post".
 
 If the instruction changes a real fact about the business itself -- a
 price, a service, a staff member, opening hours, a policy, a location, a
@@ -115,7 +160,7 @@ itself), it is "teach".
 If it is about how their own screen looks or which sections they see, it is
 "dashboard".
 If they want something posted, shared or announced on Facebook, Instagram or
-social media, it is "post" -- it becomes a draft they approve before anything
+social media (and no later time is given), it is "post" -- it becomes a draft they approve before anything
 goes out, so say "drafted", never "posted". Otherwise it is "question"."""
 
 
@@ -186,19 +231,58 @@ FACTS_RULE = ("\n\nBUSINESS FACTS below are live data from this business's own "
               "records. Answer questions ONLY from them. If the answer is not in "
               "them, say you do not have that yet -- never invent a number, "
               "price, name or date. If the owner is only ASKING something, kind is "
-              "\"question\" and nothing is changed. Use business, dashboard, teach or post "
-              "only when the owner clearly tells you to change, add, remove, teach or post.")
+              "\"question\" and nothing is changed. Use action, business, dashboard, teach or post "
+              "only when the owner clearly tells you to do, change, add, remove, teach or post.")
 
 _DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
 
+_FACTS_CACHE = {}
+FACTS_TTL = 30   # seconds; any change Jarvis makes clears it at once
+
+
+def _forget_facts(tid):
+    for k in [k for k in _FACTS_CACHE if k[0] == str(tid)]:
+        _FACTS_CACHE.pop(k, None)
+
+
 def _facts(tid, role):
+    """The snapshot, reused for a few seconds: in a conversation every turn
+    used to re-run all of these queries before the model could even start."""
+    key = (str(tid), role)
+    hit = _FACTS_CACHE.get(key)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    f = _facts_fresh(tid, role)
+    if len(_FACTS_CACHE) > 500:
+        _FACTS_CACHE.clear()
+    _FACTS_CACHE[key] = (time.time() + FACTS_TTL, f)
+    return f
+
+
+def _facts_fresh(tid, role):
     f = {}
     tz = "Asia/Karachi"
     try:
         with tenant_session(tid, role) as cur:
             cur.execute("SELECT to_char(now() AT TIME ZONE %s, 'Dy DD Mon YYYY HH24:MI') AS now", (tz,))
             f["now_pakistan_time"] = cur.fetchone()["now"]
+            cur.execute("SELECT to_char(d, 'Dy') AS day, to_char(d, 'YYYY-MM-DD') AS date "
+                        "FROM generate_series((now() AT TIME ZONE %s)::date, "
+                        "(now() AT TIME ZONE %s)::date + 7, interval '1 day') AS d", (tz, tz))
+            f["next_7_days"] = [r["day"] + " " + r["date"] for r in cur.fetchall()]
+            cur.execute("SELECT name, role FROM staff WHERE coalesce(active, true) "
+                        "ORDER BY name LIMIT 30")
+            f["staff"] = [dict(r) for r in cur.fetchall()]
+            # With ids, so "cancel Ayesha's appointment tomorrow" can name one.
+            cur.execute("""
+                SELECT a.id, to_char(a.starts_at AT TIME ZONE %(tz)s, 'Dy YYYY-MM-DD HH24:MI') AS at,
+                       c.name AS customer, a.service, a.status
+                  FROM appointments a LEFT JOIN customers c ON c.id = a.customer_id
+                 WHERE a.starts_at >= date_trunc('day', now() AT TIME ZONE %(tz)s) AT TIME ZONE %(tz)s
+                   AND a.starts_at < now() + interval '15 days'
+                 ORDER BY a.starts_at LIMIT 30""", {"tz": tz})
+            f["upcoming_appointments"] = [dict(r) for r in cur.fetchall()]
             cur.execute("SELECT name, price, currency, active FROM services "
                         "ORDER BY sort_order NULLS LAST, name LIMIT 40")
             f["services"] = [dict(r) for r in cur.fetchall()]
@@ -232,6 +316,12 @@ def _facts(tid, role):
                     WHERE date_trunc('month', paid_at AT TIME ZONE %(tz)s)
                           = date_trunc('month', now() AT TIME ZONE %(tz)s)""", {"tz": tz})
                 f["money_pkr"] = dict(cur.fetchone())
+                cur.execute("""
+                    SELECT coalesce(sum(amount), 0)::float AS spent
+                    FROM expenses
+                    WHERE date_trunc('month', spent_on) = date_trunc('month', (now() AT TIME ZONE %(tz)s)::date)""",
+                            {"tz": tz})
+                f["money_pkr"]["expenses_this_month"] = cur.fetchone()["spent"]
     except Exception as e:  # a facts failure must never block the console
         f["facts_error"] = type(e).__name__
     if not f.get("services"):
@@ -248,8 +338,24 @@ def _facts(tid, role):
     return f
 
 
-def _with_facts(tid, role, message):
-    return ("BUSINESS FACTS:\n" + json.dumps(_facts(tid, role), default=str)[:6000] +
+def _history(raw):
+    """The last few turns the dashboard sends back, so "5 pm" or "yes, her
+    number is 0300..." continues the request before it."""
+    lines = []
+    if isinstance(raw, list):
+        for h in raw[-8:]:
+            if not isinstance(h, dict):
+                continue
+            who = "Owner" if h.get("role") == "user" else "Jarvis"
+            text = re.sub(r"\s+", " ", str(h.get("text") or "")).strip()[:300]
+            if text:
+                lines.append("%s: %s" % (who, text))
+    return "\n".join(lines)
+
+
+def _with_facts(tid, role, message, history=""):
+    return ("BUSINESS FACTS:\n" + json.dumps(_facts(tid, role), default=str)[:9000] +
+            ("\n\nRECENT CONVERSATION:\n" + history if history else "") +
             "\n\nOWNER SAYS:\n" + message)
 
 
@@ -314,6 +420,29 @@ def _tts(text: str, urdu: bool) -> bytes:
     raise HTTPException(503, "Voice is busy right now (%s)." % last)
 
 
+def _sentence(e):
+    t = str(e).strip()
+    t = t[:1].upper() + t[1:]
+    return t if t.endswith((".", "?", "!")) else t + "."
+
+
+def _do_action(tid, role, uid, action, args, founder, reply):
+    try:
+        result, note = ja.run(tid, role, uid, action, args, founder=founder)
+    except ja.ActionError as e:
+        # Said, not thrown: in a spoken conversation an error box is silence.
+        return {"kind": "action", "action": action, "ok": False,
+                "reply": "I couldn't do that: %s" % _sentence(e)}
+    _forget_facts(tid)
+    if not reply:
+        reply = {"add_expense": "Done, the expense is recorded.",
+                 "cancel_appointment": "Done, that appointment is cancelled.",
+                 "schedule_post": "Done, the post is scheduled."}.get(action, "Done.")
+    if note:
+        reply = reply.rstrip(".") + " -- " + note + "."
+    return dict(result, kind="action", action=action, ok=True, reply=reply)
+
+
 def make_console_router():
     router = APIRouter(prefix="/console", tags=["console"])
 
@@ -325,6 +454,16 @@ def make_console_router():
             td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session,
                                    target=body.get("tenant_id"))
+        try:
+            founder = resolve_scope(x_tenant_id, x_role, authorization, td_session)[1] == "techdeva_admin"
+        except AuthError:
+            founder = False
+
+        # "Yes" to a question Jarvis asked: run exactly what was sealed, no model.
+        if body.get("confirm"):
+            action, args = ja.unseal(body["confirm"], tid, uid, role)
+            return _do_action(tid, role, uid, action, args, founder, None)
+
         message = (body.get("message") or "").strip()
         if not message:
             raise HTTPException(400, "Type what you would like changed.")
@@ -344,7 +483,7 @@ def make_console_router():
             # box: a second full pass through the model chain turns a slow
             # answer into a minute of silence, and silence reads as broken.
             with ai_fast():
-                out = generate_json(system, _with_facts(tid, role, message),
+                out = generate_json(system, _with_facts(tid, role, message, _history(body.get("history"))),
                                     required_keys=("kind",), _retry=False)
             response.headers["Server-Timing"] = "think;dur=%d" % int((time.time() - t0) * 1000)
             response.headers["X-Jarvis-Model"] = ai_last_model() or ""
@@ -356,6 +495,23 @@ def make_console_router():
 
         kind = (out.get("kind") or "question").strip().lower()
         reply = (out.get("reply") or "").strip() or "Done."
+
+        if kind == "action":
+            action = (out.get("action") or "").strip().lower()
+            args = out.get("args") if isinstance(out.get("args"), dict) else {}
+            if action not in ja.ACTIONS:
+                return {"kind": "question", "reply": reply}
+            if action in ja.CONFIRM:
+                try:
+                    question = ja.describe(tid, role, action, args, founder)
+                except ja.ActionError as e:
+                    return {"kind": "question", "reply": _sentence(e)}
+                return {"kind": "confirm", "action": action, "summary": question,
+                        "reply": reply if reply.rstrip().endswith("?") else question,
+                        "confirm": ja.seal(tid, uid, role, action, args)}
+            return _do_action(tid, role, uid, action, args, founder, reply)
+        if kind in ("teach", "dashboard", "post", "business"):
+            _forget_facts(tid)
 
         if kind == "teach":
             if role not in ("owner", "techdeva_admin"):

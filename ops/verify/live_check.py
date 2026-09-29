@@ -642,6 +642,49 @@ def phase10(ctx):
         check("DATA", "QA logins back to where they started", after == users_before, "before=%s after=%s" % (users_before, after))
 
 
+def phase11(ctx):
+    """Jarvis does the work (Part 16), with the REAL model: a booking, a page
+    to open, and an expense that must wait for a yes. Everything it creates in
+    the QA business is deleted again."""
+    O, OP, tid = ctx["owner"], ctx["operator"], ctx["qa"]
+    name = "Live Check Jarvis"
+    try:
+        s, r = call(O, "POST", "/console", {"confirm": "not.a.token"})
+        check("J16", "new Jarvis is deployed (a fake yes is refused)", s == 400, "HTTP %s" % s)
+        s, r = call(O, "POST", "/console", {"message": "Book an appointment for %s tomorrow at 11:00." % name})
+        rows = sql("SELECT a.id, c.id, coalesce(a.invoice_id::text,'-') FROM appointments a JOIN customers c ON c.id = a.customer_id "
+                   "WHERE a.tenant_id='%s' AND c.name = '%s'" % (tid, name))
+        for a_id, c_id, inv in rows:
+            CREATED.setdefault("appointments", []).append(a_id)
+            CREATED.setdefault("customers", []).append(c_id)
+            if inv != "-":
+                CREATED.setdefault("invoices", []).append(inv)
+        check("J16", "\"book ... tomorrow at 11\" makes a real booking", s == 200 and len(rows) == 1,
+              "HTTP %s kind=%s reply=%s rows=%d" % (s, r.get("kind"), str(r.get("reply"))[:90], len(rows)))
+        s, r = call(OP, "POST", "/console", {"message": "Open the expenses page."})
+        check("J16", "\"open the expenses page\" opens it", s == 200 and r.get("navigate") == "expenses",
+              "HTTP %s %s" % (s, {k: r.get(k) for k in ("kind", "action", "navigate")}))
+        s, r = call(O, "POST", "/console", {"message": "Record an expense of 1234 rupees for live check tea."})
+        before = int(sql("SELECT count(*) FROM expenses WHERE tenant_id='%s' AND amount = 1234" % tid)[0][0])
+        check("J16", "an expense waits for a yes", s == 200 and r.get("kind") == "confirm" and before == 0,
+              "HTTP %s kind=%s reply=%s" % (s, r.get("kind"), str(r.get("reply"))[:90]))
+        tok = r.get("confirm")
+        if tok:
+            s2, r2 = call(OP, "POST", "/console", {"confirm": tok})
+            s, r = call(O, "POST", "/console", {"confirm": tok})
+            s3, r3 = call(O, "POST", "/console", {"confirm": tok})
+            ids = [x[0] for x in sql("SELECT id FROM expenses WHERE tenant_id='%s' AND amount = 1234" % tid)]
+            CREATED.setdefault("expenses", []).extend(ids)
+            check("J16", "yes records it once; someone else's or a second yes does nothing",
+                  s == 200 and s2 == 403 and s3 == 409 and len(ids) == 1,
+                  "other=%s yes=%s again=%s rows=%d" % (s2, s, s3, len(ids)))
+    finally:
+        made = [i for t in ("appointments", "customers", "invoices", "expenses") for i in CREATED.get(t, [])]
+        if made:
+            sql("DELETE FROM executions WHERE tenant_id='%s' AND resource_id IN (%s)"
+                % (tid, ",".join("'%s'" % i for i in made)))
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)

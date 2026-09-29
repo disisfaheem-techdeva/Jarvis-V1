@@ -5290,6 +5290,288 @@ window.addEventListener('hashchange', function(){ TPIN.msg = null; TPIN.data = u
   document.head.appendChild(st);
 })();
 
+/* ======================================================== Jarvis that does things (Part 16)
+   - Remembers the conversation: the last few turns go with every message, so
+     "5 pm" or "yes, her number is 0300..." continues what was being asked.
+   - Does the work: books, moves, cancels and finishes appointments, adds
+     customers, leads and expenses, schedules posts, opens any page. The server
+     runs each through the same endpoints as the buttons, with the same rights.
+   - Money, cancelling and anything public asks first: "Shall I...?" with Yes /
+     No buttons, or just say "yes" / "haan".
+   - On every page: a Jarvis button bottom right opens a small panel, and a
+     conversation carries on while Jarvis opens other pages for you.
+   - Quick voice: English replies are spoken at once in the best voice this
+     browser has (Voice: quick); the studio voice is one tap away (Voice:
+     natural) and is always used for Urdu. */
+JV.hist = JV.hist || []; JV.pending = null; JV.dock = false; JV.extra = '';
+try { JV.voice = localStorage.getItem('jarvis_voice') || 'fast'; } catch (e) { JV.voice = 'fast'; }
+JV_VOICE_WAIT_MS = 3500;
+var JV_BEST = null;
+function jvPickVoice(){
+  try {
+    var vs = window.speechSynthesis ? window.speechSynthesis.getVoices() : [], best = null, bs = -1;
+    vs.forEach(function(v){
+      if (!/^en([-_]|$)/i.test(v.lang || '')) return;
+      var s = 0, n = v.name || '';
+      if (/natural|neural|online|premium|enhanced/i.test(n)) s += 4;
+      if (/google/i.test(n)) s += 2;
+      if (/aria|jenny|sonia|libby|samantha|zira|female/i.test(n)) s += 1;
+      if (/en[-_](GB|US)/i.test(v.lang)) s += 1;
+      if (s > bs) { bs = s; best = v; }
+    });
+    JV_BEST = best;
+  } catch (e) {}
+}
+if (window.speechSynthesis) { jvPickVoice(); try { window.speechSynthesis.addEventListener('voiceschanged', jvPickVoice); } catch (e) {} }
+function jvVoiceLabel(){ return JV.voice === 'fast' ? 'Voice: quick' : 'Voice: natural'; }
+function jvToggleVoice(btn){
+  JV.voice = JV.voice === 'fast' ? 'natural' : 'fast';
+  try { localStorage.setItem('jarvis_voice', JV.voice); } catch (e) {}
+  if (btn) btn.textContent = jvVoiceLabel();
+}
+function jvBrowserVoice(text, urdu){
+  return new Promise(function(done){
+    var fin = false, end = function(){ if (!fin) { fin = true; done(); } };
+    try {
+      if (!window.speechSynthesis || !text) return end();
+      var u = new SpeechSynthesisUtterance(text); u.lang = urdu ? 'ur-PK' : 'en-US';
+      if (!urdu && JV_BEST) { u.voice = JV_BEST; u.lang = JV_BEST.lang; }
+      u.rate = 1.05;
+      u.onend = end; u.onerror = end;
+      setTimeout(end, 4000 + String(text).length * 90);   // some browsers never say they finished
+      window.speechSynthesis.speak(u);
+    } catch (e) { end(); }
+  });
+}
+function jvSpeakServer(text, urdu){
+  var ctl = new AbortController(); JV.abort = ctl;
+  var parts = jvSentences(text);
+  var jobs = parts.map(function(p){ return jvFetchVoice(p, urdu, ctl.signal); });
+  var first = Promise.race([jobs[0], new Promise(function(r){ setTimeout(function(){ r('slow'); }, JV_VOICE_WAIT_MS); })]);
+  return first.then(function(v){
+    if (ctl.signal.aborted) return;
+    if (!v || v === 'slow') { ctl.abort(); JV.timing += ' · voice: browser (studio voice slow)'; jvSet(JV.state); return jvBrowserVoice(text, urdu); }
+    JV.timing += ' · voice ' + (v.ms / 1000).toFixed(1) + 's'; jvSet(JV.state);
+    var chain = jvPlay(v.url);
+    for (var i = 1; i < jobs.length; i++) (function(job, part){
+      chain = chain.then(function(){ return ctl.signal.aborted ? null : job; })
+                   .then(function(w){ if (ctl.signal.aborted) return; return w ? jvPlay(w.url) : jvBrowserVoice(part, urdu); });
+    })(jobs[i], parts[i]);
+    return chain;
+  });
+}
+function jvSpeak(text){
+  jvStopAudio();
+  text = String(text || '').slice(0, 600);
+  JARVIS_LAST = text;
+  if (!text) return Promise.resolve();
+  var urdu = JARVIS_LANG === 'ur' || /[؀-ۿ]/.test(text);
+  if (!urdu && JV.voice === 'fast' && JV_BEST) { JV.timing += ' · voice: instant'; jvSet(JV.state); return jvBrowserVoice(text, false); }
+  return jvSpeakServer(text, urdu);
+}
+function jvListen(){
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { JV.conv = false; jvSet('error', 'Voice needs Chrome or Edge. You can type instead.'); return; }
+  var rec; try { rec = new SR(); } catch (e) { JV.conv = false; jvSet('error', 'This browser would not start the microphone. Type instead.'); return; }
+  JV.rec = rec; JV.heard = '';
+  var failed = null;
+  rec.lang = jarvisRecLang(); rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+  rec.onresult = function(ev){ JV.heard = jarvisHeard(ev); var box = document.getElementById('con-in'); if (box) box.value = JV.heard; };
+  rec.onerror = function(ev){ failed = ev.error || 'unknown'; };
+  rec.onend = function(){
+    JV.rec = null;
+    if (!JV.conv || JV.state === 'processing' || JV.state === 'responding') return;   // a button was used meanwhile
+    if (failed && failed !== 'no-speech' && failed !== 'aborted') { JV.conv = false; jvSet('error', jvMicError(failed)); return; }
+    if (JV.heard.trim()) { JV.silent = 0; JARVIS_SPOKEN = true; consoleSend(); return; }
+    JV.silent++;
+    if (JV.silent >= 2) { JV.conv = false; jvSet('idle', 'Conversation ended: I did not hear anything.'); return; }
+    jvListen();
+  };
+  try { rec.start(); jvSet('listening', 'Go ahead, I\'m listening.'); }
+  catch (e) { JV.conv = false; jvSet('error', jvMicError('start-failed')); }
+}
+
+function jvHist(role, text){ JV.hist.push({ role: role, text: String(text || '').slice(0, 400) }); if (JV.hist.length > 20) JV.hist.shift(); }
+function jvYesNo(msg){
+  var m = String(msg).toLowerCase().replace(/[.!,?؟۔]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (m.length > 40) return null;
+  if (/^(yes|yeah|yep|yup|sure|ok|okay|confirm|go ahead|do it|haan|han|ha|haa|ji|jee|g|theek|thik|kar do|kardo|bilkul|ہاں|جی|ٹھیک|بالکل)( |$)/.test(m)) return 'yes';
+  if (/^(no|nope|cancel|stop|dont|don't|leave it|nahi|nahin|nai|na|mat|نہیں|نہ)( |$)/.test(m)) return 'no';
+  return null;
+}
+function jvTranscript(){
+  var h = JV.hist.slice(-6);
+  if (!h.length) return '<div class="card-note">Try: “Book Ayesha for a HydraFacial tomorrow at 4”, “Open appointments”, “Add an expense of 3,000 for tea”, “How many leads this week?”</div>';
+  return '<div class="jv-chat">' + h.map(function(m, i){
+    return '<div class="jv-b ' + (m.role === 'user' ? 'me' : 'ai') + '">' + esc(m.text) +
+      (i === h.length - 1 && m.role !== 'user' ? (JV.extra || '') : '') + '</div>';
+  }).join('') + (JV.state === 'processing' ? '<div class="jv-b ai jv-typing"><span></span><span></span><span></span></div>' : '') + '</div>';
+}
+function jvShowOut(){
+  var o = document.getElementById('con-out');
+  if (!o) return;
+  o.innerHTML = jvTranscript();
+  var c = o.querySelector('.jv-chat'); if (c && c.lastChild && c.lastChild.scrollIntoView && o.classList.contains('jv-dock-out')) o.scrollTop = o.scrollHeight;
+}
+function jvConfirm(yes){
+  var p = JV.pending; JV.pending = null;
+  if (!p) return;
+  try { if (JV.rec) JV.rec.abort(); } catch (e) {}
+  if (!yes) { jvHist('user', 'No'); jvLocal('Okay, I\'ve left it as it is.'); return; }
+  consoleSend({ confirm: p.confirm, label: 'Yes' });
+}
+function jvLocal(reply){
+  jvHist('jarvis', reply); JV.extra = ''; jvShowOut();
+  if (JV.conv) { jvSet('responding', 'Speaking.'); jvSpeak(reply).then(function(){ if (JV.conv) jvListen(); else jvSet('idle', ''); }); }
+  else jvSet('idle', '');
+}
+function jvFreshData(){
+  Object.keys(NEEDED).forEach(function(k){ S[k] = undefined; LOADING[k] = false; });
+  if (typeof APT !== 'undefined') { APT.data = undefined; }
+}
+function consoleSend(opt){
+  var box = document.getElementById('con-in');
+  if (JV.state === 'processing') return;
+  var body, msg;
+  if (opt && opt.confirm) { body = { confirm: opt.confirm }; msg = opt.label || 'Yes'; }
+  else {
+    if (!box || !box.value.trim()) return;
+    if (JV.img && !JV.imgUrl) { jvSet('error', 'The picture is still uploading. Try again in a moment.'); return; }
+    msg = box.value.trim();
+    if (JV.pending) {
+      var p = JV.pending, yn = jvYesNo(msg); JV.pending = null;
+      if (yn === 'yes') { box.value = ''; return consoleSend({ confirm: p.confirm, label: msg }); }
+      if (yn === 'no') { box.value = ''; jvHist('user', msg); return jvLocal('Okay, I\'ve left it as it is.'); }
+    }
+    body = { message: msg, history: JV.hist.slice(-8) };
+    if (JV.imgUrl) body.image_url = JV.imgUrl;
+  }
+  var spoken = !!(JARVIS_SPOKEN || JV.conv); JARVIS_SPOKEN = false;
+  body.voice = spoken;
+  if (box) box.value = '';
+  jvHist('user', msg); JV.extra = '';
+  var t0 = Date.now(); JV.timing = '';
+  jvSet('processing', ''); jvShowOut();
+  fetch('/console', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function(r){
+      var st = r.headers.get('Server-Timing') || '', m = /think;dur=(\d+)/.exec(st);
+      JV.timing = 'thinking ' + (m ? (m[1] / 1000).toFixed(1) : ((Date.now() - t0) / 1000).toFixed(1)) + 's';
+      return r.text().then(function(t){ var d = null; try { d = JSON.parse(t); } catch (e) {} return { ok: r.ok, status: r.status, data: d }; });
+    })
+    .catch(function(){ return { ok: false, status: 0, data: null }; })
+    .then(function(r){
+      var d = r.data || {}, extra = '', go = null;
+      var reply = r.ok ? (d.reply || 'Done.') : ((d && d.detail) || (r.status ? 'Sorry, that didn\'t work (error ' + r.status + ').' : 'I couldn\'t reach the server. Check the internet and try again.'));
+      if (r.ok) {
+        if (d.kind === 'teach') { extra = '<div class="jv-x">Your agent will now follow: <em>' + esc(d.lesson || '') + '</em></div>'; loadLessons(); }
+        if (d.kind === 'dashboard') { PREFS = d.prefs || PREFS; applyBrand(); }
+        if (d.kind === 'post') {
+          extra = '<div class="jv-x">Nothing is public yet. <a href="#/posts">Review the draft</a></div>';
+          JV.img = JV.imgUrl = null; jvRenderAttach(); loadPosts();
+        }
+        if (d.kind === 'business') { need('biz_' + d.resource, '/business/' + d.resource, true); }
+        if (d.kind === 'confirm') {
+          JV.pending = { confirm: d.confirm };
+          extra = '<div class="jv-x"><button class="btn primary" type="button" onclick="jvConfirm(true)">Yes, do it</button> ' +
+                  '<button class="btn" type="button" onclick="jvConfirm(false)">No</button></div>';
+        }
+        if (d.kind === 'action' && d.ok) {
+          if (d.navigate) go = d.navigate;
+          else if (d.refresh) {
+            jvFreshData();
+            var page = { appointments: 'appointments', customers: 'customers', leads: 'leads', expenses: 'expenses', posts: 'posts' }[d.refresh[0]];
+            if (page && currentView() !== page) extra = '<div class="jv-x"><a href="#/' + page + '">Open ' + page + '</a></div>';
+          }
+        }
+      }
+      jvHist('jarvis', reply); JV.extra = extra;
+      jvSet(r.ok ? 'idle' : 'error', r.ok ? '' : '');
+      if (go) {
+        if (go !== 'console') JV.dock = true;       // keep talking on the new page
+        if (currentView() !== go) location.hash = '#/' + go;
+      } else if (d.kind === 'action' && d.ok && d.refresh && S.me) renderShell();
+      jvShowOut();
+      if (spoken) {
+        jvSet('responding', 'Speaking. Press End conversation to stop.');
+        jvSpeak(reply).then(function(){
+          if (!JV.conv) { if (JV.state === 'responding') jvSet('idle', ''); return; }
+          jvListen();
+        });
+      }
+    });
+}
+
+/* ---- Jarvis on every page ---- */
+function jvDockHTML(){
+  if (!JV.dock) return '<button class="jv-fab" id="jv-fab" type="button" title="Talk to Jarvis"><span class="jv-fab-orb"></span>Jarvis</button>';
+  return '<div class="jv-dockp"><div class="jv-head" style="padding:12px 14px">' +
+    '<div id="jv-orb" class="jv-orb ' + JV.state + '"></div>' +
+    '<div style="flex:1;min-width:0"><div id="jv-state" class="jv-state">' + JV_LABEL[JV.state] + '</div>' +
+    '<div id="jv-msg" class="card-note">' + esc(JV.msg) + '</div><div id="jv-time" class="card-note" style="opacity:.75">' + esc(JV.timing) + '</div></div>' +
+    '<button class="btn" id="jv-dock-x" type="button" title="Close">✕</button></div>' +
+    '<div id="con-out" class="jv-dock-out">' + jvTranscript() + '</div>' +
+    '<div style="padding:10px 14px 14px"><button id="con-mic" class="btn primary jv-mic" type="button" style="width:100%;margin-bottom:8px">●  Start conversation</button>' +
+    '<div class="jv-inrow"><textarea id="con-in" class="fld" rows="1" placeholder="Or type: book, cancel, add, open…"></textarea>' +
+    '<button id="con-go" class="btn primary" type="button">Send</button></div></div></div>';
+}
+function jvDockSync(){
+  var dock = document.getElementById('jv-dock');
+  if (!dock) { dock = document.createElement('div'); dock.id = 'jv-dock'; document.body.appendChild(dock); }
+  var show = !!(S.me && !LOCK_SHOWN && currentView() !== 'console' && root.querySelector('.app'));
+  if (!show) { dock.innerHTML = ''; dock.setAttribute('data-mode', ''); return; }
+  var mode = JV.dock ? 'open' : 'fab';
+  if (dock.getAttribute('data-mode') === mode && dock.innerHTML) return;   // keep what is being typed
+  dock.setAttribute('data-mode', mode);
+  dock.innerHTML = jvDockHTML();
+  var g = function(id){ return document.getElementById(id); };
+  if (g('jv-fab')) g('jv-fab').onclick = function(){ JV.dock = true; jvDockSync(); var b = g('con-in'); if (b) b.focus(); };
+  if (g('jv-dock-x')) g('jv-dock-x').onclick = function(){
+    JV.dock = false;
+    if (JV.conv) { JV.conv = false; jvStopAudio(); try { if (JV.rec) JV.rec.abort(); } catch (e) {} jvSet('idle', ''); }
+    jvDockSync();
+  };
+  if (g('con-go')) g('con-go').onclick = function(){ consoleSend(); };
+  if (g('con-in')) g('con-in').onkeydown = function(e){ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); consoleSend(); } };
+  if (mode === 'open') { wireConsoleMic(); jvShowOut(); }
+}
+var _renderShellBeforeJvDock = renderShell;
+renderShell = function(){ var r = _renderShellBeforeJvDock.apply(this, arguments); try { jvDockSync(); } catch (e) { console.error(e); } return r; };
+
+var _viewConsoleBeforeJv16 = VIEWS.console;
+VIEWS.console = function(){
+  var h = _viewConsoleBeforeJv16();
+  h = h.replace('onclick="jarvisToggleLang(this)">EN</button>', function(m){
+    return m + ' <button id="jv-voice" class="btn" type="button" title="Quick: your browser\'s voice, instant. Natural: the studio voice, a second or two slower. Urdu always uses the studio voice." onclick="jvToggleVoice(this)">' + jvVoiceLabel() + '</button>';
+  });
+  h = h.replace('Ask about figures, change prices, services, staff and hours, teach your WhatsApp agent, or attach a picture and ask for a post.',
+    'Ask about your figures, book, move or cancel appointments, add customers, leads and expenses, change prices, services, staff and hours, teach your WhatsApp agent, open any page, or attach a picture and ask for a post.');
+  setTimeout(function(){
+    jvShowOut();
+    var go = document.getElementById('con-go'); if (go) go.onclick = function(){ consoleSend(); };
+    var box = document.getElementById('con-in'); if (box) box.onkeydown = function(e){ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); consoleSend(); } };
+  }, 0);
+  return h;
+};
+(function(){
+  var st = document.createElement('style');
+  st.textContent =
+    '.jv-chat{display:flex;flex-direction:column;gap:8px}' +
+    '.jv-b{max-width:88%;padding:9px 12px;border-radius:14px;line-height:1.45;font-size:14px;white-space:pre-wrap;word-wrap:break-word}' +
+    '.jv-b.me{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px}' +
+    '.jv-b.ai{align-self:flex-start;background:var(--panel2,rgba(127,127,127,.12));border:1px solid var(--line);border-bottom-left-radius:4px}' +
+    '.jv-x{margin-top:8px;font-size:13px;white-space:normal}.jv-x a{color:inherit;font-weight:600}' +
+    '.jv-typing span{display:inline-block;width:6px;height:6px;margin:0 2px;border-radius:50%;background:currentColor;opacity:.4;animation:jvdot 1s infinite}' +
+    '.jv-typing span:nth-child(2){animation-delay:.15s}.jv-typing span:nth-child(3){animation-delay:.3s}' +
+    '@keyframes jvdot{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:.9;transform:translateY(-3px)}}' +
+    '#jv-dock{position:fixed;right:18px;bottom:18px;z-index:60}' +
+    '.jv-fab{display:flex;align-items:center;gap:8px;padding:10px 16px 10px 10px;border-radius:999px;border:1px solid var(--line);background:var(--panel,#fff);color:inherit;font-weight:700;cursor:pointer;box-shadow:0 6px 24px rgba(0,0,0,.18)}' +
+    '.jv-fab-orb{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#9fb3ff,var(--accent))}' +
+    '.jv-dockp{width:360px;max-width:calc(100vw - 32px);max-height:min(560px,calc(100vh - 36px));display:flex;flex-direction:column;background:var(--panel,#fff);border:1px solid var(--line);border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,.25);overflow:hidden}' +
+    '.jv-dock-out{flex:1;overflow-y:auto;padding:4px 14px;min-height:80px}' +
+    '@media(max-width:560px){#jv-dock{right:16px;left:16px;bottom:16px}#jv-dock .jv-fab{margin-left:auto}.jv-dockp{width:auto;max-width:none}}';
+  document.head.appendChild(st);
+})();
+
 window.addEventListener('hashchange', function(){
   // Every section reads fresh data when it is opened, so something added in
   // one section (a staff member, a product, a booking) shows up in the others.
