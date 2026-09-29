@@ -29,7 +29,10 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
-      window.location.href = "https://api.techdeva.net/dashboard";
+      // the founder works in the founder console, a business in its dashboard
+      const who = await res.json().catch(() => null);
+      window.location.href =
+        who && who.role === "techdeva_admin" ? "https://api.techdeva.net/techdeva" : "https://api.techdeva.net/dashboard";
     } catch {
       setError("Could not reach the server.");
       setLoading(false);

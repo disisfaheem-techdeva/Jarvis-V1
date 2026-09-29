@@ -4568,6 +4568,9 @@ function boot(){
     if (!r.ok || !r.data) { root.innerHTML = errState('The platform did not respond. Please try again.'); return; }
     S.me = r.data;
     if (S.me.auth_enforced && !S.me.authenticated) { gate(); return; }
+    /* A founder account has no business of its own: its home is the founder
+       console (clients, requests, plans), not an empty business dashboard. */
+    if (S.me.role === 'techdeva_admin') { location.replace('/techdeva'); return; }
     if (!S.me.tenant_id) {
       root.innerHTML = '<div class="gate"><div class="gate-box"><h1>No business linked</h1>' +
         '<p class="sub">This account is not attached to a business yet.</p>' +

@@ -13,6 +13,10 @@ const nextConfig: NextConfig = {
       { source: "/portal/onboarding", destination: "https://api.techdeva.net/onboarding", permanent: false },
       { source: "/portal/:path+", destination: "https://api.techdeva.net/dashboard", permanent: false },
       { source: "/signup", destination: "https://api.techdeva.net/", permanent: false },
+      // The old /founder pages never listed clients; the founder console
+      // (clients, requests, plans, money) lives on the API host.
+      { source: "/founder", destination: "https://api.techdeva.net/techdeva", permanent: false },
+      { source: "/founder/:path*", destination: "https://api.techdeva.net/techdeva", permanent: false },
     ];
   },
 };
