@@ -27,32 +27,50 @@ if [ "$DNSIP" != "$MYIP" ]; then
   exit 1
 fi
 
-if grep -qF "Host(\`$HOST\`)" "$FILE"; then
-  echo "$HOST is already in $FILE"
-else
-  cp -p "$FILE" "$FILE.bak-$(date +%Y%m%d-%H%M%S)"
-  python3 - "$FILE" "$HOST" <<'PY'
+# the name of Traefik's port-80 entry point (for the http -> https redirect)
+WEBEP="$(docker inspect traefik-traefik-1 --format '{{join .Config.Cmd " "}} {{join .Args " "}}' 2>/dev/null \
+         | grep -oE 'entrypoints\.[A-Za-z0-9_-]+\.address=:80\b' | head -1 | cut -d. -f2 || true)"
+cp -p "$FILE" "$FILE.bak-$(date +%Y%m%d-%H%M%S)"
+python3 - "$FILE" "$HOST" "$WEBEP" <<'PY2'
 import re, sys
-path, host = sys.argv[1], sys.argv[2]
+path, host, webep = sys.argv[1], sys.argv[2], sys.argv[3]
 s = open(path).read()
+before = s
+anchor = "      - traefik.http.services.techdeva-api.loadbalancer.server.port=8000\n"
 rule_re = re.compile(r'(- "traefik\.http\.routers\.techdeva-tenants\.rule=)([^"]*)(")')
-if rule_re.search(s):
-    s = rule_re.sub(lambda m: m.group(1) + m.group(2) + " || Host(`%s`)" % host + m.group(3), s, count=1)
-else:
-    anchor = "      - traefik.http.services.techdeva-api.loadbalancer.server.port=8000\n"
+m = rule_re.search(s)
+if not m:
     if s.count(anchor) != 1:
         sys.exit("ABORT: could not find the api service port label exactly once; nothing changed")
     s = s.replace(anchor, anchor +
-        '      # clients\' own addresses (ops/setup/add_subdomain.sh)\n'
+        "      # clients' own addresses (ops/setup/add_subdomain.sh)\n"
         '      - "traefik.http.routers.techdeva-tenants.rule=Host(`%s`)"\n' % host +
         "      - traefik.http.routers.techdeva-tenants.entrypoints=websecure\n"
         "      - traefik.http.routers.techdeva-tenants.tls.certresolver=letsencrypt\n"
         "      - traefik.http.routers.techdeva-tenants.service=techdeva-api\n")
+    rule = "Host(`%s`)" % host
+elif ("Host(`%s`)" % host) not in m.group(2):
+    rule = m.group(2) + " || Host(`%s`)" % host
+    s = rule_re.sub(lambda x: x.group(1) + rule + x.group(3), s, count=1)
+else:
+    rule = m.group(2)
+# plain http://<name>.techdeva.net -> https (browsers try http first)
+if webep:
+    http_re = re.compile(r'(- "traefik\.http\.routers\.techdeva-tenants-http\.rule=)([^"]*)(")')
+    if http_re.search(s):
+        s = http_re.sub(lambda x: x.group(1) + rule + x.group(3), s, count=1)
+    else:
+        tail = "      - traefik.http.routers.techdeva-tenants.service=techdeva-api\n"
+        s = s.replace(tail, tail +
+            '      - "traefik.http.routers.techdeva-tenants-http.rule=%s"\n' % rule +
+            "      - traefik.http.routers.techdeva-tenants-http.entrypoints=%s\n" % webep +
+            "      - traefik.http.routers.techdeva-tenants-http.middlewares=techdeva-to-https\n"
+            "      - traefik.http.routers.techdeva-tenants-http.service=techdeva-api\n"
+            "      - traefik.http.middlewares.techdeva-to-https.redirectscheme.scheme=https\n"
+            "      - traefik.http.middlewares.techdeva-to-https.redirectscheme.permanent=true\n", 1)
 open(path, "w").write(s)
-PY
-  echo "added $HOST to $FILE (backup kept next to it)"
-fi
-
+print("updated %s%s" % (path, "" if webep else " (no port-80 entry point found: http is not redirected)") if s != before else "%s already up to date" % path)
+PY2
 docker compose config -q || { echo "ABORT: the compose file no longer parses; restore the .bak copy"; exit 1; }
 docker compose up -d --no-deps api
 echo "waiting for https://$HOST/login (the certificate can take a minute) ..."
