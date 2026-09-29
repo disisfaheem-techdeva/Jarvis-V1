@@ -1,10 +1,10 @@
 <!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>TechDeva - founder console</title>
+<title>TechDeva Founder Console</title>
 <style>
-:root{--bg:#0A0E1A;--panel:#131A2C;--panel2:#0F1524;--line:#26324D;--text:#EAF1FF;
-  --muted:#8A99B8;--accent:#6C8CFF;--tech:#4DA6F0;--growth:#34D07C;--warn:#E0A458;
+:root{--bg:#0B0B0F;--panel:#17161D;--panel2:#111016;--line:#2E2B37;--text:#F4F1EA;
+  --muted:#A29D8F;--accent:#E8C547;--tech:#4DA6F0;--growth:#34D07C;--warn:#E0A458;
   --danger:#E06A6A;--gold:#E8C547;--r:12px}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);
@@ -24,6 +24,7 @@ nav a:hover{color:var(--text);background:#0c1220}
 nav a.on{color:var(--text);background:#141c30;border-left-color:var(--accent);font-weight:600}
 nav a .tag{font-size:11px;color:var(--warn)}
 .sidefoot{padding:14px 20px 0;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+.sidefoot a{color:var(--gold);text-decoration:none}
 main{min-width:0;padding:24px 28px 80px}
 .topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;
   flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:16px}
@@ -77,12 +78,30 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 #login input{width:100%;margin:8px 0;padding:11px;background:var(--panel2);
   border:1px solid var(--line);border-radius:9px;color:var(--text);font:inherit}
 .err{color:var(--danger);font-size:13px;min-height:18px}
-@media(max-width:900px){.shell{grid-template-columns:1fr}aside{display:none}}
+/* Founder identity: gold, not the clients' blue, so this screen is never
+   mistaken for a business dashboard. */
+body::before{content:"";position:fixed;left:0;right:0;top:0;height:3px;z-index:50;
+  background:linear-gradient(90deg,#E8C547,#B8862B,#E8C547)}
+.role-badge{display:inline-block;margin:6px 20px 4px;padding:3px 10px;border-radius:999px;font-size:10.5px;
+  font-weight:700;letter-spacing:.12em;color:#1a1405;background:linear-gradient(90deg,#E8C547,#C99A32)}
+.scope{font-size:12px;color:var(--gold);border:1px solid #5a4a1a;background:#1d1809;border-radius:999px;padding:4px 11px;white-space:nowrap}
+nav a.on{background:#1f1b10}
+.bar i{background:linear-gradient(180deg,#E8C547,#7a5c16)}
+#menubtn{display:none}
+@media(max-width:900px){
+  .shell{grid-template-columns:1fr}
+  aside{position:fixed;inset:0 auto 0 0;width:260px;z-index:40;transform:translateX(-105%);transition:transform .2s;box-shadow:0 0 40px rgba(0,0,0,.6)}
+  aside.open{transform:none}
+  #menubtn{display:inline-block}
+  main{padding:18px 16px 70px}
+  .card{overflow-x:auto}
+}
 </style></head><body>
 
 <div id="login">
-  <div class="brand" style="padding:0 0 14px">TECH<b>DEVA</b></div>
-  <div class="sub">Founder console. techdeva_admin only.</div>
+  <div class="brand" style="padding:0 0 8px">TECH<b>DEVA</b></div>
+  <div class="role-badge" style="margin:0 0 10px">FOUNDER CONSOLE</div>
+  <div class="sub">For the TechDeva founder only. Businesses sign in at <a href="/dashboard" style="color:var(--gold)">/dashboard</a>.</div>
   <form id="lf">
     <input id="email" type="email" placeholder="Email" autocomplete="username">
     <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
@@ -92,8 +111,10 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 </div>
 
 <div class="shell" id="app" style="display:none">
-  <aside>
+  <aside id="aside">
     <div class="brand">TECH<b>DEVA</b></div>
+    <div class="role-badge">FOUNDER CONSOLE</div>
+    <div class="sub" style="padding:0 20px 6px">Every client, in one place</div>
     <nav id="nav"></nav>
     <div class="sidefoot">
       <div id="who"></div>
@@ -102,8 +123,9 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
   </aside>
   <main>
     <div class="topbar">
-      <div><h1 id="vtitle">Overview</h1><div class="sub" id="vsub"></div></div>
-      <div class="tools"><button id="refresh">Refresh</button></div>
+      <div style="display:flex;gap:12px;align-items:flex-start"><button id="menubtn" aria-label="Open menu">☰</button>
+        <div><h1 id="vtitle">Overview</h1><div class="sub" id="vsub"></div></div></div>
+      <div class="tools"><span class="scope">Founder view · all businesses</span><button id="refresh">Refresh</button></div>
     </div>
     <div id="view"></div>
   </main>
@@ -178,6 +200,8 @@ document.getElementById('out').onclick = async e => {
   TOKEN = null; location.href = '/techdeva';
 };
 document.getElementById('refresh').onclick = () => load();
+document.getElementById('menubtn').onclick = () => document.getElementById('aside').classList.toggle('open');
+document.getElementById('nav').addEventListener('click', e => { if (e.target.closest('a')) document.getElementById('aside').classList.remove('open'); });
 window.addEventListener('hashchange', paint);
 
 function show(){
