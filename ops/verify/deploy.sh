@@ -22,7 +22,7 @@ for f in $(ls db/[0-9][0-9]_*.sql 2>/dev/null | sort); do
   case "$n" in 0*|1*|2[0-9]_*) continue;; esac
   # -q: without it psql prints "CREATE TABLE" before the 1, the answer never
   # equals "1", and every migration was re-run (and the marker insert failed)
-  docker compose exec -T db psql -U postgres -d techdeva -qtAc \
+  docker compose exec -T -e PGOPTIONS='-c client_min_messages=warning' db psql -U postgres -d techdeva -qtAc \
     "CREATE TABLE IF NOT EXISTS _td_migrations(name text primary key, applied_at timestamptz default now())" >/dev/null
   applied=$(docker compose exec -T db psql -U postgres -d techdeva -qtAc \
     "SELECT 1 FROM _td_migrations WHERE name='$n'" | tr -d '[:space:]')

@@ -131,6 +131,8 @@ Fields:
            specifics (name, day, time, amount) so they can hear it is right.
            For add_expense, cancel_appointment and schedule_post, ask for a
            yes first ("Shall I record 5,000 for the electricity bill?").
+           Every OTHER action is carried out at once, so its reply says it is
+           done ("Booked Ayesha for tomorrow at 4."), never asks.
            No emoji, no markdown.
 
 If something needed to do what they asked is missing (for a booking: who and
@@ -426,6 +428,52 @@ def _sentence(e):
     return t if t.endswith((".", "?", "!")) else t + "."
 
 
+def _when(args):
+    """'2026-09-30' + '16:00' -> 'Wed 30 Sep at 4:00 pm' (for spoken replies)."""
+    import datetime
+    try:
+        d = datetime.date.fromisoformat(str(args.get("date")))
+        out = d.strftime("%a %d %b").replace(" 0", " ")
+    except (TypeError, ValueError):
+        return ""
+    try:
+        h, m = (int(x) for x in str(args.get("time")).split(":"))
+        out += " at %d:%02d %s" % (h % 12 or 12, m, "am" if h < 12 else "pm")
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
+def _done_text(action, args):
+    args = args if isinstance(args, dict) else {}
+    name = str(args.get("name") or "").strip()
+    when = _when(args)
+    if action == "book_appointment":
+        return "Done, %s is booked%s." % (name or "the appointment", " for " + when if when else "")
+    if action == "reschedule_appointment":
+        return "Done, it's moved to %s." % when if when else "Done, it's moved."
+    if action == "cancel_appointment":
+        return "Done, that appointment is cancelled."
+    if action == "complete_appointment":
+        return "Done, it's marked as completed."
+    if action == "add_customer":
+        return "Done, %s is added to your customers." % (name or "they")
+    if action == "add_lead":
+        return "Done, %s is added as a new lead." % (name or "they")
+    if action == "add_expense":
+        try:
+            amt = "PKR {:,.0f}".format(float(str(args.get("amount")).replace(",", "")))
+        except (TypeError, ValueError):
+            amt = "the expense"
+        what = str(args.get("description") or "").strip()
+        return "Done, %s%s is recorded." % (amt, " for " + what if what else "")
+    if action == "schedule_post":
+        return "Done, the post will go out %s." % (args.get("at_words") or "at the time you picked")
+    if action == "navigate":
+        return "Here you go."
+    return "Done."
+
+
 def _do_action(tid, role, uid, action, args, founder, reply):
     try:
         result, note = ja.run(tid, role, uid, action, args, founder=founder)
@@ -434,10 +482,12 @@ def _do_action(tid, role, uid, action, args, founder, reply):
         return {"kind": "action", "action": action, "ok": False,
                 "reply": "I couldn't do that: %s" % _sentence(e)}
     _forget_facts(tid)
-    if not reply:
-        reply = {"add_expense": "Done, the expense is recorded.",
-                 "cancel_appointment": "Done, that appointment is cancelled.",
-                 "schedule_post": "Done, the post is scheduled."}.get(action, "Done.")
+    # The model writes its reply before anything runs, and sometimes as a
+    # question ("Shall I book...?") although the booking is already made. A
+    # client must never hear a question about something already done, so a
+    # questioning (or missing) reply is replaced by what actually happened.
+    if not reply or reply.rstrip().endswith(("?", "\u061f")):
+        reply = _done_text(action, args)
     if note:
         reply = reply.rstrip(".") + " -- " + note + "."
     return dict(result, kind="action", action=action, ok=True, reply=reply)
