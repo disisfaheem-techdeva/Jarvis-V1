@@ -40,6 +40,7 @@ from .account import make_account_router
 from .billing import make_billing_router
 from .provisioning import make_provisioning_router
 from .plans import make_plans_router
+from .pins import make_pins_router
 from . import trial
 
 # API docs (/docs, /redoc, /openapi.json) hand anyone on the internet the
@@ -84,6 +85,7 @@ app.include_router(make_account_router())
 app.include_router(make_billing_router())
 app.include_router(make_provisioning_router())
 app.include_router(make_plans_router())
+app.include_router(make_pins_router())
 trial.install(app)
 
 # The two client-facing pages. The API image is built from ./app, so web/ is
@@ -567,6 +569,12 @@ def onboarding_page():
 def reset_page():
     """Forgot password: ask for a link, or choose a new password from one."""
     return _page("reset.html")
+
+
+@app.get("/pin", include_in_schema=False)
+def pin_page():
+    """Team PIN login: the shared screen's PIN pad, or business code + PIN."""
+    return _page("pin.html")
 
 
 @app.get("/portal", include_in_schema=False)

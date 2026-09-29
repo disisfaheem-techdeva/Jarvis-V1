@@ -23,7 +23,7 @@ from .db import tenant_session
 TRIAL_DAYS = 7
 MESSAGE = ("Your free trial has ended. Please pay to keep using your dashboard. "
            "Your WhatsApp agent is still answering your customers.")
-OPEN_EXACT = {"/", "/dashboard", "/reset", "/onboarding", "/portal", "/techdeva", "/health",
+OPEN_EXACT = {"/", "/dashboard", "/reset", "/pin", "/onboarding", "/portal", "/techdeva", "/health",
               "/me", "/portal/summary", "/portal/config", "/console/prefs", "/brand", "/brand/logo"}
 OPEN_PREFIX = ("/auth/", "/billing", "/public/", "/media/", "/signup")
 _CACHE: dict = {}

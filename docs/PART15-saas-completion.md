@@ -46,6 +46,15 @@ or Brevo/Mailgun), then `docker compose up -d --no-deps api`.
 | Plans: **Starter PKR 20,000**, 1 number, 500 conversations; **Growth PKR 34,999**, 2 numbers, 1,500; **Pro** (price not given yet), 5 numbers, 4,000 | `plans` table (db/36), editable in founder console, Clients, Plans. Numbers are a hard limit (the request form refuses more). Conversations are counted per month and warned at 80% / 100%; the agent is never cut off mid-conversation. |
 | Payment details: TECH DEVA DIGITAL MARKETING AGENCY, JS Bank Cavalry Lahore, 0002923574, PK19JSBL9561000002923574 | db/37 fills "How clients pay you" when it is still empty (never overwrites). |
 
+**Team PIN login** (as in the Beauty Aesthetic CRM): Team page, Team logins. The owner
+gives each person a 4-6 digit PIN and an access level (Staff = no money pages or settings;
+Full = everything the owner sees). "Use this device for PIN login" makes the reception
+screen open straight to the business's PIN pad at `/pin`; on their own phone a person
+enters the business code first. Easy PINs (1111, 1234, ...) and duplicates are refused;
+5 wrong tries lock that screen for 15 minutes (30 lock the whole business); every try is
+recorded; removing a PIN stops it at once and keeps the person's history. PIN sessions
+last 12 hours. The owner can give themself a PIN too. db/38, app/pins.py, web/pin.html.
+
 A business may now have several WhatsApp numbers (one agent each): the WhatsApp
 Connection page has a tab per number and "+ Add another number" within the plan;
 the inbox shows every number's chats and replies through the number a chat came in on.

@@ -601,6 +601,47 @@ def phase9(ctx):
               "not counted": (u.get("usage") or {}).get("incomplete")}))
 
 
+def phase10(ctx):
+    """Team PIN login on the QA business: add a login, log in by business code +
+    PIN, prove staff limits and the weak-PIN rule, then delete everything made."""
+    import random
+    O, OP, tid = ctx["owner"], ctx["operator"], ctx["qa"]
+    code_before = sql("SELECT coalesce(login_code,'-') FROM tenants WHERE id='%s'" % tid)[0][0]
+    users_before = int(sql("SELECT count(*) FROM users WHERE tenant_id='%s'" % tid)[0][0])
+    uid = None
+    try:
+        s, r = call(O, "POST", "/team/logins", {"name": "Live Check PIN", "access": "staff", "pin": "1234"})
+        check("PIN", "an easy PIN (1234) is refused", s == 400, "HTTP %s %s" % (s, r.get("detail") if isinstance(r, dict) else r))
+        s, r = call(OP, "POST", "/team/logins", {"name": "x", "access": "staff", "pin": "58203"})
+        check("PIN", "staff cannot give out logins", s == 403, "HTTP %s" % s)
+        pin = None
+        for _ in range(20):
+            cand = "%06d" % random.randint(100000, 999999)
+            s, r = call(O, "POST", "/team/logins", {"name": "Live Check PIN", "access": "staff", "pin": cand})
+            if s == 200:
+                pin, uid = cand, r.get("id"); break
+        check("PIN", "owner gives a team member a PIN login", bool(uid), "HTTP %s" % s)
+        s, r = call(O, "GET", "/team/logins")
+        code = r.get("code") if isinstance(r, dict) else None
+        check("PIN", "business code for phones", s == 200 and bool(code), "code shown to the owner")
+        s, r = call(None, "POST", "/auth/pin", {"code": code, "pin": pin})
+        check("PIN", "team member logs in with code + PIN", s == 200 and r.get("role") == "operator", "HTTP %s %s" % (s, r))
+        s, r = call(None, "POST", "/auth/pin", {"code": code, "pin": "000001"})
+        check("PIN", "a wrong PIN is refused", s == 401, "HTTP %s" % s)
+        s, r = call(O, "DELETE", "/team/logins/%s/pin" % uid)
+        s2, r2 = call(None, "POST", "/auth/pin", {"code": code, "pin": pin})
+        check("PIN", "removing the PIN stops it working", s == 200 and s2 == 401, "remove HTTP %s, then login HTTP %s" % (s, s2))
+    finally:
+        sql("DELETE FROM pin_attempts WHERE tenant_id='%s' AND at > now() - interval '10 minutes'" % tid)
+        if uid:
+            sql("DELETE FROM executions WHERE resource='users' AND resource_id='%s'" % uid)
+            sql("DELETE FROM users WHERE id='%s' AND tenant_id='%s' AND email LIKE '%%@pin.invalid'" % (uid, tid))
+        if code_before == "-":
+            sql("UPDATE tenants SET login_code=NULL WHERE id='%s'" % tid)
+        after = int(sql("SELECT count(*) FROM users WHERE tenant_id='%s'" % tid)[0][0])
+        check("DATA", "QA logins back to where they started", after == users_before, "before=%s after=%s" % (users_before, after))
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)

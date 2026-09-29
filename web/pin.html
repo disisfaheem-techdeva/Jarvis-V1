@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team login — TechDeva</title>
+<meta name="robots" content="noindex">
+<style>
+  :root{--bg:#05070C;--panel:#0E1522;--line:#1E2A3F;--text:#F2F7FF;--muted:#8FA0BC;--accent:#6C8CFF;--ok:#34D399;--bad:#F87171}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);color:var(--text);
+       font:15px/1.5 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:16px}
+  .box{width:100%;max-width:360px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px;text-align:center}
+  h1{font-size:19px;margin:6px 0 2px}.sub{color:var(--muted);font-size:13.5px;margin:0 0 14px}
+  .dots{display:flex;justify-content:center;gap:12px;margin:18px 0 8px;min-height:18px}
+  .dots span{width:14px;height:14px;border-radius:50%;border:2px solid var(--muted)}
+  .dots span.on{background:var(--accent);border-color:var(--accent)}
+  .pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
+  .pad button{height:62px;border-radius:14px;border:1px solid var(--line);background:#0A1020;color:var(--text);font-size:24px;font-weight:600;cursor:pointer}
+  .pad button:active{background:#16213A}.pad .ghost{background:transparent;border-color:transparent;font-size:14px;color:var(--muted)}
+  .go{width:100%;margin-top:14px;padding:12px;border:0;border-radius:10px;background:var(--accent);color:#0A0E1A;font-weight:700;font-size:15px;cursor:pointer}
+  .go:disabled{opacity:.5}
+  input{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:#070B13;color:var(--text);font-size:18px;text-align:center;letter-spacing:.2em;text-transform:uppercase}
+  .msg{min-height:20px;margin-top:10px;font-size:14px}.msg.bad{color:var(--bad)}
+  a{color:var(--muted);font-size:13px}.foot{margin-top:16px}
+  .mark{font-weight:800;letter-spacing:.14em;font-size:13px;color:var(--muted)}.mark span{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="box" id="box"><div class="sub">Loading…</div></div>
+<script>
+(function(){
+  var box = document.getElementById('box'), code = '', pin = '';
+  try { code = localStorage.getItem('td_pin_code') || ''; } catch (e) {}
+  function esc(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function j(method, path, body){
+    return fetch(path, {method: method, credentials: 'include', headers: body ? {'Content-Type':'application/json'} : {}, body: body ? JSON.stringify(body) : undefined})
+      .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(d){ return {ok: r.ok, status: r.status, data: d}; }); })
+      .catch(function(){ return {ok: false, status: 0, data: {detail: 'Network error. Try again.'}}; });
+  }
+  function askCode(msg){
+    box.innerHTML = '<div class="mark">TECH<span>DEVA</span></div><h1>Team login</h1><p class="sub">Enter your business code. The owner can see it on the Team page.</p>' +
+      '<input id="code" maxlength="8" autocomplete="off" value="' + esc(code) + '" placeholder="CODE">' +
+      '<button class="go" id="next">Next</button><div class="msg bad" id="msg">' + esc(msg || '') + '</div>' +
+      '<div class="foot"><a href="/dashboard">Owner? Sign in with email</a></div>';
+    var go = function(){
+      var c = document.getElementById('code').value.trim().toUpperCase();
+      if (c.length < 4) { document.getElementById('msg').textContent = 'Enter the business code.'; return; }
+      j('GET', '/auth/pin-info?code=' + encodeURIComponent(c)).then(function(r){
+        if (!r.ok) { askCode((r.data && r.data.detail) || 'That code did not work.'); return; }
+        code = c; try { localStorage.setItem('td_pin_code', c); } catch (e) {}
+        pad(r.data.business, false);
+      });
+    };
+    document.getElementById('next').onclick = go;
+    document.getElementById('code').onkeydown = function(e){ if (e.key === 'Enter') go(); };
+  }
+  function pad(business, device){
+    pin = '';
+    box.innerHTML = '<div class="mark">TECH<span>DEVA</span></div><h1>' + esc(business) + '</h1><p class="sub">Enter your PIN</p>' +
+      '<div class="dots" id="dots"></div><div class="msg bad" id="msg"></div>' +
+      '<div class="pad">' + [1,2,3,4,5,6,7,8,9].map(function(n){ return '<button data-k="' + n + '">' + n + '</button>'; }).join('') +
+      '<button class="ghost" data-k="c">Clear</button><button data-k="0">0</button><button class="ghost" data-k="b">⌫</button></div>' +
+      '<button class="go" id="enter" disabled>Log in</button>' +
+      '<div class="foot">' + (device ? '' : '<a href="#" id="chg">Different business</a> · ') + '<a href="/dashboard">Owner email login</a></div>';
+    function draw(){
+      var d = ''; for (var i = 0; i < Math.max(4, pin.length); i++) d += '<span' + (i < pin.length ? ' class="on"' : '') + '></span>';
+      document.getElementById('dots').innerHTML = d;
+      document.getElementById('enter').disabled = pin.length < 4;
+    }
+    function submit(){
+      if (pin.length < 4) return;
+      var b = document.getElementById('enter'); b.disabled = true; b.textContent = 'Checking…';
+      j('POST', '/auth/pin', {pin: pin, code: device ? undefined : code}).then(function(r){
+        if (r.ok) { location.href = '/dashboard'; return; }
+        pin = ''; draw(); b.textContent = 'Log in';
+        document.getElementById('msg').textContent = (r.data && r.data.detail) || 'That did not work.';
+      });
+    }
+    function key(k){
+      document.getElementById('msg').textContent = '';
+      if (k === 'c') pin = ''; else if (k === 'b') pin = pin.slice(0, -1); else if (pin.length < 6) pin += k;
+      draw();
+    }
+    box.querySelectorAll('[data-k]').forEach(function(b){ b.onclick = function(){ key(b.getAttribute('data-k')); }; });
+    document.getElementById('enter').onclick = submit;
+    document.onkeydown = function(e){
+      if (/^\d$/.test(e.key)) key(e.key); else if (e.key === 'Backspace') key('b'); else if (e.key === 'Enter') submit();
+    };
+    var chg = document.getElementById('chg');
+    if (chg) chg.onclick = function(e){ e.preventDefault(); document.onkeydown = null; askCode(''); };
+    draw();
+  }
+  j('GET', '/auth/pin-info').then(function(r){
+    if (r.ok && r.data.device) { pad(r.data.business, true); return; }
+    if (code) {
+      j('GET', '/auth/pin-info?code=' + encodeURIComponent(code)).then(function(r2){
+        if (r2.ok && r2.data.business) pad(r2.data.business, false); else askCode('');
+      });
+    } else askCode('');
+  });
+})();
+</script>
+</body>
+</html>
