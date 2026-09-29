@@ -654,7 +654,15 @@ def phase11(ctx):
         check("J16", "new Jarvis is deployed (a fake yes is refused)",
               s == 400 and "confirmation" in str(r.get("detail") if isinstance(r, dict) else r),
               "HTTP %s %s" % (s, r.get("detail") if isinstance(r, dict) else r))
-        s, r = call(O, "POST", "/console", {"message": "Book an appointment for %s tomorrow at 11:00." % name})
+        first = "Book an appointment for %s tomorrow at 11:00." % name
+        s, r = call(O, "POST", "/console", {"message": first})
+        asked = None
+        if s == 200 and r.get("kind") == "question":
+            # a person would answer; this also proves the conversation memory
+            asked = str(r.get("reply"))[:90]
+            s, r = call(O, "POST", "/console", {
+                "message": "No phone number, just book it.",
+                "history": [{"role": "user", "text": first}, {"role": "jarvis", "text": r.get("reply")}]})
         rows = sql("SELECT a.id, c.id, coalesce(a.invoice_id::text,'-') FROM appointments a JOIN customers c ON c.id = a.customer_id "
                    "WHERE a.tenant_id='%s' AND c.name = '%s'" % (tid, name))
         for a_id, c_id, inv in rows:
@@ -663,7 +671,8 @@ def phase11(ctx):
             if inv != "-":
                 CREATED.setdefault("invoices", []).append(inv)
         check("J16", "\"book ... tomorrow at 11\" makes a real booking", s == 200 and len(rows) == 1,
-              "HTTP %s kind=%s reply=%s rows=%d" % (s, r.get("kind"), str(r.get("reply"))[:90], len(rows)))
+              "HTTP %s kind=%s reply=%s rows=%d%s" % (s, r.get("kind"), str(r.get("reply"))[:90], len(rows),
+                                                       " (after it asked: %s)" % asked if asked else ""))
         s, r = call(OP, "POST", "/console", {"message": "Open the expenses page."})
         check("J16", "\"open the expenses page\" opens it", s == 200 and r.get("navigate") == "expenses",
               "HTTP %s %s" % (s, {k: r.get(k) for k in ("kind", "action", "navigate")}))
