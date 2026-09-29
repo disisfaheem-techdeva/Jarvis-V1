@@ -6,6 +6,7 @@ JSON envelope with the tenant_id so the worker can open a correctly-scoped DB
 session. Every emitted event flows back through the queue, so the whole system
 is uniformly event-driven.
 """
+from .trial import TRIAL_DAYS
 import os
 import json
 import redis
@@ -685,8 +686,8 @@ class Persistence:
             if not s:
                 raise ValueError("signup not found")
             cur.execute("""INSERT INTO tenants (name, industry, status, trial_ends_at, is_test)
-                           VALUES (%s,%s,'trial', now() + interval '30 days', %s) RETURNING id""",
-                        (s["business_name"], s["industry"], _looks_like_test(s.get("contact_email"))))
+                           VALUES (%s,%s,'trial', now() + make_interval(days => %s), %s) RETURNING id""",
+                        (s["business_name"], s["industry"], TRIAL_DAYS, _looks_like_test(s.get("contact_email"))))
             tid = str(cur.fetchone()["id"])
             brand = {"website": s["website_url"], "social": s["social_links"]}
             cur.execute("""INSERT INTO tenant_config (tenant_id, brand, geo, automation)

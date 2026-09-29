@@ -17,6 +17,7 @@ from fastapi import APIRouter, Body, Cookie, Header, HTTPException
 from .audit import record
 from .auth import AuthError, SESSION_COOKIE, resolve_scope
 from .db import tenant_session
+from . import trial
 
 CLIENT_SETTINGS = ("payment_instructions",)
 METHODS = ("bank", "jazzcash", "easypaisa", "cash", "other")
@@ -87,6 +88,8 @@ def make_billing_router():
             i["claim"] = next((c["status"] for c in claims if c["invoice_id"] == i["id"]), None)
         for c in claims:
             c["amount"] = float(c["amount"])
+        t["locked"] = trial.locked(tid)
+        t["trial_days"] = trial.TRIAL_DAYS
         return {"account": t, "invoices": invoices, "claims": claims,
                 "payment_instructions": how,
                 "due": sum(i["amount"] for i in invoices if i["status"] == "sent")}
@@ -122,6 +125,38 @@ def make_billing_router():
             cid = cur.fetchone()["id"]
             record(cur, action="billing.claim", resource="payment_claims", resource_id=str(cid),
                    actor=str(uid), status="ok", detail={"method": method, "amount": float(inv["amount"])})
+        return {"ok": True, "id": str(cid), "status": "pending"}
+
+    @router.post("/billing/paid")
+    def claim_open(body: dict = Body(...),
+                   x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                   authorization: str | None = Header(None),
+                   td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """'I have paid' with no bill yet: the trial ended and the owner paid the
+        monthly fee straight away. Still a claim until the founder confirms it."""
+        tid, role, uid = _owner(x_tenant_id, x_role, authorization, td_session)
+        method = str(body.get("method") or "").strip().lower()
+        if method not in METHODS:
+            raise HTTPException(400, "Say how you paid: bank, JazzCash, Easypaisa, cash or other.")
+        ref = str(body.get("reference") or "").strip()[:120]
+        if method != "cash" and len(ref) < 3:
+            raise HTTPException(400, "Add the transaction ID or reference so TechDeva can find the payment.")
+        try:
+            amount = float(str(body.get("amount") or "0").replace(",", ""))
+        except ValueError:
+            amount = 0
+        if amount <= 0:
+            raise HTTPException(400, "Enter the amount you paid.")
+        with tenant_session(tid, role) as cur:
+            cur.execute("SELECT 1 FROM payment_claims WHERE invoice_id IS NULL AND status = 'pending'")
+            if cur.fetchone():
+                raise HTTPException(409, "You already told us about a payment. TechDeva is checking it.")
+            cur.execute("""INSERT INTO payment_claims (tenant_id, amount, method, reference, note, claimed_by)
+                           VALUES (current_tenant(), %s, %s, %s, %s, %s) RETURNING id""",
+                        (amount, method, ref, str(body.get("note") or "").strip()[:500], str(uid) if uid else None))
+            cid = cur.fetchone()["id"]
+            record(cur, action="billing.claim", resource="payment_claims", resource_id=str(cid),
+                   actor=str(uid), status="ok", detail={"method": method, "amount": amount, "invoice": None})
         return {"ok": True, "id": str(cid), "status": "pending"}
 
     # ---------------------------------------------------------- founder side
@@ -171,6 +206,7 @@ def make_billing_router():
                 cur.execute("UPDATE client_invoices SET status = 'paid', paid_at = now(), updated_at = now() "
                             "WHERE id = %s AND status = 'sent'", (c["invoice_id"],))
             cur.execute("UPDATE tenants SET status = 'active' WHERE id = %s AND status = 'trial'", (c["tenant_id"],))
+            trial.forget(c["tenant_id"])
             record(cur, action="billing.claim_confirmed", resource="payment_claims", resource_id=claim_id,
                    actor=uid, status="ok", detail={"payment_id": str(pid), "amount": float(c["amount"])},
                    tenant_id=c["tenant_id"])
@@ -210,9 +246,51 @@ def make_billing_router():
             cur.execute("UPDATE payment_claims SET status = 'confirmed', decided_by = %s, decided_at = now() "
                         "WHERE invoice_id = %s AND status = 'pending'", (str(uid), invoice_id))
             cur.execute("UPDATE tenants SET status = 'active' WHERE id = %s AND status = 'trial'", (inv["tenant_id"],))
+            trial.forget(inv["tenant_id"])
             record(cur, action="techdeva.invoice.paid", resource="client_invoices", resource_id=invoice_id,
                    actor=uid, status="ok", detail={"payment_id": str(pid)}, tenant_id=inv["tenant_id"])
         return {"ok": True, "payment_id": str(pid)}
+
+    @router.post("/techdeva/clients/{tenant_id}/trial")
+    def extend_trial(tenant_id: str, body: dict = Body(default={}),
+                     x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                     authorization: str | None = Header(None),
+                     td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Give a business more trial days (it unlocks at once if it was locked)."""
+        uid = _admin(x_tenant_id, x_role, authorization, td_session)
+        try:
+            days = int(body.get("days") or 7)
+        except (TypeError, ValueError):
+            days = 0
+        if not 1 <= days <= 60:
+            raise HTTPException(400, "Extend by 1 to 60 days.")
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("""UPDATE tenants SET trial_ends_at = GREATEST(now(), COALESCE(trial_ends_at, now()))
+                                                + make_interval(days => %s)
+                            WHERE id = %s AND status = 'trial' RETURNING trial_ends_at""", (days, tenant_id))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(409, "Only a business on trial can get more trial days.")
+            record(cur, action="techdeva.trial.extend", resource="tenants", resource_id=tenant_id,
+                   actor=uid, status="ok", detail={"days": days}, tenant_id=tenant_id)
+        trial.forget(tenant_id)
+        return {"ok": True, "trial_ends_at": row["trial_ends_at"]}
+
+    @router.post("/techdeva/clients/{tenant_id}/activate")
+    def activate(tenant_id: str, x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                 authorization: str | None = Header(None),
+                 td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Mark a business as a paying client by hand (never locked by the trial)."""
+        uid = _admin(x_tenant_id, x_role, authorization, td_session)
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("UPDATE tenants SET status = 'active' WHERE id = %s AND status <> 'active' RETURNING id",
+                        (tenant_id,))
+            if not cur.fetchone():
+                raise HTTPException(409, "That business is already active (or does not exist).")
+            record(cur, action="techdeva.client.activate", resource="tenants", resource_id=tenant_id,
+                   actor=uid, status="ok", detail={}, tenant_id=tenant_id)
+        trial.forget(tenant_id)
+        return {"ok": True}
 
     @router.put("/techdeva/settings/{key}")
     def put_setting(key: str, body: dict = Body(...),

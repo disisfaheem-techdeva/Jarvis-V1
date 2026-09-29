@@ -39,6 +39,7 @@ from .booking import make_booking_router
 from .account import make_account_router
 from .billing import make_billing_router
 from .provisioning import make_provisioning_router
+from . import trial
 
 # API docs (/docs, /redoc, /openapi.json) hand anyone on the internet the
 # full route surface and request/response schema. Off by default; set
@@ -81,6 +82,7 @@ app.include_router(founder_router)
 app.include_router(make_account_router())
 app.include_router(make_billing_router())
 app.include_router(make_provisioning_router())
+trial.install(app)
 
 # The two client-facing pages. The API image is built from ./app, so web/ is
 # mounted in (see docker-compose.yml) rather than baked into the image; WEB_DIR
@@ -465,7 +467,7 @@ class SignupIn(BaseModel):
 @app.post("/signup")
 def public_signup(body: SignupIn, request: Request):
     """PUBLIC self-serve signup on techdeva.net. No auth: this is the front door.
-    Records the intake, provisions a 1-month (30-day) trial tenant, creates the client's own
+    Records the intake, provisions a 7-day trial tenant (app/trial.py locks it when it ends unpaid), creates the client's own
     login, and kicks off analysis. The owner does nothing — the pipeline runs
     itself from here.
 

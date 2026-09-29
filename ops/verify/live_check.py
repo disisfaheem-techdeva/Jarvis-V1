@@ -519,6 +519,47 @@ def phase7(ctx):
             check("P15", "website " + path + " is public", s == 200, "HTTP %s" % s)
 
 
+def wholocks(ctx=None):
+    """Read-only: which real businesses the trial lock would lock right now."""
+    rows = sql("SELECT name, status, coalesce(to_char(trial_ends_at,'YYYY-MM-DD'),'-'), "
+               "(status::text='trial' AND trial_ends_at IS NOT NULL AND trial_ends_at < now()) "
+               "FROM tenants WHERE NOT is_test ORDER BY 4 DESC, name")
+    print("\nbusiness                                  status    trial ends   LOCKED?")
+    for n, st, te, lk in rows:
+        print("%-41s %-9s %-12s %s" % (n[:41], st, te, "YES - dashboard locked" if lk == "t" else "no"))
+    print("\nTo keep one open: founder console > Clients > 'Mark paying' (paid) or '+7 days trial'.")
+
+
+def phase8(ctx):
+    """Trial lock on the QA business: expire its trial, prove the lock, extend,
+    prove the unlock, then restore its status and trial date exactly."""
+    import time as _t
+    O, OP, tid = ctx["owner"], ctx["operator"], ctx["qa"]
+    ADM = token(None, "techdeva_admin", "live-check")
+    orig = sql("SELECT status::text, coalesce(trial_ends_at::text,'') FROM tenants WHERE id='%s'" % tid)[0]
+    try:
+        sql("UPDATE tenants SET status='trial', trial_ends_at=now()-interval '1 hour' WHERE id='%s'" % tid)
+        _t.sleep(22)          # the api caches the lock state for 20 s
+        s, r = call(O, "GET", "/business/customers")
+        check("LOCK", "expired trial: owner's data is locked", s == 402 and r.get("locked"), "HTTP %s" % s)
+        s, r = call(OP, "GET", "/leads")
+        check("LOCK", "expired trial: staff are locked too", s == 402, "HTTP %s" % s)
+        s, r = call(O, "GET", "/billing")
+        check("LOCK", "expired trial: Plan & Billing still opens to pay", s == 200 and (r.get("account") or {}).get("locked"), "HTTP %s" % s)
+        s, r = call(O, "GET", "/me")
+        check("LOCK", "/me tells the dashboard to show the lock screen", s == 200 and r.get("locked") is True, "HTTP %s" % s)
+        s, r = call(ADM, "GET", "/techdeva/book")
+        check("LOCK", "founder is never locked", s == 200, "HTTP %s" % s)
+        s, r = call(ADM, "POST", "/techdeva/clients/%s/trial" % tid, {"days": 1})
+        s2, r2 = call(O, "GET", "/business/customers")
+        check("LOCK", "founder '+ days' unlocks at once", s == 200 and s2 == 200, "extend HTTP %s, then data HTTP %s" % (s, s2))
+    finally:
+        sql("UPDATE tenants SET status=$$%s$$::tenant_status, trial_ends_at=%s WHERE id='%s'"
+            % (orig[0], ("$$%s$$::timestamptz" % orig[1]) if orig[1] else "NULL", tid))
+        now = sql("SELECT status::text, coalesce(trial_ends_at::text,'') FROM tenants WHERE id='%s'" % tid)[0]
+        check("DATA", "QA status and trial date restored exactly", list(now) == list(orig), "%s" % (now,))
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)
@@ -533,6 +574,8 @@ def main():
     before = counts(qa)
     try:
         for ph in phases:
+            if ph == "wholocks":
+                wholocks(); continue
             if ph in ("a4", "a5"):
                 globals()[ph + "_readonly"](); continue
             globals()[ph](ctx)

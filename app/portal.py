@@ -155,8 +155,10 @@ def make_portal_router(P) -> APIRouter:
            authorization: str | None = Header(None),
            td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
         tid, role, uid = identity(x_tenant_id, x_role, authorization, td_session)
+        from .trial import locked
         return {"tenant_id": tid, "role": role, "user_id": uid,
-                "authenticated": uid is not None, "auth_enforced": auth_required()}
+                "authenticated": uid is not None, "auth_enforced": auth_required(),
+                "locked": role != "techdeva_admin" and locked(tid)}
 
     # ------------------------------------------------------------- trial + report
     @router.get("/portal/summary")

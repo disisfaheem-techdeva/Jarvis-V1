@@ -391,13 +391,15 @@ function chart(months){
     '%"></i><span>' + esc(String(m.month).slice(5)) + '</span></div>').join('') +
     '</div><div class="sub">Tallest bar ' + money(max) + '.</div>';
 }
+function isLocked(c){ return c.status === 'trial' && c.trial_ends_at && new Date(c.trial_ends_at) < new Date(); }
 function clientRows(rows){
   return rows.map(c => {
     const paidThis = Number(c.paid_this_month)||0, fee = Number(c.monthly_fee)||0;
     const owes = fee > 0 && paidThis <= 0 && c.status === 'active';
     return '<tr><td><div class="name">' + esc(c.name || 'Unnamed') + '</div>' +
       '<div class="k-note">' + esc(c.industry || '') + '</div></td>' +
-      '<td><span class="pill ' + esc(c.status) + '">' + esc(c.status) + '</span></td>' +
+      '<td><span class="pill ' + esc(c.status) + '">' + esc(isLocked(c) ? 'locked (trial ended)' : c.status) + '</span>' +
+        (c.status === 'trial' && c.trial_ends_at ? '<div class="k-note">trial ' + (isLocked(c) ? 'ended ' : 'ends ') + esc(String(c.trial_ends_at).slice(0,10)) + '</div>' : '') + '</td>' +
       '<td class="num"><input class="fee" data-fee="' + esc(c.id) + '" value="' + (fee||'') + '" placeholder="0"></td>' +
       '<td class="num ' + (owes?'warn':'') + '">' + (paidThis ? money(paidThis) : '-') + '</td>' +
       '<td class="num">' + (Number(c.paid_total) ? money(c.paid_total) : '-') + '</td>' +
@@ -406,6 +408,8 @@ function clientRows(rows){
       '<td class="num ' + (Number(c.awaiting)?'warn':'dim') + '">' + c.awaiting + '</td>' +
       '<td class="dim">' + when(c.last_event_at) + '</td>' +
       '<td><div class="row"><button class="tiny" data-pay="' + esc(c.id) + '">Payment</button>' +
+      (c.status === 'trial' ? '<button class="tiny" data-trial="' + esc(c.id) + '">+7 days trial</button>' : '') +
+      (c.status !== 'active' ? '<button class="tiny" data-activate="' + esc(c.id) + '">Mark paying</button>' : '') +
       '<button class="tiny" data-hide="' + esc(c.id) + '">Hide</button></div>' +
       '<div class="pay" id="pay-' + esc(c.id) + '"><input placeholder="Amount" data-amt="' + esc(c.id) +
       '"><button class="tiny primary" data-save="' + esc(c.id) + '">Record</button></div></td></tr>';
@@ -666,6 +670,15 @@ function wireClients(){
     const id = b.getAttribute('data-save');
     try { await api('/techdeva/clients/' + id + '/payment', {method:'POST',
       body: JSON.stringify({amount: el.querySelector('[data-amt="' + id + '"]').value})}); load(); }
+    catch (e) { alert(e.message); }
+  });
+  el.querySelectorAll('[data-trial]').forEach(b => b.onclick = async () => {
+    try { await api('/techdeva/clients/' + b.getAttribute('data-trial') + '/trial', {method:'POST', body: JSON.stringify({days: 7})}); load(); }
+    catch (e) { alert(e.message); }
+  });
+  el.querySelectorAll('[data-activate]').forEach(b => b.onclick = async () => {
+    if (!confirm('Mark this business as a paying client? Its dashboard will never be locked by the trial.')) return;
+    try { await api('/techdeva/clients/' + b.getAttribute('data-activate') + '/activate', {method:'POST'}); load(); }
     catch (e) { alert(e.message); }
   });
   el.querySelectorAll('[data-hide]').forEach(b => b.onclick = async () => {

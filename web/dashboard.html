@@ -4906,6 +4906,92 @@ window.addEventListener('hashchange', arStop);
   document.head.appendChild(st);
 })();
 
+/* ======================================================== Trial lock screen
+   When the 7-day trial has ended unpaid the API answers 402 for the business's
+   own logins (app/trial.py). This replaces the whole dashboard with one screen:
+   what happened, how to pay, "I have paid". The WhatsApp agent keeps working. */
+var LOCK_SHOWN = false;
+function lockScreen(){
+  LOCK_SHOWN = true;
+  if (typeof stopAllPolls === 'function') try { stopAllPolls(); } catch (e) {}
+  var own = S.me && S.me.role === 'owner';
+  root.innerHTML = '<div class="gate"><div class="gate-box lock-box" id="lockbox">' + loading('Loading...') + '</div></div>';
+  var p = own ? api('/billing') : Promise.resolve({ ok: false });
+  Promise.all([p, api('/portal/summary')]).then(function(rs){
+    var b = rs[0].ok ? rs[0].data : null, sm = rs[1].ok ? rs[1].data : null;
+    var name = (sm && sm.trial && sm.trial.name) || 'Your business';
+    var a = (b && b.account) || {};
+    var fee = Number(a.monthly_fee) || 0;
+    var h = (BRAND && BRAND.has_logo ? '<img src="' + brandLogoURL() + '" alt="" style="width:56px;height:56px;object-fit:contain;border-radius:12px;margin-bottom:10px">' : '') +
+      '<h1>Your free trial has ended</h1>' +
+      '<p class="sub">' + esc(name) + ': your ' + esc((a.trial_days || 7) + '-day') + ' free trial' +
+      (a.trial_ends_at ? ' ended on ' + esc(bilDate(a.trial_ends_at)) : ' has ended') + '. ' +
+      'Pay to unlock your dashboard. Your data is safe, and your WhatsApp agent is still answering your customers.</p>';
+    if (!own) {
+      h += '<p class="sub">Please ask the business owner to pay. The dashboard unlocks for everyone as soon as TechDeva receives it.</p>';
+    } else {
+      var pending = (b && b.claims || []).some(function(c){ return c.status === 'pending'; });
+      h += '<div class="lock-sec"><div class="card-note">Amount</div><div class="lock-fee">' +
+        (fee > 0 ? esc(bilMoney(fee, a.currency)) + ' / month' : 'TechDeva will confirm your monthly fee') + '</div></div>';
+      h += '<div class="lock-sec"><div class="card-note">How to pay</div><div style="white-space:pre-wrap">' +
+        (b && b.payment_instructions ? esc(b.payment_instructions) : 'Contact TechDeva for payment details.') + '</div></div>';
+      if (pending) {
+        h += '<div class="lock-sec"><span class="tag">Payment being checked</span><p class="sub" style="margin-top:8px">We have your payment details. ' +
+          'Your dashboard unlocks as soon as TechDeva confirms it. This page checks by itself.</p></div>';
+        setTimeout(function(){ if (LOCK_SHOWN) boot(); }, 30000);
+      } else {
+        h += '<div class="lock-sec"><div class="card-note" style="margin-bottom:6px">Already paid? Tell us so we can unlock you:</div>' +
+          '<div class="bil-pay" style="margin-top:0"><select class="fld" id="lk_m">' + BIL_METHODS.map(function(m){ return '<option value="' + m[0] + '">' + m[1] + '</option>'; }).join('') + '</select>' +
+          '<input class="fld" id="lk_amt" inputmode="decimal" placeholder="Amount (PKR)" value="' + (fee > 0 ? esc(Math.round(fee)) : '') + '">' +
+          '<input class="fld" id="lk_ref" placeholder="Transaction ID / reference"></div>' +
+          '<button class="btn primary" id="lk_go" style="width:100%;margin-top:10px;padding:10px">I have paid</button>' +
+          '<div id="lk_msg" class="card-note" style="min-height:18px;margin-top:8px"></div></div>';
+      }
+    }
+    h += '<div style="margin-top:14px;text-align:center"><a href="#" id="lk_out" style="color:var(--muted);font-size:13px">Sign out</a></div>';
+    var box = document.getElementById('lockbox'); if (!box) return;
+    box.innerHTML = h;
+    var out = document.getElementById('lk_out');
+    if (out) out.onclick = function(e){ e.preventDefault(); api('/auth/logout', { method: 'POST' }).then(function(){ LOCK_SHOWN = false; gate(); }); };
+    var go = document.getElementById('lk_go');
+    if (go) go.onclick = function(){
+      var msg = document.getElementById('lk_msg');
+      go.disabled = true; msg.style.color = ''; msg.textContent = 'Sending...';
+      api('/billing/paid', { method: 'POST', body: { method: document.getElementById('lk_m').value,
+        amount: document.getElementById('lk_amt').value, reference: document.getElementById('lk_ref').value.trim() } }).then(function(r){
+        if (!r.ok) { go.disabled = false; msg.style.color = 'var(--danger)'; msg.textContent = (r.data && r.data.detail) || 'That did not work.'; return; }
+        lockScreen();
+      });
+    };
+  });
+}
+/* While locked nothing may draw the dashboard over the lock screen (hash
+   changes, late responses, polls all call renderShell). */
+var _renderShellBeforeLock = renderShell;
+renderShell = function(){ if (LOCK_SHOWN) return; return _renderShellBeforeLock.apply(this, arguments); };
+/* Any 402 "locked" answer (e.g. the trial ends while the page is open) shows the lock screen. */
+var _apiBeforeLock = api;
+api = function(path, opts){
+  return _apiBeforeLock(path, opts).then(function(r){
+    if (r.status === 402 && r.data && r.data.locked && !LOCK_SHOWN) setTimeout(lockScreen, 0);
+    return r;
+  });
+};
+var _bootBeforeLock = boot;
+boot = function(){
+  LOCK_SHOWN = false;
+  _apiBeforeLock('/me').then(function(r){
+    if (r.ok && r.data && r.data.locked && r.data.tenant_id) { S.me = r.data; loadBrand(); lockScreen(); return; }
+    _bootBeforeLock();
+  });
+};
+(function(){
+  var st = document.createElement('style');
+  st.textContent = '.lock-box{max-width:460px}.lock-sec{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.02)}' +
+    '.lock-fee{font-size:22px;font-weight:700;margin-top:2px}.lock-box .bil-pay .fld{max-width:none;flex:1 1 130px}';
+  document.head.appendChild(st);
+})();
+
 window.addEventListener('hashchange', function(){
   // Every section reads fresh data when it is opened, so something added in
   // one section (a staff member, a product, a booking) shows up in the others.

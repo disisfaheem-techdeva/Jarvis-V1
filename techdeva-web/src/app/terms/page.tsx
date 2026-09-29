@@ -27,8 +27,9 @@ export default function TermsPage() {
       <Section title="Free trial and payment">
         <p>
           A new business can use TechDeva free for {TRIAL_DAYS} days. After that, the monthly fee agreed with TechDeva
-          applies. TechDeva sends bills through your dashboard (Plan &amp; Billing), and a bill counts as paid once
-          TechDeva has received the money.
+          applies. If the trial ends without a payment, your dashboard is locked until you pay; your data is kept and
+          your WhatsApp agent keeps answering your customers. TechDeva sends bills through your dashboard (Plan &amp;
+          Billing), and a bill counts as paid once TechDeva has received the money.
         </p>
       </Section>
 
