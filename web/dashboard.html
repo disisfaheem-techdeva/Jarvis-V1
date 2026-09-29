@@ -3789,7 +3789,9 @@ VIEWS.inbox = function(){
       '<textarea class="fld" id="ibx_text" rows="2" maxlength="4000" placeholder="Type a reply to this customer…"' + (connected ? '' : ' disabled') + '>' + esc(IBX.draft) + '</textarea>' +
       '<div style="display:flex;gap:8px;align-items:center;margin-top:6px"><button class="btn primary" id="ibx_send"' + (connected && !IBX.sending ? '' : ' disabled') + '>' +
       (IBX.sending ? 'Sending…' : 'Send') + '</button><span id="ibx_note" class="card-note" style="' + (IBX.note && IBX.note.bad ? 'color:var(--danger)' : 'color:var(--growth)') + '">' +
-      esc(IBX.note ? IBX.note.text : '') + '</span></div>' +
+      esc(IBX.note ? IBX.note.text : '') + '</span>' +
+      (IBX.note && IBX.note.wa ? '<a class="btn" target="_blank" rel="noopener" href="' + esc(IBX.note.wa) + '" title="Opens WhatsApp with this customer and your message typed in. Send it from your business WhatsApp.">Reply in WhatsApp</a>' : '') +
+      '</div>' +
       '<div class="card-note">Your AI agent keeps answering this chat too. Replies sent here go out from your business number.</div></div>';
   }
   out += panel('Conversations', '<div class="ibx"><div class="ibx-list">' + list + '</div><div><div class="ibx-chat" id="ibx_chat">' +
@@ -3815,7 +3817,13 @@ function ibxWire(){
       api('/whatsapp/chats/' + encodeURIComponent(sid) + '/send', { method: 'POST', body: { text: text } }).then(function(res){
         IBX.sending = false;
         if (res.ok) { IBX.draft = ''; IBX.note = { text: 'Sent at ' + when(res.data.at || new Date().toISOString()) + '.', bad: false }; }
-        else IBX.note = { text: (res.data && res.data.detail) || ('Not sent (HTTP ' + res.status + ').'), bad: true };
+        else {
+          IBX.note = { text: (res.data && res.data.detail) || ('Not sent (HTTP ' + res.status + ').'), bad: true };
+          // Still let them answer: open WhatsApp with this customer and the text typed in.
+          var ch = null; ((IBX.data && IBX.data.chats) || []).forEach(function(c){ if (c.session_id === sid) ch = c; });
+          var ph = ch && String(ch.phone || '').replace(/\D/g, '');
+          if (ph && ph.length >= 8) IBX.note.wa = 'https://wa.me/' + ph + '?text=' + encodeURIComponent(text);
+        }
         if (IBX.sel === sid) ibxOpen(sid); else renderShell();
       });
     };

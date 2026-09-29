@@ -390,6 +390,10 @@ def make_whatsapp_router():
                    detail={"text": text, "message_id": out.get("message_id"), "at": out.get("at")},
                    error=None if ok else ("HTTP %s: %s" % (status, reason)))
         if not ok:
+            if status == 404:
+                # the audit row above keeps the technical reason; people get a plain one
+                raise HTTPException(502, "Not sent: sending from the dashboard is not switched on for this "
+                                         "WhatsApp number yet. Use Reply in WhatsApp instead.")
             raise HTTPException(502, "Not sent. %s" % (reason or ("the WhatsApp service answered HTTP %s" % status)))
         return {"sent": True, "message_id": out.get("message_id"), "at": out.get("at")}
 
