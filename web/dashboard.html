@@ -4793,7 +4793,7 @@ VIEWS.billing = function(){
         var m = document.getElementById('bm_' + id).value, r = document.getElementById('br_' + id).value.trim();
         btn.disabled = true;
         act('/billing/invoices/' + id + '/paid', { method: 'POST', body: { method: m, reference: r } },
-            'Thank you. TechDeva will check the payment and mark the bill paid.').then(function(res){
+            'Thank you. Our team checks payments within 2 hours and then marks the bill paid.').then(function(res){
           if (res.ok) need('billing', '/billing', true); else btn.disabled = false;
         });
       };
@@ -4929,7 +4929,7 @@ function lockScreen(){
       (a.trial_ends_at ? ' ended on ' + esc(bilDate(a.trial_ends_at)) : ' has ended') + '. ' +
       'Pay to unlock your dashboard. Your data is safe, and your WhatsApp agent is still answering your customers.</p>';
     if (!own) {
-      h += '<p class="sub">Please ask the business owner to pay. The dashboard unlocks for everyone as soon as TechDeva receives it.</p>';
+      h += '<p class="sub">Please ask the business owner to pay. The dashboard unlocks for everyone as soon as TechDeva receives it (usually within 2 hours).</p>';
     } else {
       var pending = (b && b.claims || []).some(function(c){ return c.status === 'pending'; });
       h += '<div class="lock-sec"><div class="card-note">Amount</div><div class="lock-fee">' +
@@ -4938,7 +4938,7 @@ function lockScreen(){
         (b && b.payment_instructions ? esc(b.payment_instructions) : 'Contact TechDeva for payment details.') + '</div></div>';
       if (pending) {
         h += '<div class="lock-sec"><span class="tag">Payment being checked</span><p class="sub" style="margin-top:8px">We have your payment details. ' +
-          'Your dashboard unlocks as soon as TechDeva confirms it. This page checks by itself.</p></div>';
+          'Our team checks payments within 2 hours, and your dashboard unlocks the moment it is confirmed. This page checks by itself.</p></div>';
         setTimeout(function(){ if (LOCK_SHOWN) boot(); }, 30000);
       } else {
         h += '<div class="lock-sec"><div class="card-note" style="margin-bottom:6px">Already paid? Tell us so we can unlock you:</div>' +
