@@ -522,7 +522,7 @@ def phase7(ctx):
 def wholocks(ctx=None):
     """Read-only: which real businesses the trial lock would lock right now."""
     rows = sql("SELECT name, status, coalesce(to_char(trial_ends_at,'YYYY-MM-DD'),'-'), "
-               "(status::text='trial' AND trial_ends_at IS NOT NULL AND trial_ends_at < now()) "
+               "(status::text='paused' OR (status::text='trial' AND trial_ends_at IS NOT NULL AND trial_ends_at < now())) "
                "FROM tenants WHERE NOT is_test ORDER BY 4 DESC, name")
     print("\nbusiness                                  status    trial ends   LOCKED?")
     for n, st, te, lk in rows:
@@ -654,6 +654,12 @@ def main():
     ctx = {"qa": qa, "owner": token(qa, "owner", uid), "operator": token(qa, "operator", uid),
            "other": token(other[0][0], "owner", str(uuid.uuid4())) if other else None}
     before = counts(qa)
+    # QA's own trial ends like anyone's, and a locked QA would answer 402 to
+    # every check. Open it for the run; its exact state is put back after.
+    qa_state = sql("SELECT status::text, coalesce(trial_ends_at::text,'-') FROM tenants WHERE id='%s'" % qa)[0]
+    sql("UPDATE tenants SET status='active' WHERE id='%s' AND status <> 'active'" % qa)
+    if qa_state[0] != "active":
+        import time as _t; _t.sleep(21)           # the api caches the lock state for 20 s
     try:
         for ph in phases:
             if ph == "wholocks":
@@ -663,6 +669,8 @@ def main():
             globals()[ph](ctx)
     finally:
         cleanup(qa)
+        sql("UPDATE tenants SET status=$$%s$$::tenant_status, trial_ends_at=%s WHERE id='%s'"
+            % (qa_state[0], "NULL" if qa_state[1] == "-" else "$$%s$$::timestamptz" % qa_state[1], qa))
         after = counts(qa)
         same = before == after
         check("DATA", "QA tenant row counts back to where they started", same,

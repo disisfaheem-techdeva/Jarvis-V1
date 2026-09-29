@@ -205,7 +205,7 @@ def make_billing_router():
             if c["invoice_id"]:
                 cur.execute("UPDATE client_invoices SET status = 'paid', paid_at = now(), updated_at = now() "
                             "WHERE id = %s AND status = 'sent'", (c["invoice_id"],))
-            cur.execute("UPDATE tenants SET status = 'active' WHERE id = %s AND status = 'trial'", (c["tenant_id"],))
+            cur.execute("UPDATE tenants SET status = 'active' WHERE id = %s AND status IN ('trial','paused')", (c["tenant_id"],))
             trial.forget(c["tenant_id"])
             record(cur, action="billing.claim_confirmed", resource="payment_claims", resource_id=claim_id,
                    actor=uid, status="ok", detail={"payment_id": str(pid), "amount": float(c["amount"])},
@@ -245,7 +245,7 @@ def make_billing_router():
             pid = cur.fetchone()["id"]
             cur.execute("UPDATE payment_claims SET status = 'confirmed', decided_by = %s, decided_at = now() "
                         "WHERE invoice_id = %s AND status = 'pending'", (str(uid), invoice_id))
-            cur.execute("UPDATE tenants SET status = 'active' WHERE id = %s AND status = 'trial'", (inv["tenant_id"],))
+            cur.execute("UPDATE tenants SET status = 'active' WHERE id = %s AND status IN ('trial','paused')", (inv["tenant_id"],))
             trial.forget(inv["tenant_id"])
             record(cur, action="techdeva.invoice.paid", resource="client_invoices", resource_id=invoice_id,
                    actor=uid, status="ok", detail={"payment_id": str(pid)}, tenant_id=inv["tenant_id"])
@@ -265,12 +265,13 @@ def make_billing_router():
         if not 1 <= days <= 60:
             raise HTTPException(400, "Extend by 1 to 60 days.")
         with tenant_session(None, "techdeva_admin") as cur:
-            cur.execute("""UPDATE tenants SET trial_ends_at = GREATEST(now(), COALESCE(trial_ends_at, now()))
+            cur.execute("""UPDATE tenants SET status = 'trial',
+                                  trial_ends_at = GREATEST(now(), COALESCE(trial_ends_at, now()))
                                                 + make_interval(days => %s)
-                            WHERE id = %s AND status = 'trial' RETURNING trial_ends_at""", (days, tenant_id))
+                            WHERE id = %s AND status IN ('trial','paused') RETURNING trial_ends_at""", (days, tenant_id))
             row = cur.fetchone()
             if not row:
-                raise HTTPException(409, "Only a business on trial can get more trial days.")
+                raise HTTPException(409, "Only a business on trial (or paused) can get more trial days.")
             record(cur, action="techdeva.trial.extend", resource="tenants", resource_id=tenant_id,
                    actor=uid, status="ok", detail={"days": days}, tenant_id=tenant_id)
         trial.forget(tenant_id)

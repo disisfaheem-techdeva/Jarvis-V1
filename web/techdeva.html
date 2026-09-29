@@ -407,14 +407,14 @@ function planCell(c){
   } else h += '<div class="k-note dim">usage loading…</div>';
   return h;
 }
-function isLocked(c){ return c.status === 'trial' && c.trial_ends_at && new Date(c.trial_ends_at) < new Date(); }
+function isLocked(c){ return c.status === 'paused' || (c.status === 'trial' && c.trial_ends_at && new Date(c.trial_ends_at) < new Date()); }
 function clientRows(rows){
   return rows.map(c => {
     const paidThis = Number(c.paid_this_month)||0, fee = Number(c.monthly_fee)||0;
     const owes = fee > 0 && paidThis <= 0 && c.status === 'active';
     return '<tr><td><div class="name">' + esc(c.name || 'Unnamed') + '</div>' +
       '<div class="k-note">' + esc(c.industry || '') + '</div></td>' +
-      '<td><span class="pill ' + esc(c.status) + '">' + esc(isLocked(c) ? 'locked (trial ended)' : c.status) + '</span>' +
+      '<td><span class="pill ' + esc(c.status) + '">' + esc(isLocked(c) ? (c.status === 'paused' ? 'locked (paused)' : 'locked (trial ended)') : c.status) + '</span>' +
         (c.status === 'trial' && c.trial_ends_at ? '<div class="k-note">trial ' + (isLocked(c) ? 'ended ' : 'ends ') + esc(String(c.trial_ends_at).slice(0,10)) + '</div>' : '') + '</td>' +
       '<td>' + planCell(c) + '</td>' +
       '<td class="num"><input class="fee" data-fee="' + esc(c.id) + '" value="' + (fee||'') + '" placeholder="0"></td>' +
@@ -425,7 +425,7 @@ function clientRows(rows){
       '<td class="num ' + (Number(c.awaiting)?'warn':'dim') + '">' + c.awaiting + '</td>' +
       '<td class="dim">' + when(c.last_event_at) + '</td>' +
       '<td><div class="row"><button class="tiny" data-pay="' + esc(c.id) + '">Payment</button>' +
-      (c.status === 'trial' ? '<button class="tiny" data-trial="' + esc(c.id) + '">+7 days trial</button>' : '') +
+      (c.status === 'trial' || c.status === 'paused' ? '<button class="tiny" data-trial="' + esc(c.id) + '">+7 days trial</button>' : '') +
       (c.status !== 'active' ? '<button class="tiny" data-activate="' + esc(c.id) + '">Mark paying</button>' : '') +
       '<button class="tiny" data-hide="' + esc(c.id) + '">Hide</button></div>' +
       '<div class="pay" id="pay-' + esc(c.id) + '"><input placeholder="Amount" data-amt="' + esc(c.id) +

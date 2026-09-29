@@ -52,8 +52,8 @@ def main():
     print("\n=== 1. How clients pay you (shown on every client's Plan & Billing page)")
     print("Now:\n  " + (cur.replace("\n", "\n  ") if cur else "(nothing yet)"))
     print("Type the new text, line by line, e.g.\n"
-          "  Bank: Meezan Bank, Account title: TechDeva, IBAN: PK..\n"
-          "  JazzCash: 03xx xxxxxxx (TechDeva)\n"
+          "  <your bank>, account title, account number, IBAN\n"
+          "  JazzCash / Easypaisa number (if you take them)\n"
           "  After paying, press 'I have paid' and add the transaction ID.\n"
           "Finish with an empty line. Just press Enter now to keep it as it is.")
     lines = []

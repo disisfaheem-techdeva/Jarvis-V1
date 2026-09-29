@@ -7,9 +7,12 @@ passed. They get HTTP 402 with a plain message, except the few things needed
 to see the lock screen and pay (sign in/out, /me, the business name and logo,
 Plan & Billing).
 
+Also locked: 'paused' businesses (an ended trial is moved to 'paused' by the
+scheduler within seconds; the founder can pause one too).
+
 What is NOT locked: the founder (techdeva_admin); the business's WhatsApp agent
 (it runs in its own containers and does not use a dashboard login, so patients
-keep getting answers); the worker; paid ('active') and 'paused' businesses.
+keep getting answers); the worker; paid ('active') businesses.
 
 It unlocks the moment the founder confirms a payment (billing.confirm sets the
 business 'active'), or extends the trial.
@@ -38,8 +41,11 @@ def locked(tenant_id) -> bool:
     if hit and hit[0] > now:
         return hit[1]
     with tenant_session(None, "techdeva_admin") as cur:
-        cur.execute("SELECT status::text = 'trial' AND trial_ends_at IS NOT NULL "
-                    "AND trial_ends_at < now() AS locked FROM tenants WHERE id = %s", (str(tenant_id),))
+        # 'paused' counts too: the scheduler moves an ended trial to 'paused'
+        # within seconds (persistence.mark_trial_flagged), so checking 'trial'
+        # alone never locked anything on the live server.
+        cur.execute("SELECT status::text = 'paused' OR (status::text = 'trial' AND trial_ends_at IS NOT NULL "
+                    "AND trial_ends_at < now()) AS locked FROM tenants WHERE id = %s", (str(tenant_id),))
         row = cur.fetchone()
     value = bool(row and row["locked"])
     _CACHE[tenant_id] = (now + TTL, value)
