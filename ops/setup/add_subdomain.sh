@@ -74,6 +74,14 @@ open(path, "w").write(s)
 print("updated %s%s" % (path, "" if webep else " (no port-80 entry point found: http is not redirected)") if s != before else "%s already up to date" % path)
 PY2
 docker compose config -q || { echo "ABORT: the compose file no longer parses; restore the copy in /root/backups/override"; exit 1; }
+# docker-compose.override.yml is tracked in git: record the new address as a
+# local commit, so a later update merges it instead of dropping it (a reset or
+# a dirty tree would lose the address or block deploy.sh).
+if ! git diff --quiet -- "$FILE"; then
+  git -c user.name="TechDeva server" -c user.email="server@techdeva.net" \
+      commit -q -m "server: route $HOST to the platform (add_subdomain.sh)" -- "$FILE"
+  echo "recorded in git: $(git log --oneline -1)"
+fi
 docker compose up -d --no-deps api
 echo "waiting for https://$HOST/login (the certificate can take a minute) ..."
 for i in $(seq 1 24); do
