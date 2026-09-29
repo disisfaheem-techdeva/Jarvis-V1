@@ -25,7 +25,7 @@ def _admin(x_tenant_id, x_role, authorization, session):
 
 
 CLIENTS_SQL = """
-SELECT t.id, t.name, t.industry, t.status::text AS status, t.plan::text AS plan,
+SELECT t.id, t.name, t.industry, t.status::text AS status, t.plan::text AS plan, t.subdomain,
        t.billing::text AS billing, t.trial_ends_at, t.created_at,
        COALESCE(a.monthly_fee,0)     AS monthly_fee,
        COALESCE(a.setup_fee,0)       AS setup_fee,
@@ -234,6 +234,35 @@ def list_invoices(x_tenant_id: str | None = Header(None),
         r["amount"] = float(r["amount"])
     return {"invoices": rows}
  
+
+@router.put("/techdeva/clients/{tenant_id}/subdomain")
+def set_subdomain(tenant_id: str, body: dict = Body(...),
+                  x_tenant_id: str | None = Header(None),
+                  x_role: str | None = Header(None),
+                  authorization: str | None = Header(None),
+                  td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+    """Give a client its own address: <sub>.techdeva.net/login is its staff PIN
+    login. Empty removes it. DNS + proxy for the name are set up on the server."""
+    import re
+    uid = _admin(x_tenant_id, x_role, authorization, td_session)
+    sub = str(body.get("subdomain") or "").strip().lower() or None
+    if sub and not re.fullmatch(r"[a-z][a-z0-9-]{1,30}[a-z0-9]", sub):
+        raise HTTPException(400, "Use 3-32 lowercase letters, digits or -, starting with a letter (e.g. drirfan).")
+    with tenant_session(None, "techdeva_admin") as cur:
+        if sub:
+            cur.execute("SELECT 1 FROM tenants WHERE subdomain = %s AND id <> %s", (sub, tenant_id))
+            if cur.fetchone():
+                raise HTTPException(409, "Another client already uses that address.")
+        try:
+            cur.execute("UPDATE tenants SET subdomain = %s WHERE id = %s RETURNING id", (sub, tenant_id))
+        except Exception:
+            raise HTTPException(400, "That name is reserved (www, api, crm, portal ...). Choose another.")
+        if not cur.fetchone():
+            raise HTTPException(404, "no such client")
+        record(cur, action="techdeva.client.subdomain", resource="tenants", resource_id=tenant_id,
+               actor=uid, detail={"subdomain": sub}, tenant_id=tenant_id)
+    return {"ok": True, "subdomain": sub}
+
 
 @router.post("/techdeva/clients/{tenant_id}/hide")
 def hide(tenant_id: str, body: dict = Body(default={}),

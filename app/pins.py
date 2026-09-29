@@ -20,6 +20,7 @@ business after 30). Every try is recorded in pin_attempts.
 import hashlib
 import hmac
 import json
+import os
 import re
 import secrets
 import time
@@ -101,6 +102,30 @@ def _owner(*a):
     return tid, role, uid
 
 
+BASE_DOMAIN = os.environ.get("TENANT_BASE_DOMAIN", "techdeva.net").strip().lower().lstrip(".")
+
+
+def subdomain_of(request):
+    """'drirfan' for a request to drirfan.techdeva.net, else None."""
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",")[0]
+    host = host.strip().lower().split(":")[0]
+    if not BASE_DOMAIN or not host.endswith("." + BASE_DOMAIN):
+        return None
+    label = host[: -len(BASE_DOMAIN) - 1]
+    return label if re.fullmatch(r"[a-z][a-z0-9-]{1,30}[a-z0-9]", label) else None
+
+
+def host_tenant(request):
+    """The business whose own address this request came to, if any."""
+    sub = subdomain_of(request)
+    if not sub:
+        return None
+    with tenant_session(None, "techdeva_admin") as cur:
+        cur.execute("SELECT id FROM tenants WHERE subdomain = %s", (sub,))
+        r = cur.fetchone()
+    return str(r["id"]) if r else None
+
+
 def _pin_taken(cur, tid, pin, except_user=None):
     cur.execute("SELECT id, pin_hash FROM users WHERE tenant_id = %s AND pin_hash IS NOT NULL", (tid,))
     return any(verify_password(pin * 2, r["pin_hash"]) for r in cur.fetchall() if str(r["id"]) != str(except_user or ""))
@@ -126,17 +151,54 @@ def make_pins_router():
     router = APIRouter()
 
     # ------------------------------------------------------------ PIN pad
-    @router.get("/auth/pin-info")
-    def pin_info(code: str | None = None, td_device: str | None = Cookie(None, alias=DEVICE_COOKIE)):
-        """Which business this PIN pad is for (the device's, or the code's)."""
-        tid = _device_tenant(td_device)
+    def _pad_business(code, td_device, request=None):
+        # this screen's business: the device's, else the address's
+        # (drirfan.techdeva.net), else the typed business code
+        tid = _device_tenant(td_device) or (host_tenant(request) if request is not None else None)
         with tenant_session(None, "techdeva_admin") as cur:
             b = _business(cur, tenant_id=tid) if tid else (_business(cur, code=code) if code else None)
+            if not b:
+                return None, None, None
+            cur.execute("SELECT brand, geo FROM tenant_config WHERE tenant_id = %s", (b["id"],))
+            cfg = cur.fetchone() or {}
+            cur.execute("SELECT updated_at FROM brand_assets WHERE kind = 'logo' AND tenant_id = %s", (b["id"],))
+            logo = cur.fetchone()
+        return b, (cfg, logo), bool(tid)
+
+    @router.get("/auth/pin-info")
+    def pin_info(request: Request, code: str | None = None, td_device: str | None = Cookie(None, alias=DEVICE_COOKIE)):
+        """Which business this PIN screen is for (the device's, or the code's),
+        and how to dress it: that business's own logo, colour and tagline."""
+        b, extra, device = _pad_business(code, td_device, request)
         if not b:
             if code:
                 raise HTTPException(404, "No business has that code. Check it with the owner.")
             return {"device": False}
-        return {"device": bool(tid), "business": b["name"], "tenant_id": str(b["id"]) if tid else None}
+        cfg, logo = extra
+        brand = cfg.get("brand") if isinstance(cfg.get("brand"), dict) else {}
+        geo = cfg.get("geo") if isinstance(cfg.get("geo"), dict) else {}
+        accent = str((brand.get("colors") or {}).get("accent") or "")
+        where = ", ".join(x for x in (geo.get("area"), geo.get("city")) if isinstance(x, str) and x.strip())
+        return {"device": device, "business": b["name"],
+                "tagline": (brand.get("tagline") or where or "Staff login")[:80],
+                "accent": accent if re.fullmatch(r"#[0-9a-fA-F]{6}", accent) else None,
+                "logo": ("/auth/pin-logo?v=%d" % int(logo["updated_at"].timestamp())
+                         + ("&code=" + str(code).strip().upper() if not device and code else "")) if logo else None}
+
+    @router.get("/auth/pin-logo")
+    def pin_logo(request: Request, code: str | None = None, td_device: str | None = Cookie(None, alias=DEVICE_COOKIE)):
+        """The business's logo for its PIN screen (before anyone is signed in)."""
+        b, _x, _d = _pad_business(code, td_device, request)
+        if not b:
+            raise HTTPException(404, "Not found.")
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("SELECT mime, bytes FROM brand_assets WHERE kind = 'logo' AND tenant_id = %s", (b["id"],))
+            row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "Not found.")
+        return Response(content=bytes(row["bytes"]), media_type=row["mime"],
+                        headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff",
+                                 "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
 
     @router.post("/auth/pin")
     def pin_login(request: Request, response: Response, body: dict = Body(...),
@@ -146,7 +208,7 @@ def make_pins_router():
             raise HTTPException(400, "Enter your 4 to 6 digit PIN.")
         ip = _ip(request)
         with tenant_session(None, "techdeva_admin") as cur:
-            tid = _device_tenant(td_device)
+            tid = _device_tenant(td_device) or host_tenant(request)
             b = _business(cur, tenant_id=tid) if tid else _business(cur, code=body.get("code"))
             if not b:
                 raise HTTPException(400, "Enter your business code first (ask the owner).")
@@ -195,10 +257,13 @@ def make_pins_router():
             cur.execute("""SELECT s.id, s.name, s.role FROM staff s WHERE s.tenant_id = %s AND s.active
                             AND NOT EXISTS (SELECT 1 FROM users u WHERE u.staff_id = s.id) ORDER BY s.name""", (tid,))
             staff = [dict(r) for r in cur.fetchall()]
+            cur.execute("SELECT subdomain FROM tenants WHERE id = %s", (tid,))
+            sub = (cur.fetchone() or {}).get("subdomain")
         for u in users:
             u["access"] = "full" if u["role"] == "owner" else "staff"
             u["me"] = str(u["id"]) == str(uid)
         return {"code": code, "logins": users, "staff_without_login": staff,
+                "address": ("https://%s.%s/login" % (sub, BASE_DOMAIN)) if sub else None,
                 "this_device": _device_tenant(td_device) == str(tid)}
 
     @router.post("/team/logins")

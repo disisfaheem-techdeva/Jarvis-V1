@@ -437,7 +437,9 @@ function clientRows(rows){
     const paidThis = Number(c.paid_this_month)||0, fee = Number(c.monthly_fee)||0;
     const owes = fee > 0 && paidThis <= 0 && c.status === 'active';
     return '<tr><td><div class="name">' + esc(c.name || 'Unnamed') + '</div>' +
-      '<div class="k-note">' + esc(c.industry || '') + '</div></td>' +
+      '<div class="k-note">' + esc(c.industry || '') + '</div>' +
+      '<div class="k-note">' + (c.subdomain ? '<a href="https://' + esc(c.subdomain) + '.techdeva.net/login" target="_blank" style="color:var(--gold)">' + esc(c.subdomain) + '.techdeva.net</a> ' : '') +
+      '<a href="#" data-sub="' + esc(c.id) + '" data-cur="' + esc(c.subdomain || '') + '" style="color:var(--muted)">' + (c.subdomain ? 'change' : 'give it an address') + '</a></div></td>' +
       '<td><span class="pill ' + esc(c.status) + '">' + esc(isLocked(c) ? (c.status === 'paused' ? 'locked (paused)' : 'locked (trial ended)') : c.status) + '</span>' +
         (c.status === 'trial' && c.trial_ends_at ? '<div class="k-note">trial ' + (isLocked(c) ? 'ended ' : 'ends ') + esc(String(c.trial_ends_at).slice(0,10)) + '</div>' : '') + '</td>' +
       '<td>' + planCell(c) + '</td>' +
@@ -732,6 +734,13 @@ function wireClients(){
     try { await api('/techdeva/plans/' + k, {method:'PUT', body: JSON.stringify({price_pkr: v('data-pp'), max_numbers: v('data-pn'), max_conversations: v('data-pc')})});
           b.textContent = 'Saved'; load(); }
     catch (e) { alert(e.message); }
+  });
+  el.querySelectorAll('[data-sub]').forEach(a => a.onclick = async e => {
+    e.preventDefault();
+    const v = prompt('Address for this client, before .techdeva.net (e.g. drirfan). Empty removes it.', a.getAttribute('data-cur'));
+    if (v === null) return;
+    try { await api('/techdeva/clients/' + a.getAttribute('data-sub') + '/subdomain', {method:'PUT', body: JSON.stringify({subdomain: v.trim()})}); load(); }
+    catch (err) { alert(err.message); }
   });
   el.querySelectorAll('[data-trial]').forEach(b => b.onclick = async () => {
     try { await api('/techdeva/clients/' + b.getAttribute('data-trial') + '/trial', {method:'POST', body: JSON.stringify({days: 7})}); load(); }

@@ -5198,7 +5198,7 @@ function tpinHTML(){
   if (TPIN.data.error) return errState(TPIN.data.error);
   var d = TPIN.data, base = location.origin;
   var h = '<div class="tpin-top"><div><div class="card-note">Business code (for PIN login on a phone)</div><div class="tpin-code">' + esc(d.code) + '</div></div>' +
-    '<div><div class="card-note">PIN login page</div><div><b>' + esc(base) + '/pin</b></div></div>' +
+    '<div><div class="card-note">Staff login page</div><div><b>' + esc(d.address || (base + '/pin')) + '</b></div></div>' +
     '<div>' + (d.this_device
       ? '<span class="tag" style="color:var(--growth)">This screen is your PIN screen</span> <button class="btn" id="tp_devoff">Stop</button>'
       : '<button class="btn" id="tp_dev">Use this device for PIN login</button><div class="card-note">For the reception computer or tablet.</div>') + '</div></div>';
@@ -5268,6 +5268,11 @@ VIEWS.team = function(){
 /* sign-in screen: a way in for the team */
 var _gateBeforePins = gate;
 gate = function(msg){
+  /* the business's PIN screen: its sign-in is the PIN pad, not email */
+  if (!/[?&]email=1/.test(location.search) && !gate._pinChecked) {
+    gate._pinChecked = true;
+    _apiBeforeLock('/auth/pin-info').then(function(r){ if (r.ok && r.data && r.data.device) location.replace('/pin'); });
+  }
   _gateBeforePins(msg);
   var box = document.querySelector('.gate-box');
   if (box && !document.getElementById('pinlink')) {

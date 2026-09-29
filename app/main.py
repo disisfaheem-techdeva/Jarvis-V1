@@ -554,9 +554,21 @@ def public_demo_request(body: DemoRequestIn, request: Request):
 
 # ---------------------- the pages the client actually sees ----------------------
 @app.get("/", include_in_schema=False)
-def signup_page():
-    """The public front door on techdeva.net."""
+def signup_page(request: Request):
+    """The public front door on techdeva.net. On a business's own address
+    (drirfan.techdeva.net) the front door is that business's staff login."""
+    from .pins import host_tenant
+    if host_tenant(request):
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
     return _page("signup.html")
+
+
+@app.get("/login", include_in_schema=False)
+def login_page():
+    """Staff PIN login: the business is taken from its own address, the
+    PIN-screen device, or the business code."""
+    return _page("pin.html")
 
 
 @app.get("/onboarding", include_in_schema=False)
