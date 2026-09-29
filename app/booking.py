@@ -74,6 +74,50 @@ _CUR = re.compile(r"^[A-Z]{3}$")
 OWNER_ROLES = ("owner", "techdeva_admin")
 
 
+def _price_lines(body):
+    """The bill a request describes: its lines and its money, validated.
+    Shared by booking and by editing a saved bill so both price the same way."""
+    lines, subtotal = [], 0.0
+    raw = body.get("services") or []
+    if not isinstance(raw, list) or len(raw) > 30:
+        raise HTTPException(400, "Services must be a list (max 30).")
+    line_disc = 0.0
+    for i, s in enumerate(raw, 1):
+        if not isinstance(s, dict):
+            raise HTTPException(400, "Service %d is not valid." % i)
+        nm = (s.get("name") or "").strip()[:300]
+        if not nm:
+            raise HTTPException(400, "Service %d needs a name." % i)
+        qty = _num(s.get("qty") or 1, "Quantity")
+        if qty <= 0:
+            raise HTTPException(400, "Quantity must be at least 1.")
+        price = _num(s.get("price"), "Price")
+        ld = _num(s.get("discount"), "Line discount")
+        if ld > price * qty:
+            raise HTTPException(400, "The discount on %s is more than its price." % nm)
+        lines.append({"service_id": s.get("service_id") or None,
+                      "package_id": s.get("package_id") or None, "description": nm,
+                      "quantity": qty, "unit_price": price,
+                      "line_total": round(price * qty, 2)})
+        subtotal += price * qty
+        line_disc += ld
+    dtype = (body.get("discount_type") or "flat").lower()
+    dval = _num(body.get("discount_value"), "Discount")
+    bill_disc = (subtotal - line_disc) * dval / 100.0 if dtype == "percent" else dval
+    if dtype == "percent" and dval > 100:
+        raise HTTPException(400, "A percentage discount cannot be over 100.")
+    discount = round(line_disc + bill_disc, 2)
+    if discount > subtotal + 0.001:
+        raise HTTPException(400, "The discount is more than the bill.")
+    gst_pct = _num(body.get("gst_percent"), "GST %")
+    tax = round((subtotal - discount) * gst_pct / 100.0, 2)
+    total = round(subtotal - discount + tax, 2)
+    return {"lines": lines, "subtotal": subtotal, "discount": discount, "tax": tax,
+            "total": total}
+
+
+
+
 def _currency(v):
     c = (v or "PKR").strip().upper()
     if not _CUR.match(c):
@@ -202,7 +246,7 @@ def make_booking_router():
                 cur.execute("SELECT number, subtotal, discount, tax, total, status, currency "
                             "FROM invoices WHERE id = %s", (a["invoice_id"],))
                 inv = cur.fetchone()
-                cur.execute("SELECT description, quantity, unit_price, line_total "
+                cur.execute("SELECT description, quantity, unit_price, line_total, service_id, package_id "
                             "FROM invoice_items WHERE invoice_id = %s ORDER BY description",
                             (a["invoice_id"],))
                 items = cur.fetchall()
@@ -236,41 +280,9 @@ def make_booking_router():
         if not customer_id and not name:
             raise HTTPException(400, "Enter the client's name.")
 
-        lines, subtotal = [], 0.0
-        raw = body.get("services") or []
-        if not isinstance(raw, list) or len(raw) > 30:
-            raise HTTPException(400, "Services must be a list (max 30).")
-        line_disc = 0.0
-        for i, s in enumerate(raw, 1):
-            if not isinstance(s, dict):
-                raise HTTPException(400, "Service %d is not valid." % i)
-            nm = (s.get("name") or "").strip()[:300]
-            if not nm:
-                raise HTTPException(400, "Service %d needs a name." % i)
-            qty = _num(s.get("qty") or 1, "Quantity")
-            if qty <= 0:
-                raise HTTPException(400, "Quantity must be at least 1.")
-            price = _num(s.get("price"), "Price")
-            ld = _num(s.get("discount"), "Line discount")
-            if ld > price * qty:
-                raise HTTPException(400, "The discount on %s is more than its price." % nm)
-            lines.append({"service_id": s.get("service_id") or None,
-                          "package_id": s.get("package_id") or None, "description": nm,
-                          "quantity": qty, "unit_price": price,
-                          "line_total": round(price * qty, 2)})
-            subtotal += price * qty
-            line_disc += ld
-        dtype = (body.get("discount_type") or "flat").lower()
-        dval = _num(body.get("discount_value"), "Discount")
-        bill_disc = (subtotal - line_disc) * dval / 100.0 if dtype == "percent" else dval
-        if dtype == "percent" and dval > 100:
-            raise HTTPException(400, "A percentage discount cannot be over 100.")
-        discount = round(line_disc + bill_disc, 2)
-        if discount > subtotal + 0.001:
-            raise HTTPException(400, "The discount is more than the bill.")
-        gst_pct = _num(body.get("gst_percent"), "GST %")
-        tax = round((subtotal - discount) * gst_pct / 100.0, 2)
-        total = round(subtotal - discount + tax, 2)
+        pb = _price_lines(body)
+        lines, subtotal, discount, tax, total = (pb["lines"], pb["subtotal"], pb["discount"],
+                                                 pb["tax"], pb["total"])
         received = _num(body.get("received"), "Amount received")
         if received - total > 0.009:
             raise HTTPException(400, "Amount received (%s) is more than the bill (%s)." % (received, total))
@@ -435,6 +447,74 @@ def make_booking_router():
                    resource_id=appt_id, actor=str(uid), actor_type="human", status="ok",
                    detail={"fields": [s.split(" ")[0] for s in sets]}, error=None)
         return {"ok": True}
+
+    @router.put("/appointments/{appt_id}/bill")
+    def edit_bill(appt_id: str, body: dict = Body(...),
+                  x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                  authorization: str | None = Header(None),
+                  td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Correct what a visit was billed: its services, prices, discount, GST.
+
+        The owner's call only: changing a price after the fact is exactly what
+        a till has to be protected from. Payments already taken are never
+        touched, and the bill can never be made smaller than what was paid
+        (that would be a refund, which is its own decision). The lines are
+        replaced, the totals recomputed by the same code as booking, and the
+        before/after totals are written to the audit log."""
+        tid, role, uid = _who(x_tenant_id, x_role, authorization, td_session)
+        if role not in OWNER_ROLES:
+            raise HTTPException(403, "Only the business owner can change the prices on a saved bill.")
+        pb = _price_lines(body)
+        if not pb["lines"]:
+            raise HTTPException(400, "A bill needs at least one service. To remove the bill, "
+                                     "delete the appointment instead.")
+        with tenant_session(tid, role) as cur:
+            cur.execute("SELECT id, invoice_id, customer_id, location_id, currency, "
+                        "to_char(starts_at AT TIME ZONE %s, 'YYYY-MM-DD') AS day "
+                        "FROM appointments WHERE id = %s", (TZ, appt_id))
+            a = cur.fetchone()
+            if not a:
+                raise HTTPException(404, "Appointment not found.")
+            before = None
+            inv_id = a["invoice_id"]
+            if inv_id:
+                cur.execute("SELECT total, voided_at, currency FROM invoices WHERE id = %s", (inv_id,))
+                iv = cur.fetchone()
+                if iv and iv["voided_at"]:
+                    raise HTTPException(409, "This bill was voided, so it cannot be changed.")
+                before = float(iv["total"] or 0) if iv else None
+                paid = _paid_so_far(cur, inv_id)
+                if pb["total"] + 0.009 < paid:
+                    raise HTTPException(409, "PKR {:,.0f} has already been paid on this bill, so the new total "
+                                             "({:,.0f}) cannot be less than that.".format(paid, pb["total"]))
+                cur.execute("DELETE FROM invoice_items WHERE invoice_id = %s", (inv_id,))
+                cur.execute("UPDATE invoices SET discount = %s, tax = %s, updated_at = now() WHERE id = %s",
+                            (pb["discount"], pb["tax"], inv_id))
+            else:
+                number = _next_invoice_number(cur)
+                cur.execute(
+                    "INSERT INTO invoices (tenant_id, customer_id, location_id, number, issued_on, "
+                    "currency, discount, tax, notes) VALUES (current_tenant(), %s, %s, %s, %s, %s, "
+                    "%s, %s, %s) RETURNING id",
+                    (a["customer_id"], a["location_id"], number, a["day"], a["currency"] or "PKR",
+                     pb["discount"], pb["tax"], "Appointment %s" % a["day"]))
+                inv_id = cur.fetchone()["id"]
+            for l in pb["lines"]:
+                cur.execute(
+                    "INSERT INTO invoice_items (tenant_id, invoice_id, service_id, package_id, "
+                    "description, quantity, unit_price, line_total) "
+                    "VALUES (current_tenant(), %s, %s, %s, %s, %s, %s, %s)",
+                    (inv_id, l["service_id"], l["package_id"], l["description"], l["quantity"],
+                     l["unit_price"], l["line_total"]))
+            money = _settle(cur, inv_id, uid)
+            cur.execute("UPDATE appointments SET invoice_id = %s, service = %s, price = %s WHERE id = %s",
+                        (inv_id, ", ".join(l["description"] for l in pb["lines"])[:500],
+                         pb["total"], appt_id))
+            record(cur, action="appointment.bill_edit", resource="appointments",
+                   resource_id=str(appt_id), actor=str(uid), actor_type="human", status="ok",
+                   detail={"invoice_id": str(inv_id), "total_before": before,
+                           "total_after": pb["total"], "lines": len(pb["lines"])}, error=None)
+        return {"ok": True, "invoice_id": str(inv_id), "money": money}
 
     @router.delete("/appointments/{appt_id}")
     def remove(appt_id: str,

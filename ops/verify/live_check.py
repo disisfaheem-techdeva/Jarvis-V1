@@ -697,6 +697,38 @@ def phase11(ctx):
                 % (tid, ",".join("'%s'" % i for i in made)))
 
 
+def phase12(ctx):
+    """Correcting a saved visit's bill (Part 17): owner only, never below what
+    was paid, totals recomputed. Everything made is deleted again."""
+    O, OP, tid = ctx["owner"], ctx["operator"], ctx["qa"]
+    s, r = call(O, "POST", "/appointments/book", {
+        "date": "2026-01-15", "time": "12:00", "status": "completed", "name": "Live Check Bill Edit",
+        "services": [{"name": "Live check service", "price": 5000}], "received": 2000, "payment_method": "cash"})
+    aid = r.get("appointment_id") if isinstance(r, dict) else None
+    if aid:
+        CREATED.setdefault("appointments", []).append(aid)
+        CREATED.setdefault("customers", []).append(r.get("customer_id"))
+        inv = sql("SELECT invoice_id FROM appointments WHERE id='%s'" % aid)[0][0]
+        CREATED.setdefault("invoices", []).append(inv)
+    check("B17", "a visit with a part payment is recorded", s == 200 and bool(aid), "HTTP %s" % s)
+    if not aid:
+        return
+    try:
+        s, r = call(OP, "PUT", "/appointments/%s/bill" % aid, {"services": [{"name": "x", "price": 1}]})
+        check("B17", "staff cannot change prices on a saved bill", s == 403, "HTTP %s" % s)
+        s, r = call(O, "PUT", "/appointments/%s/bill" % aid, {"services": [{"name": "x", "price": 1000}]})
+        check("B17", "a bill cannot go below what was paid", s == 409, "HTTP %s %s" % (s, r.get("detail") if isinstance(r, dict) else r))
+        s, r = call(O, "PUT", "/appointments/%s/bill" % aid, {
+            "services": [{"name": "Live check service", "price": 6000}, {"name": "Live check extra", "price": 1000}],
+            "discount_type": "flat", "discount_value": 500, "gst_percent": 10})
+        m = r.get("money", {}) if isinstance(r, dict) else {}
+        check("B17", "owner corrects the bill; totals and balance follow",
+              s == 200 and m.get("total") == 7150.0 and m.get("paid") == 2000.0 and m.get("balance") == 5150.0,
+              "HTTP %s %s" % (s, m))
+    finally:
+        sql("DELETE FROM executions WHERE tenant_id='%s' AND resource_id IN ('%s','%s')" % (tid, aid, inv))
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)

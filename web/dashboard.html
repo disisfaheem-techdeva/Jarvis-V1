@@ -5466,7 +5466,7 @@ function consoleSend(opt){
         if (d.kind === 'teach') { extra = '<div class="jv-x">Your agent will now follow: <em>' + esc(d.lesson || '') + '</em></div>'; loadLessons(); }
         if (d.kind === 'dashboard') { PREFS = d.prefs || PREFS; applyBrand(); }
         if (d.kind === 'post') {
-          extra = '<div class="jv-x">Nothing is public yet. <a href="#/posts">Review the draft</a></div>';
+          extra = '<div class="jv-x">Nothing is public yet. <a href="#/needshuman">Review it in Needs Human</a></div>';
           JV.img = JV.imgUrl = null; jvRenderAttach(); loadPosts();
         }
         if (d.kind === 'business') { need('biz_' + d.resource, '/business/' + d.resource, true); }
@@ -5571,6 +5571,325 @@ VIEWS.console = function(){
     '@media(max-width:560px){#jv-dock{right:16px;left:16px;bottom:16px}#jv-dock .jv-fab{margin-left:auto}.jv-dockp{width:auto;max-width:none}}';
   document.head.appendChild(st);
 })();
+
+/* ======================================================== Part 17
+   - Invoices: the client's name in the list and on the open invoice, a new
+     invoice can be written to a walk-in by name, and every invoice prints.
+   - A saved visit (Daily Entry / Appointments) can be corrected: the client's
+     name and phone by anyone, the services, prices, discount and GST by the
+     owner only (PUT /appointments/{id}/bill never goes below what was paid).
+   - Inventory: each product has Edit (owner): details, warn level, active,
+     and "stock on hand" which is saved as a correcting adjustment.
+   - Posts waiting for approval now live in Needs Human. */
+function bizName(){ return (S.summary && S.summary.trial && S.summary.trial.name) || ''; }
+function custName(id){
+  var c = null; items('customers').forEach(function(x){ if (String(x.id) === String(id)) c = x; });
+  return c;
+}
+
+/* ---- print any invoice (same look as the appointment bill) ---- */
+function invPrint(d){
+  var inv = d.invoice || {}, cur = inv.currency || 'PKR';
+  var f = function(n){ return cur + ' ' + Number(n || 0).toLocaleString(); };
+  var lines = (d.items || []).map(function(i){ return '<tr><td>' + esc(i.description) + '</td><td>' + esc(i.quantity) + '</td><td>' + f(i.unit_price) + '</td><td>' + f(i.line_total) + '</td></tr>'; }).join('');
+  var pays = (d.payments || []).map(function(p){ return esc(String(p.paid_at || '').slice(0, 10)) + ' ' + esc(p.method || '') + ' ' + f(p.amount); }).join('<br>');
+  var logo = (typeof BRAND !== 'undefined' && BRAND && BRAND.has_logo) ? '<img src="/brand/logo" style="height:70px" onerror="this.remove()">' : '';
+  var due = Math.round((Number(inv.total || 0) - Number(d.paid || 0)) * 100) / 100;
+  var h = '<html><head><title>' + esc(inv.number || 'Invoice') + '</title><style>body{font-family:Arial,sans-serif;color:#111;padding:24px;max-width:720px;margin:auto}' +
+    '.hd{display:flex;justify-content:space-between;border-bottom:2px solid #111;padding-bottom:12px}h1{margin:0;font-size:26px;letter-spacing:3px}' +
+    'table{width:100%;border-collapse:collapse;margin-top:18px;font-size:13px}th{background:#f4f4f4;text-align:left;padding:8px}td{padding:8px;border-bottom:1px solid #eee}' +
+    '.tot{float:right;width:280px;margin-top:14px;font-size:13px}.tot div{display:flex;justify-content:space-between;padding:4px 0}.g{border-top:2px solid #111;border-bottom:2px solid #111;font-weight:bold}' +
+    '.ft{clear:both;padding-top:50px;font-size:11px;color:#555}@media print{.np{display:none}}</style></head><body>' +
+    '<div class="hd"><div>' + logo + '<h1>INVOICE</h1></div><div style="text-align:right;font-size:13px"><b>' + esc(bizName()) + '</b>' +
+    (inv.location_name ? '<br>' + esc(inv.location_name) : '') + '</div></div>' +
+    '<p style="font-size:13px;line-height:1.7"><b>Invoice:</b> ' + esc(inv.number || '') + ' &nbsp;|&nbsp; <b>Date:</b> ' + esc(String(inv.issued_on || '').slice(0, 10)) +
+    (inv.status === 'void' ? ' &nbsp;|&nbsp; <b style="color:#b00">VOID</b>' : '') +
+    '<br><b>Client:</b> ' + esc(inv.customer_name || 'Walk-in') + ' &nbsp;|&nbsp; <b>Contact:</b> ' + esc(inv.customer_phone || '-') + '</p>' +
+    '<table><thead><tr><th>Item</th><th>Qty</th><th>Unit price</th><th>Line total</th></tr></thead><tbody>' + lines + '</tbody></table>' +
+    '<div class="tot"><div><span>Subtotal</span><span>' + f(inv.subtotal) + '</span></div><div><span>Discount</span><span>-' + f(inv.discount) + '</span></div>' +
+    '<div><span>Tax</span><span>' + f(inv.tax) + '</span></div><div class="g"><span>Total</span><span>' + f(inv.total) + '</span></div>' +
+    '<div><span>Paid</span><span>' + f(d.paid) + '</span></div>' + (due > 0.004 ? '<div><span>Due</span><span>' + f(due) + '</span></div>' : '<div style="color:#1b7f3b;font-weight:bold"><span>PAID IN FULL</span><span>&#10003;</span></div>') + '</div>' +
+    '<div class="ft">' + (pays ? 'Payments:<br>' + pays : '') + (inv.notes ? '<br>' + esc(inv.notes) : '') +
+    '<p style="text-align:center;margin-top:20px">Thank you for choosing ' + esc(bizName()) + '</p></div>' +
+    '<div class="np" style="text-align:center;margin-top:20px"><button onclick="window.print()" style="padding:10px 24px">Print</button></div></body></html>';
+  var w = window.open('', '_blank', 'width=820,height=920');
+  if (!w) { say('Allow pop-ups for this site to print the invoice.'); return; }
+  w.document.write(h); w.document.close();
+}
+
+/* ---- invoices ---- */
+var INV_NEW = { name: '', phone: '' };
+var _viewInvoicesBefore17 = VIEWS.invoices;
+VIEWS.invoices = function(){
+  var h = _viewInvoicesBefore17();
+  // a walk-in: type the name when they are not a saved customer
+  h = h.replace(/(<select[^>]*id="invcust"[\s\S]*?<\/select>)/, function(m){
+    return m + '<input class="fld" id="invname" placeholder="or type the client\'s name" value="' + esc(INV_NEW.name) + '" style="flex:1;min-width:160px">' +
+      '<input class="fld" id="invphone" placeholder="Phone (optional)" value="' + esc(INV_NEW.phone) + '" style="flex:1;min-width:130px">';
+  });
+  // the open invoice: who it is for, and Print
+  var d = OPEN_INVOICE ? S['inv_' + OPEN_INVOICE] : null;
+  if (d && d.invoice) {
+    h = h.replace('<h3>Lines</h3>', '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0 4px">' +
+      '<div><span class="card-note">Billed to</span><div style="font-size:16px;font-weight:700">' + esc(d.invoice.customer_name || 'Walk-in (no name)') + '</div>' +
+      '<div class="card-note">' + esc(d.invoice.customer_phone || '') + '</div></div>' +
+      '<button class="btn primary" id="invprint" type="button">&#128424; Print invoice</button></div><h3>Lines</h3>');
+  }
+  setTimeout(function(){
+    var g = function(id){ return document.getElementById(id); };
+    ['invname', 'invphone'].forEach(function(id){ if (g(id)) g(id).oninput = function(){ INV_NEW[id === 'invname' ? 'name' : 'phone'] = g(id).value; }; });
+    if (g('invprint') && d) g('invprint').onclick = function(){ invPrint(d); };
+    // client column in the list
+    var inv = (S.invoices && S.invoices.items) || [];
+    var tbl = null;
+    document.querySelectorAll('[data-open]').forEach(function(b){
+      var tr = b.closest('tr'); if (!tr || tr.getAttribute('data-cn')) return;
+      tbl = tr.closest('table');
+      var v = null; inv.forEach(function(x){ if (String(x.id) === b.getAttribute('data-open')) v = x; });
+      var c = v && v.customer_id ? custName(v.customer_id) : null;
+      var td = document.createElement('td'); td.textContent = c ? c.name : (v && v.customer_id ? '…' : 'Walk-in');
+      tr.insertBefore(td, tr.children[1]); tr.setAttribute('data-cn', '1');
+    });
+    if (tbl && !tbl.getAttribute('data-cn')) {
+      var hr = tbl.querySelector('thead tr'); if (hr) { var th = document.createElement('th'); th.textContent = 'Client'; hr.insertBefore(th, hr.children[1]); }
+      tbl.setAttribute('data-cn', '1');
+    }
+    // create: a typed name becomes a customer first
+    var mk = g('invcreate');
+    if (mk) mk.onclick = function(){
+      var cid = val('invcust') || null, nm = (INV_NEW.name || '').trim();
+      var go = function(customer_id){
+        return act('/operations/invoices', {method:'POST', body:{ customer_id: customer_id, items: NEW_LINES,
+          discount: numv('invdisc') || 0, tax: numv('invtax') || 0 }}, 'Invoice created.').then(function(r){
+          if (r.ok) { NEW_LINES = []; INV_NEW = { name: '', phone: '' }; OPEN_INVOICE = r.data.invoice_id; need('invoices', '/business/invoices', true); need('customers', '/business/customers', true); }
+        });
+      };
+      if (cid || !nm) { go(cid); return; }
+      // a returning client typed again: the same phone means the same person (as in booking)
+      var dig = function(x){ return String(x || '').replace(/\D/g, '').slice(-10); };
+      var ph = (INV_NEW.phone || '').trim();
+      var same = function(list){ var hit = null; if (dig(ph).length >= 7) list.forEach(function(c){ if (!hit && dig(c.phone) === dig(ph)) hit = c; }); return hit; };
+      var known = same(items('customers'));
+      if (known) { go(known.id); return; }
+      mk.disabled = true;
+      api('/business/customers', { method: 'POST', body: { name: nm, phone: ph || null, source: 'invoice' } }).then(function(r){
+        if (r.ok) { mk.disabled = false; go(r.data.item.id); return; }
+        return api('/business/customers').then(function(all){
+          mk.disabled = false;
+          var k = all.ok ? same((all.data && all.data.items) || []) : null;
+          if (k) go(k.id); else say((r.data && r.data.detail) || 'The client could not be saved.');
+        });
+      });
+    };
+  }, 0);
+  return h;
+};
+
+/* ---- edit a saved visit ---- */
+var _aptOpenBefore17 = aptOpen;
+aptOpen = function(a, preset){
+  _aptOpenBefore17(a, preset);
+  if (!a || !APT.form) return;
+  var f = APT.form;
+  f.cname = a.customer_name || ''; f.cphone = a.customer_phone || '';
+  if (!isOwner()) return;
+  f.bill = { loading: true };
+  api('/appointments/' + a.id + '/bill').then(function(r){
+    if (APT.form !== f) return;
+    var inv = r.ok && r.data ? r.data.invoice : null;
+    APT.lines = ((r.ok && r.data && r.data.items) || []).map(function(i){
+      return { service_id: i.service_id || null, package_id: i.package_id || null, name: i.description,
+               price: Number(i.unit_price), qty: Number(i.quantity), discount: '' };
+    });
+    var sub = inv ? Number(inv.subtotal || 0) : 0, disc = inv ? Number(inv.discount || 0) : 0, tax = inv ? Number(inv.tax || 0) : 0;
+    var paid = ((r.ok && r.data && r.data.payments) || []).reduce(function(s, p){ return s + Number(p.amount || 0); }, 0);
+    f.bill = { loaded: true, has: !!inv, disc: disc, gst: sub - disc > 0 ? Math.round(tax / (sub - disc) * 10000) / 100 : 0,
+               cur: (inv && inv.currency) || a.currency || 'PKR', paid: paid };
+    f.billInit = null;
+    renderShell();
+  });
+};
+function aptBillSig(){ return JSON.stringify([APT.lines, val('ap_dtype'), val('ap_dval'), val('ap_gst')]); }
+var _aptBillHTMLBefore17 = aptBillHTML;
+aptBillHTML = function(){
+  var f = APT.form;
+  if (!f || !f.edit || !f.bill || !f.bill.loaded) return _aptBillHTMLBefore17();
+  if (!APT.lines.length) return 'Add a service to see the bill.';
+  var b = aptBill(), c = aptCur(), bal = Math.round((b.total - f.bill.paid) * 100) / 100;
+  return 'Subtotal <b>' + aptMoney(b.sub, c) + '</b><br>Discount <b>- ' + aptMoney(b.disc, c) + '</b><br>GST <b>' + aptMoney(b.tax, c) +
+    '</b><br><span style="font-size:15px">New total <b>' + aptMoney(b.total, c) + '</b></span><br>Already paid <b>' + aptMoney(f.bill.paid, c) +
+    '</b><br>' + (bal < -0.004 ? '<b class="bal-due">The total cannot be less than what was already paid.</b>'
+                               : 'Balance after this change <b class="' + (bal > 0.004 ? 'bal-due' : 'bal-ok') + '">' + aptMoney(Math.max(bal, 0), c) + '</b>');
+};
+var _aptFormHTMLBefore17 = aptFormHTML;
+aptFormHTML = function(){
+  var h = _aptFormHTMLBefore17(), f = APT.form;
+  if (!f || !f.edit) return h;
+  var client = '<div class="fgrid"><div><label>Client name</label><input class="fld" id="ap_cname" value="' + esc(f.cname || '') + '"></div>' +
+    '<div><label>Phone</label><input class="fld" id="ap_cphone" type="tel" value="' + esc(f.cphone || '') + '"></div></div>' +
+    '<div class="card-note">Changing the name or phone corrects this client everywhere.</div>';
+  var bill;
+  if (!isOwner()) bill = '<div class="card-note">Only the owner can change the services or prices on a saved bill. You can change everything else, or take a payment below.</div>';
+  else if (!f.bill || !f.bill.loaded) bill = '<div class="card-note">Loading the bill…</div>';
+  else bill = '<div class="fgrid" style="margin-top:12px"><div style="grid-column:1/-1"><label>Services on this bill (pick, then Add)</label>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap"><select class="fld" id="ap_svc" style="flex:1;min-width:180px"><option value="">Choose…</option>' +
+      aptPickList().map(function(p){ return '<option value="' + esc(p.key) + '">' + esc(p.name) + (p.price != null ? ' — ' + esc(Number(p.price).toLocaleString()) : '') + '</option>'; }).join('') +
+      '<option value="__custom">Other (type it)</option></select><button class="btn" id="ap_addsvc">+ Add</button></div></div></div>' +
+      '<label style="font-size:12px;color:var(--muted)">name · price · qty · discount</label>' +
+      '<div id="ap_lines">' + aptLinesHTML() + '</div>' +
+      '<div class="fgrid"><div><label>Discount type</label><select class="fld" id="ap_dtype"><option value="flat">Flat amount</option><option value="percent">Percentage (%)</option></select></div>' +
+      '<div><label>Discount</label><input class="fld" id="ap_dval" type="number" min="0" value="' + esc(f.bill.disc || '') + '" placeholder="0"></div>' +
+      '<div><label>GST %</label><input class="fld" id="ap_gst" type="number" min="0" value="' + esc(f.bill.gst || 0) + '"></div>' +
+      '<div><label>Currency</label><input class="fld" id="ap_cur" maxlength="3" value="' + esc(f.bill.cur) + '" readonly></div></div>' +
+      '<div class="billbox"><strong>Bill</strong><div id="ap_bill" style="margin-top:6px">' + aptBillHTML() + '</div></div>';
+  return h.replace(/<div class="card-note">Prices on a saved bill are not edited\.[^<]*<\/div>/, client + bill);
+};
+var _aptWireFormBefore17 = aptWireForm;
+aptWireForm = function(){
+  _aptWireFormBefore17();
+  var f = APT.form, g = function(id){ return document.getElementById(id); };
+  if (!f || !f.edit || !g('ap_save')) return;
+  if (f.bill && f.bill.loaded && f.billInit === null) f.billInit = aptBillSig();
+  if (g('ap_cname')) g('ap_cname').oninput = function(){ f.cname = g('ap_cname').value; };
+  if (g('ap_cphone')) g('ap_cphone').oninput = function(){ f.cphone = g('ap_cphone').value; };
+  var saveRest = g('ap_save').onclick;
+  g('ap_save').onclick = function(){
+    if (APT.busy) return;
+    var a = f.a || {}, steps = [];
+    var nm = (val('ap_cname') || '').trim(), ph = (val('ap_cphone') || '').trim();
+    if (g('ap_cname') && !nm) { aptSay('The client needs a name.', true); return; }
+    if (a.customer_id && (nm !== (a.customer_name || '') || ph !== (a.customer_phone || '')))
+      steps.push(function(){ return api('/business/customers/' + a.customer_id, { method: 'PATCH', body: { name: nm, phone: ph || null } })
+        .then(function(r){ return r.ok ? null : 'The client was not updated: ' + ((r.data && r.data.detail) || r.status); }); });
+    if (isOwner() && f.bill && f.bill.loaded && f.billInit !== null && aptBillSig() !== f.billInit) {
+      var bad = APT.lines.filter(function(l){ return !String(l.name).trim() || l.price === '' || Number(l.price) < 0; });
+      if (!APT.lines.length) { aptSay('A bill needs at least one service.', true); return; }
+      if (bad.length) { aptSay('Every line needs a name and a price.', true); return; }
+      if (aptBill().total + 0.009 < f.bill.paid) { aptSay('The new total cannot be less than what was already paid.', true); return; }
+      steps.push(function(){ return api('/appointments/' + f.id + '/bill', { method: 'PUT', body: {
+          services: APT.lines.map(function(l){ return { service_id: l.service_id, package_id: l.package_id, name: String(l.name).trim(), price: Number(l.price) || 0, qty: Number(l.qty) || 1, discount: Number(l.discount) || 0 }; }),
+          discount_type: val('ap_dtype'), discount_value: numv('ap_dval') || 0, gst_percent: numv('ap_gst') || 0 } })
+        .then(function(r){ return r.ok ? null : 'The bill was not changed: ' + ((r.data && r.data.detail) || r.status); }); });
+    }
+    if (!steps.length) return saveRest();
+    APT.busy = true; g('ap_save').disabled = true; aptSay('Saving…');
+    steps.reduce(function(p, step){ return p.then(function(err){ return err ? err : step(); }); }, Promise.resolve(null))
+      .then(function(err){
+        APT.busy = false;
+        if (err) { if (g('ap_save')) g('ap_save').disabled = false; aptSay(err, true); return; }
+        saveRest();                                      // then the booking itself, as before
+      });
+  };
+};
+
+/* ---- inventory: edit a product ---- */
+var INV_EDIT = null;
+var _viewInventoryBefore17 = VIEWS.inventory;
+VIEWS.inventory = function(){
+  var h = _viewInventoryBefore17();
+  var prods = (S.inventory && S.inventory.products) || [];
+  var p = null; prods.forEach(function(x){ if (String(x.id) === String(INV_EDIT)) p = x; });
+  if (p && isOwner()) {
+    var form = '<h2 id="pe_top">Edit ' + esc(p.name) + '</h2>' + panel('Edit product',
+      '<div style="padding:14px 16px"><div class="fgrid">' +
+      '<div><label>Product name *</label><input class="fld" id="pe_name" value="' + esc(p.name) + '"></div>' +
+      '<div><label>SKU</label><input class="fld" id="pe_sku" value="' + esc(p.sku || '') + '"></div>' +
+      '<div><label>Category</label><input class="fld" id="pe_cat" value="' + esc(p.category || '') + '"></div>' +
+      '<div><label>Sale price</label><input class="fld" id="pe_price" type="number" min="0" value="' + esc(p.price == null ? '' : p.price) + '"></div></div>' +
+      '<div class="fgrid"><div><label>Stock on hand</label><input class="fld" id="pe_stock" type="number" value="' + esc(p.on_hand == null ? 0 : p.on_hand) + '"' + (p.track_stock ? '' : ' disabled') + '></div>' +
+      '<div><label>Warn when stock falls to</label><input class="fld" id="pe_low" type="number" min="0" value="' + esc(p.low_stock_threshold == null ? '' : p.low_stock_threshold) + '"></div>' +
+      '<div><label style="margin-top:22px"><input type="checkbox" id="pe_track"' + (p.track_stock ? ' checked' : '') + '> Track stock</label></div>' +
+      '<div><label style="margin-top:22px"><input type="checkbox" id="pe_active"' + (p.active === false ? '' : ' checked') + '> Active (can be sold)</label></div></div>' +
+      '<div class="card-note">A new stock number is saved as an adjustment, so the history still shows what changed and when.</div>' +
+      '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn primary" id="pe_save">Save changes</button><button class="btn" id="pe_cancel">Cancel</button></div>' +
+      '<div id="pemsg" class="card-note" style="min-height:18px;margin-top:8px"></div></div>');
+    h = h.replace('<h2>Add a product</h2>', form + '<h2>Add a product</h2>');
+  }
+  setTimeout(function(){
+    var g = function(id){ return document.getElementById(id); };
+    var tbl = null;
+    document.querySelectorAll('table').forEach(function(t){ if (/Warn at/.test(t.querySelector('thead') ? t.querySelector('thead').textContent : '')) tbl = t; });
+    if (tbl && isOwner() && !tbl.getAttribute('data-ed')) {
+      tbl.setAttribute('data-ed', '1');
+      var hr = tbl.querySelector('thead tr'); if (hr) hr.appendChild(document.createElement('th'));
+      Array.prototype.forEach.call(tbl.querySelectorAll('tbody tr'), function(tr, i){
+        var pr = prods[i]; if (!pr) return;
+        var td = document.createElement('td'), b = document.createElement('button');
+        b.className = 'btn'; b.textContent = 'Edit'; b.onclick = function(){ INV_EDIT = pr.id; renderShell(); setTimeout(function(){ var t = g('pe_top'); if (t) t.scrollIntoView({ behavior: 'smooth' }); }, 50); };
+        td.appendChild(b); tr.appendChild(td);
+      });
+    }
+    if (!p) return;
+    var msg = function(m, bad){ var e = g('pemsg'); if (e) { e.textContent = m; e.style.color = bad ? 'var(--danger)' : 'var(--growth)'; } };
+    if (g('pe_track')) g('pe_track').onchange = function(){ if (g('pe_stock')) g('pe_stock').disabled = !g('pe_track').checked; };
+    if (g('pe_cancel')) g('pe_cancel').onclick = function(){ INV_EDIT = null; renderShell(); };
+    if (g('pe_save')) g('pe_save').onclick = function(){
+      var name = val('pe_name'), price = numv('pe_price'), low = numv('pe_low'), stock = numv('pe_stock');
+      if (!name) { msg('A product needs a name.', true); return; }
+      if ([price, low].some(function(n){ return n !== null && (isNaN(n) || n < 0); })) { msg('Price and warn level cannot be negative.', true); return; }
+      var track = g('pe_track').checked;
+      g('pe_save').disabled = true; msg('Saving…');
+      api('/business/products/' + p.id, { method: 'PATCH', body: { name: name, sku: val('pe_sku') || null, category: val('pe_cat') || null,
+        price: price, low_stock_threshold: low, track_stock: track, active: g('pe_active').checked } }).then(function(r){
+        if (!r.ok) { g('pe_save').disabled = false; msg((r.data && r.data.detail) || ('Not saved (' + r.status + ').'), true); return null; }
+        var delta = track && stock !== null && !isNaN(stock) ? Math.round((stock - Number(p.on_hand || 0)) * 1000) / 1000 : 0;
+        if (!delta) return r;
+        return api('/business/stock_movements', { method: 'POST', body: { product_id: p.id, kind: 'adjustment', quantity_delta: delta,
+          reason: 'Stock count corrected from ' + (p.on_hand || 0) + ' to ' + stock } }).then(function(m){
+          if (!m.ok) { g('pe_save').disabled = false; msg('Details saved, but the stock change was refused: ' + ((m.data && m.data.detail) || m.status), true); return null; }
+          return m;
+        });
+      }).then(function(r){
+        if (!r) return;
+        INV_EDIT = null; need('inventory', '/operations/inventory', true); need('products', '/business/products', true);
+        say('Product updated.');
+      });
+    };
+  }, 0);
+  return h;
+};
+
+/* ---- posts waiting for approval live in Needs Human ---- */
+var _viewNeedsHumanBefore17 = VIEWS.needshuman;
+VIEWS.needshuman = function(){
+  var h = _viewNeedsHumanBefore17();
+  if (!isOwner()) return h;
+  var sec = '<h2>Social posts waiting for your approval</h2>';
+  if (!need('nh_posts', '/social/posts')) return h + sec + panel('Posts', loading('Loading posts...'));
+  if (!S.nh_posts) return h;
+  var waiting = (S.nh_posts.posts || []).filter(function(p){ return p.status === 'draft' || p.status === 'failed'; });
+  if (!waiting.length) return h + sec + panel('Posts', empty('Nothing waiting', 'Posts Jarvis drafts for you appear here until you approve or discard them.'));
+  var list = waiting.map(function(p){
+    var res = p.results || {};
+    var errs = Object.keys(res).filter(function(k){ return res[k] && !res[k].ok; }).map(function(k){ return k + ': ' + (res[k].error || 'failed'); });
+    return '<div style="padding:14px 16px;border-bottom:1px solid var(--line)">' +
+      '<div class="card-note">' + esc((p.platforms || []).join(' + ')) + ' · ' + esc(p.status === 'failed' ? 'failed to post' : 'draft') + ' · ' + esc(String(p.created_at).slice(0, 16).replace('T', ' ')) + '</div>' +
+      (p.image_url ? '<img src="' + esc(p.image_url) + '" alt="" style="max-width:220px;border-radius:8px;margin:8px 0;display:block">' : '') +
+      '<div style="white-space:pre-wrap;margin:6px 0">' + esc(p.caption) + '</div>' +
+      (errs.length ? '<div class="card-note" style="color:var(--danger)">' + esc(errs.join(' | ')) + '</div>' : '') +
+      '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" data-nhpub="' + esc(p.id) + '">Approve &amp; post</button>' +
+      '<a class="btn" href="#/posts">Edit or schedule</a><button class="btn" data-nhdis="' + esc(p.id) + '">Discard</button></div></div>';
+  }).join('');
+  setTimeout(function(){
+    document.querySelectorAll('[data-nhpub]').forEach(function(b){
+      b.onclick = function(){
+        if (!b.getAttribute('data-armed')) { b.setAttribute('data-armed', '1'); b.textContent = 'Tap again to post publicly'; return; }
+        b.disabled = true; b.textContent = 'Posting...';
+        act('/social/posts/' + b.getAttribute('data-nhpub') + '/publish', { method: 'POST' }, 'Posted.')
+          .then(function(){ need('nh_posts', '/social/posts', true); });
+      };
+    });
+    document.querySelectorAll('[data-nhdis]').forEach(function(b){
+      b.onclick = function(){ act('/social/posts/' + b.getAttribute('data-nhdis'), { method: 'DELETE' }, 'Discarded.').then(function(){ need('nh_posts', '/social/posts', true); }); };
+    });
+  }, 0);
+  return h + sec + panel('Posts', list, '<span class="pill attn">' + waiting.length + '</span>');
+};
+var _viewConsoleBefore17 = VIEWS.console;
+VIEWS.console = function(){
+  return _viewConsoleBefore17().replace(/<h2>Social posts<\/h2>[\s\S]*?(?=<h2>What your WhatsApp agent)/,
+    '<div class="card-note" style="margin:14px 0">Posts Jarvis drafts wait for your approval in <a href="#/needshuman">Needs Human</a>.</div>');
+};
 
 window.addEventListener('hashchange', function(){
   // Every section reads fresh data when it is opened, so something added in
