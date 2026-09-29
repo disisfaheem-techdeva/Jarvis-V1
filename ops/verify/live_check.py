@@ -650,7 +650,10 @@ def phase11(ctx):
     name = "Live Check Jarvis"
     try:
         s, r = call(O, "POST", "/console", {"confirm": "not.a.token"})
-        check("J16", "new Jarvis is deployed (a fake yes is refused)", s == 400, "HTTP %s" % s)
+        # the old code also answered 400 (no message), so check it is the NEW refusal
+        check("J16", "new Jarvis is deployed (a fake yes is refused)",
+              s == 400 and "confirmation" in str(r.get("detail") if isinstance(r, dict) else r),
+              "HTTP %s %s" % (s, r.get("detail") if isinstance(r, dict) else r))
         s, r = call(O, "POST", "/console", {"message": "Book an appointment for %s tomorrow at 11:00." % name})
         rows = sql("SELECT a.id, c.id, coalesce(a.invoice_id::text,'-') FROM appointments a JOIN customers c ON c.id = a.customer_id "
                    "WHERE a.tenant_id='%s' AND c.name = '%s'" % (tid, name))

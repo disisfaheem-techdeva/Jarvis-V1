@@ -30,7 +30,9 @@ fi
 # the name of Traefik's port-80 entry point (for the http -> https redirect)
 WEBEP="$(docker inspect traefik-traefik-1 --format '{{join .Config.Cmd " "}} {{join .Args " "}}' 2>/dev/null \
          | grep -oE 'entrypoints\.[A-Za-z0-9_-]+\.address=:80\b' | head -1 | cut -d. -f2 || true)"
-cp -p "$FILE" "$FILE.bak-$(date +%Y%m%d-%H%M%S)"
+# backups live outside the repo: a .bak file inside it blocks deploy.sh
+mkdir -p /root/backups/override
+cp -p "$FILE" "/root/backups/override/$FILE.bak-$(date +%Y%m%d-%H%M%S)"
 python3 - "$FILE" "$HOST" "$WEBEP" <<'PY2'
 import re, sys
 path, host, webep = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -71,7 +73,7 @@ if webep:
 open(path, "w").write(s)
 print("updated %s%s" % (path, "" if webep else " (no port-80 entry point found: http is not redirected)") if s != before else "%s already up to date" % path)
 PY2
-docker compose config -q || { echo "ABORT: the compose file no longer parses; restore the .bak copy"; exit 1; }
+docker compose config -q || { echo "ABORT: the compose file no longer parses; restore the copy in /root/backups/override"; exit 1; }
 docker compose up -d --no-deps api
 echo "waiting for https://$HOST/login (the certificate can take a minute) ..."
 for i in $(seq 1 24); do
