@@ -18,4 +18,4 @@ export function Bullets({ items }: { items: React.ReactNode[] }) {
   );
 }
 
-export const LEGAL_UPDATED = "28 September 2026";
+export const LEGAL_UPDATED = "30 September 2026";

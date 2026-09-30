@@ -73,10 +73,32 @@ export default function PrivacyPage() {
         </p>
       </Section>
 
+      <Section title="How we use Google data">
+        <Bullets
+          items={[
+            "When a business owner connects Google Ads, TechDeva reads that business's own campaign spend, impressions, clicks and conversions, read-only, to show them in its dashboard.",
+            "We do not create, change or pause campaigns, we do not sell this data, and we do not use it for advertising or to train AI models.",
+            "The data is shown only to that business's owner. A business can disconnect Google at any time; its stored Google sign-in is then deleted.",
+          ]}
+        />
+        <p>
+          TechDeva&apos;s use and transfer of information received from Google APIs adheres to the{" "}
+          <a
+            href="https://developers.google.com/terms/api-services-user-data-policy"
+            className="text-white underline"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Google API Services User Data Policy
+          </a>
+          , including the Limited Use requirements.
+        </p>
+      </Section>
+
       <Section title="Who else processes data">
         <Bullets
           items={[
-            "Google (Gemini AI): the text of a conversation or request is sent to Google's AI service to write the agent's reply, a post draft, or Jarvis's spoken answer.",
+            "Google (Gemini AI): the text of a conversation or request is sent to Google's AI service to write the agent's reply, a post draft, or Jarvis's spoken answer. Data we receive from Facebook, Instagram or Google Ads is never sent to the AI service.",
             "Meta (Facebook, Instagram, WhatsApp): posts are published through Meta's API, and WhatsApp messages travel through WhatsApp.",
             "Our hosting provider, which runs the servers the platform and its database are on.",
           ]}
@@ -105,8 +127,8 @@ export default function PrivacyPage() {
 
       <Section title="Your choices and deleting your data">
         <p>
-          A business owner can edit or remove most records from the dashboard, and can disconnect Facebook and
-          WhatsApp at any time. To have your data deleted, including data we received from Facebook, use the form on
+          A business owner can edit or remove most records from the dashboard, and can disconnect Facebook, Google and
+          WhatsApp at any time. To have your data deleted, including data we received from Facebook or Google, use the form on
           our <Link href="/data-deletion" className="text-white underline">data deletion page</Link>. If you are a
           customer of a business that uses TechDeva, you can also ask that business directly; we will act on its
           instructions.
