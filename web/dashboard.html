@@ -6035,6 +6035,71 @@ VIEWS.marketing = function(){
   return at > -1 ? h.slice(0, at) + adsPerfHTML() + h.slice(at) : h + adsPerfHTML();
 };
 
+/* ======================================================== Part 19: Client work
+   Only in TechDeva's own business: the delivery tasks the founder gives the
+   team from the founder console. Everyone on the team sees the list; each
+   person moves the tasks given to them (the owner can move any). No prices. */
+var TDW = { filter: 'mine' };
+function tdwLoad(){ S.tdwork = undefined; LOADING.tdwork = false; need('tdwork', '/work/tasks', true); }
+VIEWS.clientwork = function(){
+  var out = '<h1>Client work</h1><p class="sub">The work TechDeva is doing for its clients. Move a task along as you go: To do → Doing → Done.</p>';
+  if (!need('tdwork', '/work/tasks')) return out + panel('Tasks', loading('Loading tasks...'));
+  var d = S.tdwork;
+  if (!d) return out + panel('Tasks', errState('Could not read the tasks.'));
+  if (!d.home) return out + panel('Tasks', '<div style="padding:14px 16px" class="sub">This page is for TechDeva\'s own team.</div>');
+  var own = isOwner(), today = new Date().toISOString().slice(0, 10);
+  var list = d.tasks.filter(function(t){ return TDW.filter === 'all' || String(t.assignee_user_id) === String(d.me); });
+  var open = list.filter(function(t){ return t.status !== 'done'; }), done = list.filter(function(t){ return t.status === 'done'; }).slice(0, 15);
+  out += '<div style="display:flex;gap:8px;margin-bottom:12px">' +
+    '<button class="btn' + (TDW.filter === 'mine' ? ' primary' : '') + '" data-tdwf="mine">My tasks</button>' +
+    '<button class="btn' + (TDW.filter === 'all' ? ' primary' : '') + '" data-tdwf="all">Everyone\'s</button></div>' + actbar();
+  function row(t){
+    var mine = own || String(t.assignee_user_id) === String(d.me);
+    var due = t.due_on ? String(t.due_on).slice(0, 10) : '';
+    var late = due && t.status !== 'done' && due < today;
+    var next = t.status === 'todo' ? ['doing', 'Start'] : t.status === 'doing' ? ['done', 'Done'] : ['doing', 'Reopen'];
+    return '<div style="padding:12px 16px;border-top:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap">' +
+      '<div style="flex:1;min-width:200px"><b>' + esc(t.title) + '</b>' +
+        '<div class="card-note">' + esc(t.client_name || 'TechDeva') + ' · ' + esc(t.assignee_name || 'not given to anyone') +
+        (due ? ' · <span style="' + (late ? 'color:var(--danger)' : '') + '">due ' + esc(due) + '</span>' : '') + '</div>' +
+        (t.notes ? '<div class="card-note">' + esc(t.notes) + '</div>' : '') + '</div>' +
+      '<span class="tag">' + esc(t.status === 'todo' ? 'to do' : t.status) + '</span>' +
+      (mine ? '<button class="btn' + (t.status === 'done' ? '' : ' primary') + '" data-tdwmv="' + esc(t.id) + '" data-to="' + next[0] + '">' + next[1] + '</button>' : '') +
+      '</div>';
+  }
+  out += panel('Open (' + open.length + ')', open.length ? open.map(row).join('') : '<div style="padding:14px 16px" class="sub">Nothing open. Well done.</div>');
+  if (done.length) out += panel('Done recently', done.map(row).join(''));
+  setTimeout(function(){
+    document.querySelectorAll('[data-tdwf]').forEach(function(b){ b.onclick = function(){ TDW.filter = b.getAttribute('data-tdwf'); renderShell(); }; });
+    document.querySelectorAll('[data-tdwmv]').forEach(function(b){
+      b.onclick = function(){
+        b.disabled = true;
+        act('/work/tasks/' + b.getAttribute('data-tdwmv'), { method: 'PUT', body: { status: b.getAttribute('data-to') } }, 'Moved.')
+          .then(function(r){ if (r.ok) tdwLoad(); else b.disabled = false; });
+      };
+    });
+  }, 0);
+  return out;
+};
+/* The menu item appears only once the API says this is TechDeva's own business. */
+(function(){
+  function add(){
+    if (!S.me || S.tdwork_probe !== undefined) return;
+    S.tdwork_probe = null;
+    api('/work/tasks').then(function(r){
+      S.tdwork_probe = !!(r.ok && r.data && r.data.home);
+      if (!S.tdwork_probe) return;
+      S.tdwork = r.data;
+      NAV.forEach(function(g){
+        if (g.label === 'CRM' && !g.items.some(function(it){ return it.id === 'clientwork'; }))
+          g.items.unshift({ id: 'clientwork', icon: '✅', name: 'Client work', sub: false });
+      });
+      renderShell();
+    });
+  }
+  var t = setInterval(function(){ if (S.me) { clearInterval(t); add(); } }, 500);
+})();
+
 window.addEventListener('hashchange', function(){
   // Every section reads fresh data when it is opened, so something added in
   // one section (a staff member, a product, a booking) shows up in the others.

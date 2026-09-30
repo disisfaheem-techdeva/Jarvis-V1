@@ -88,6 +88,8 @@ app.include_router(make_plans_router())
 app.include_router(make_pins_router())
 from .ads import make_ads_router
 app.include_router(make_ads_router())
+from .tdwork import make_tdwork_router
+app.include_router(make_tdwork_router())
 trial.install(app)
 
 # The two client-facing pages. The API image is built from ./app, so web/ is

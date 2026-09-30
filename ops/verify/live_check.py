@@ -758,6 +758,42 @@ def phase13(ctx):
           % (setup.get("facebook"), setup.get("google"), setup.get("google_ads_reporting")))
 
 
+def phase14(ctx):
+    """TechDeva's own work (Part 19): the founder's catalogue, client services
+    and delivery board; clients never reach it; only TechDeva's own business
+    sees tasks. Read-only on live: it never picks or changes the home business."""
+    O, OP, OT = ctx["owner"], ctx["operator"], ctx["other"]
+    forced = sql("SELECT count(*) FROM pg_class WHERE relname IN ('td_catalog','td_client_services','td_tasks') "
+                 "AND relrowsecurity AND relforcerowsecurity")
+    check("A19", "work tables exist with row level security forced", forced and forced[0][0] == "3",
+          "tables forced: %s" % (forced[0][0] if forced else "none"))
+    adm = token(None, "techdeva_admin", "live-check")
+    s, r = call(adm, "GET", "/techdeva/work/home")
+    home = (r.get("home") or {}) if isinstance(r, dict) else {}
+    check("A19", "founder sees which business is TechDeva's own", s == 200 and "candidates" in r,
+          "HTTP %s home=%s" % (s, home.get("name") or "not chosen yet"))
+    for path in ("/techdeva/work/catalog", "/techdeva/work/client-services", "/techdeva/work/tasks", "/techdeva/work/team"):
+        s, r = call(adm, "GET", path)
+        ok = s == 200
+        s2, _ = call(O, "GET", path)
+        check("A19", "founder reads %s, a client is refused" % path.rsplit("/", 1)[1], ok and s2 == 403,
+              "founder HTTP %s, client HTTP %s" % (s, s2))
+    s, r = call(O, "PUT", "/techdeva/work/home", {"tenant_id": ctx["qa"]})
+    check("A19", "a client cannot make itself TechDeva's business", s == 403, "HTTP %s" % s)
+    qa_is_home = str(home.get("id") or "") == str(ctx["qa"])
+    s, r = call(OP, "GET", "/work/tasks")
+    check("A19", "tasks show only in TechDeva's own business", s == 200 and bool(r.get("home")) == qa_is_home,
+          "HTTP %s home=%s (QA is home: %s)" % (s, r.get("home"), qa_is_home))
+    if qa_is_home:
+        check("A19", "the team's view carries no prices", "price" not in json.dumps(r), "checked the whole reply")
+    if OT:
+        s, r = call(OT, "GET", "/work/tasks")
+        check("A19", "another business sees no TechDeva tasks", s == 200 and not r.get("home") and not r.get("tasks"),
+              "HTTP %s home=%s tasks=%s" % (s, r.get("home"), len(r.get("tasks") or [])))
+    s, r = call(OP, "PUT", "/work/tasks/%s" % uuid.uuid4(), {"status": "done"})
+    check("A19", "moving a task that is not yours is refused cleanly", s in (403, 404), "HTTP %s" % s)
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)

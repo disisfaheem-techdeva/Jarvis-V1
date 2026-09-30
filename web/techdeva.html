@@ -854,4 +854,186 @@ api('/me').then(m => {
   document.getElementById('who').textContent = m.role || '';
   if (m.role === 'techdeva_admin') show();
 }).catch(() => {});
+
+/* ======================================================== Part 19: TechDeva's team & services
+   Team: which business on the platform is TechDeva's own (its staff log in
+   there with PINs), and who is on the team. Services catalogue: what TechDeva
+   sells. Client services: which client has what, at what price. Delivery
+   board: tasks per client, given to team members (they see and move their
+   own tasks in TechDeva's dashboard). */
+NAV.splice(1, 0, ['TECHDEVA TEAM & SERVICES', [
+  ['team','Team'], ['catalog','Services catalogue'], ['clientsvc','Client services'], ['work','Delivery board']]]);
+Object.assign(TITLES, {
+  team: ['Team', "TechDeva's own business on the platform, and the people who work in it."],
+  catalog: ['Services catalogue', 'What TechDeva sells, and for how much.'],
+  clientsvc: ['Client services', 'Which client has which service, at what price, since when.'],
+  work: ['Delivery board', 'The work for each client, who is doing it, and by when.']});
+const W = {};
+const CATS = ['plan', 'ads', 'content', 'website', 'setup', 'training', 'other'];
+function wkGet(key, path){
+  if (W[key] !== undefined) return W[key];
+  W[key] = null;
+  api(path).then(d => { W[key] = d; }).catch(e => { W[key] = {error: e.message}; })
+    .then(() => { if (['team','catalog','clientsvc','work'].indexOf(current()) !== -1) paint(); });
+  return null;
+}
+function wkFresh(){ Object.keys(W).forEach(k => delete W[k]); paint(); }
+function wkNoHome(){
+  return '<div class="empty">First choose which business on the platform is TechDeva\'s own, on the ' +
+    '<a href="#/team" style="color:var(--gold)">Team</a> page.</div>';
+}
+const wkPrice = (p, billing) => p == null || p === '' ? '<span class="dim">Talk to us</span>' :
+  money(p) + (billing === 'monthly' ? '<span class="dim"> / month</span>' : '<span class="dim"> once</span>');
+function wkAct(sel, fn){
+  setTimeout(() => document.querySelectorAll(sel).forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try { await fn(b); } catch (e) { alert(e.message); b.disabled = false; }
+  }), 0);
+}
+const wkVal = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+const wkInput = 'style="background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;font:inherit"';
+
+VIEWS.team = function(){
+  const h = wkGet('home', '/techdeva/work/home');
+  if (!h) return '<div class="empty">Loading...</div>';
+  if (h.error) return '<div class="empty">' + esc(h.error) + '</div>';
+  let out = '<section><div class="card" style="margin-bottom:16px">';
+  if (!h.home) {
+    out += '<div class="k-label">Step 1</div><p>Which business on the platform is <b>TechDeva itself</b>? Your team logs in there with their PINs, ' +
+      'and the delivery tasks you give them appear in that dashboard. Clients never see any of it.</p>' +
+      '<select id="wk-home" ' + wkInput + '><option value="">Choose...</option>' +
+      h.candidates.map(c => '<option value="' + esc(c.id) + '"' + (/techdeva/i.test(c.name) ? ' selected' : '') + '>' + esc(c.name) + '</option>').join('') +
+      '</select> <button class="primary" id="wk-home-save">This is TechDeva</button>' +
+      '<div class="k-note">Not in the list? Sign TechDeva up as a business first (portal signup), then come back.</div></div></section>';
+    wkAct('#wk-home-save', async () => {
+      if (!wkVal('wk-home')) throw new Error('Choose the business first.');
+      const d = await api('/techdeva/work/home', {method:'PUT', body: JSON.stringify({tenant_id: wkVal('wk-home')})});
+      alert('Done. ' + (d.catalog_seeded ? 'Your plans were added to the services catalogue.' : ''));
+      wkFresh();
+    });
+    return out;
+  }
+  out += '<div class="k-label">TechDeva\'s own business</div><div style="font-size:18px;font-weight:700;margin:4px 0">' + esc(h.home.name) + '</div>' +
+    '<div class="k-note">Your team works here with their own PIN and limited rights. To add someone: log in to this business as its owner, ' +
+    'open <b>Team → Team logins</b>, add the person as <b>Staff</b> (or Manager) and give them a PIN.</div></div>';
+  const t = wkGet('team', '/techdeva/work/team');
+  if (!t) return out + '<div class="empty">Loading the team...</div></section>';
+  if (t.error) return out + '<div class="empty">' + esc(t.error) + '</div></section>';
+  out += '<div class="card">' + tbl('<th>Name</th><th>Access</th><th>Job</th><th>PIN</th><th>Last login</th><th>Open tasks</th>',
+    t.team.map(p => '<tr><td>' + esc(p.name || p.email) + '</td><td><span class="pill">' + (p.role === 'owner' ? 'Owner / manager' : 'Staff') + '</span></td><td>' +
+      esc(p.job || '-') + '</td><td>' + (p.has_pin ? '<span class="good">set</span>' : '<span class="dim">no</span>') + '</td><td>' + when(p.last_login_at) +
+      '</td><td>' + (p.open_tasks ? '<a href="#/work" style="color:var(--gold)">' + p.open_tasks + '</a>' : '0') + '</td></tr>')) + '</div></section>';
+  return out;
+};
+
+VIEWS.catalog = function(){
+  const c = wkGet('catalog', '/techdeva/work/catalog');
+  if (!c) return '<div class="empty">Loading...</div>';
+  if (c.error) return '<div class="empty">' + esc(c.error) + '</div>';
+  if (!c.home) return wkNoHome();
+  const ed = W.catEdit ? c.items.find(i => i.id === W.catEdit) : null;
+  let out = '<section><div class="card" style="margin-bottom:16px"><div class="k-label">' + (ed ? 'Edit ' + esc(ed.name) : 'Add a service') + '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
+    '<input id="ct-name" placeholder="Name, e.g. Meta ads management" ' + wkInput + ' value="' + esc(ed ? ed.name : '') + '" style="flex:2;min-width:200px">' +
+    '<select id="ct-cat" ' + wkInput + '>' + CATS.map(k => '<option' + ((ed ? ed.category : 'ads') === k ? ' selected' : '') + '>' + k + '</option>').join('') + '</select>' +
+    '<input id="ct-price" type="number" min="0" placeholder="Price PKR (empty = talk to us)" ' + wkInput + ' value="' + esc(ed && ed.price != null ? ed.price : '') + '" style="width:190px">' +
+    '<select id="ct-bill" ' + wkInput + '><option value="monthly"' + (ed && ed.billing === 'one_time' ? '' : ' selected') + '>per month</option><option value="one_time"' + (ed && ed.billing === 'one_time' ? ' selected' : '') + '>one time</option></select></div>' +
+    '<input id="ct-desc" placeholder="What is included (optional)" ' + wkInput + ' value="' + esc(ed ? ed.description : '') + '" style="width:100%;margin-top:8px;box-sizing:border-box">' +
+    '<div style="margin-top:10px"><button class="primary" id="ct-save">' + (ed ? 'Save changes' : 'Add to catalogue') + '</button>' +
+    (ed ? ' <button id="ct-cancel">Cancel</button>' : '') + '</div></div>';
+  out += '<div class="card">' + tbl('<th>Service</th><th>Type</th><th>Price</th><th>Clients on it</th><th>Status</th><th></th>',
+    c.items.map(i => '<tr><td><b>' + esc(i.name) + '</b>' + (i.description ? '<div class="k-note">' + esc(i.description) + '</div>' : '') + '</td><td>' + esc(i.category) +
+      '</td><td>' + wkPrice(i.price, i.billing) + '</td><td>' + (i.active_clients || 0) + '</td><td>' +
+      (i.active ? '<span class="good">selling</span>' : '<span class="dim">stopped</span>') + '</td><td style="white-space:nowrap"><button data-ctedit="' + esc(i.id) + '">Edit</button> ' +
+      '<button data-cttog="' + esc(i.id) + '" data-on="' + (i.active ? '1' : '') + '">' + (i.active ? 'Stop selling' : 'Sell again') + '</button></td></tr>')) + '</div>' +
+    '<div class="k-note" style="margin-top:10px">Plan prices here are what you charge. The limits of each plan (numbers, conversations) are on the Plans panel under Clients.</div></section>';
+  wkAct('#ct-save', async () => {
+    const body = {name: wkVal('ct-name'), category: wkVal('ct-cat'), price: wkVal('ct-price'), billing: wkVal('ct-bill'), description: wkVal('ct-desc')};
+    if (!body.name) throw new Error('Give the service a name.');
+    if (ed) await api('/techdeva/work/catalog/' + ed.id, {method:'PUT', body: JSON.stringify(body)});
+    else await api('/techdeva/work/catalog', {method:'POST', body: JSON.stringify(body)});
+    W.catEdit = null; wkFresh();
+  });
+  wkAct('#ct-cancel', async () => { W.catEdit = null; paint(); });
+  wkAct('[data-ctedit]', async b => { W.catEdit = b.getAttribute('data-ctedit'); paint(); window.scrollTo(0, 0); });
+  wkAct('[data-cttog]', async b => { await api('/techdeva/work/catalog/' + b.getAttribute('data-cttog'), {method:'PUT', body: JSON.stringify({active: !b.getAttribute('data-on')})}); wkFresh(); });
+  return out;
+};
+
+VIEWS.clientsvc = function(){
+  const d = wkGet('cs', '/techdeva/work/client-services'), c = wkGet('catalog', '/techdeva/work/catalog');
+  if (!d || !c) return '<div class="empty">Loading...</div>';
+  if (d.error || c.error) return '<div class="empty">' + esc(d.error || c.error) + '</div>';
+  if (!d.home) return wkNoHome();
+  const active = d.items.filter(i => i.status === 'active');
+  const clientsWith = new Set(active.map(i => i.client_tenant_id)).size;
+  let out = '<section><div class="grid" style="margin-top:0;margin-bottom:16px">' +
+    kpi('Monthly from services', money(d.monthly_total), 'active monthly services') +
+    kpi('Active services', active.length, '') + kpi('Clients with a service', clientsWith + ' / ' + d.clients.length, '') + '</div>';
+  out += '<div class="card" style="margin-bottom:16px"><div class="k-label">Give a client a service</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
+    '<select id="cs-client" ' + wkInput + '><option value="">Client...</option>' + d.clients.map(x => '<option value="' + esc(x.id) + '">' + esc(x.name) + '</option>').join('') + '</select>' +
+    '<select id="cs-svc" ' + wkInput + '><option value="">Service...</option>' + c.items.filter(i => i.active).map(i => '<option value="' + esc(i.id) + '">' + esc(i.name) + (i.price != null ? ' — ' + Number(i.price).toLocaleString() : '') + '</option>').join('') + '</select>' +
+    '<input id="cs-price" type="number" min="0" placeholder="Price (empty = catalogue price)" ' + wkInput + ' style="width:210px">' +
+    '<input id="cs-start" type="date" ' + wkInput + '>' +
+    '<button class="primary" id="cs-add">Add</button></div></div>';
+  out += '<div class="card">' + tbl('<th>Client</th><th>Service</th><th>Price</th><th>Since</th><th>Status</th><th>Open tasks</th><th></th>',
+    d.items.map(i => '<tr><td><b>' + esc(i.client_name) + '</b></td><td>' + esc(i.service_name) + '</td><td>' + wkPrice(i.price, i.billing) + '</td><td>' +
+      esc(String(i.started_on || '').slice(0, 10)) + (i.ended_on ? ' → ' + esc(String(i.ended_on).slice(0, 10)) : '') + '</td><td><select data-csst="' + esc(i.id) + '" ' + wkInput + '>' +
+      ['active', 'paused', 'ended'].map(s => '<option' + (s === i.status ? ' selected' : '') + '>' + s + '</option>').join('') + '</select></td><td>' + (i.open_tasks || 0) +
+      '</td><td><button data-cstask="' + esc(i.id) + '">+ Task</button></td></tr>')) + '</div></section>';
+  wkAct('#cs-add', async () => {
+    if (!wkVal('cs-client') || !wkVal('cs-svc')) throw new Error('Choose the client and the service.');
+    await api('/techdeva/work/client-services', {method:'POST', body: JSON.stringify({client_tenant_id: wkVal('cs-client'), catalog_id: wkVal('cs-svc'), price: wkVal('cs-price'), started_on: wkVal('cs-start')})});
+    wkFresh();
+  });
+  setTimeout(() => document.querySelectorAll('[data-csst]').forEach(s => s.onchange = async () => {
+    try { await api('/techdeva/work/client-services/' + s.getAttribute('data-csst'), {method:'PUT', body: JSON.stringify({status: s.value})}); wkFresh(); }
+    catch (e) { alert(e.message); }
+  }), 0);
+  wkAct('[data-cstask]', async b => { W.newTaskCs = b.getAttribute('data-cstask'); location.hash = '#/work'; });
+  return out;
+};
+
+VIEWS.work = function(){
+  const t = wkGet('tasks', '/techdeva/work/tasks'), cs = wkGet('cs', '/techdeva/work/client-services'), team = wkGet('team', '/techdeva/work/team');
+  if (!t || !cs || !team) return '<div class="empty">Loading...</div>';
+  if (t.error || cs.error || team.error) return '<div class="empty">' + esc(t.error || cs.error || team.error) + '</div>';
+  if (!t.home) return wkNoHome();
+  const today = new Date().toISOString().slice(0, 10);
+  let out = '<section><div class="card" style="margin-bottom:16px"><div class="k-label">New task</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
+    '<input id="tk-title" placeholder="e.g. Set up WhatsApp agent" ' + wkInput + ' style="flex:2;min-width:220px">' +
+    '<select id="tk-cs" ' + wkInput + '><option value="">Client service (optional)...</option>' +
+      cs.items.filter(i => i.status !== 'ended').map(i => '<option value="' + esc(i.id) + '"' + (W.newTaskCs === i.id ? ' selected' : '') + '>' + esc(i.client_name + ' — ' + i.service_name) + '</option>').join('') + '</select>' +
+    '<select id="tk-who" ' + wkInput + '><option value="">Give to...</option>' + team.team.map(p => '<option value="' + esc(p.id) + '">' + esc(p.name || p.email) + '</option>').join('') + '</select>' +
+    '<input id="tk-due" type="date" ' + wkInput + '><button class="primary" id="tk-add">Add task</button></div></div>';
+  const col = (st, label) => {
+    let list = t.tasks.filter(x => x.status === st);
+    if (st === 'done') list = list.slice(0, 20);
+    return '<div class="card" style="min-width:0"><div class="k-label">' + label + ' (' + t.tasks.filter(x => x.status === st).length + ')</div>' +
+      (list.length ? list.map(x => {
+        const late = x.due_on && x.status !== 'done' && String(x.due_on).slice(0, 10) < today;
+        return '<div style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:10px">' +
+          '<div style="font-weight:600">' + esc(x.title) + '</div>' +
+          '<div class="k-note">' + esc(x.client_name || 'TechDeva') + ' · ' + esc(x.assignee_name || 'nobody yet') +
+          (x.due_on ? ' · <span class="' + (late ? 'bad' : '') + '">due ' + esc(String(x.due_on).slice(0, 10)) + '</span>' : '') + '</div>' +
+          '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">' +
+          (st !== 'todo' ? '<button data-tkmv="' + esc(x.id) + '" data-to="' + (st === 'done' ? 'doing' : 'todo') + '">←</button>' : '') +
+          (st !== 'done' ? '<button class="primary" data-tkmv="' + esc(x.id) + '" data-to="' + (st === 'todo' ? 'doing' : 'done') + '">' + (st === 'todo' ? 'Start' : 'Done') + '</button>' : '') +
+          '<button data-tkdel="' + esc(x.id) + '">Delete</button></div></div>';
+      }).join('') : '<div class="k-note" style="margin-top:10px">Nothing here.</div>') + '</div>';
+  };
+  out += '<div class="grid" style="margin-top:0">' + col('todo', 'To do') + col('doing', 'Doing') + col('done', 'Done') + '</div>' +
+    '<div class="k-note" style="margin-top:10px">Your team sees these under <b>Client work</b> in TechDeva\'s dashboard and can move the ones given to them.</div></section>';
+  wkAct('#tk-add', async () => {
+    if (!wkVal('tk-title')) throw new Error('Write the task.');
+    await api('/techdeva/work/tasks', {method:'POST', body: JSON.stringify({title: wkVal('tk-title'), client_service_id: wkVal('tk-cs'), assignee_user_id: wkVal('tk-who'), due_on: wkVal('tk-due')})});
+    W.newTaskCs = null; wkFresh();
+  });
+  wkAct('[data-tkmv]', async b => { await api('/techdeva/work/tasks/' + b.getAttribute('data-tkmv'), {method:'PUT', body: JSON.stringify({status: b.getAttribute('data-to')})}); wkFresh(); });
+  wkAct('[data-tkdel]', async b => {
+    if (!confirm('Delete this task?')) { b.disabled = false; return; }
+    await api('/techdeva/work/tasks/' + b.getAttribute('data-tkdel'), {method:'DELETE'}); wkFresh();
+  });
+  return out;
+};
 </script></body></html>
