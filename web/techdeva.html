@@ -913,16 +913,54 @@ VIEWS.team = function(){
     });
     return out;
   }
-  out += '<div class="k-label">TechDeva\'s own business</div><div style="font-size:18px;font-weight:700;margin:4px 0">' + esc(h.home.name) + '</div>' +
-    '<div class="k-note">Your team works here with their own PIN and limited rights. To add someone: log in to this business as its owner, ' +
-    'open <b>Team → Team logins</b>, add the person as <b>Staff</b> (or Manager) and give them a PIN.</div></div>';
+  out += '<div class="k-label">TechDeva\'s own business</div><div style="font-size:18px;font-weight:700;margin:4px 0">' + esc(h.home.name) + '</div>';
   const t = wkGet('team', '/techdeva/work/team');
-  if (!t) return out + '<div class="empty">Loading the team...</div></section>';
-  if (t.error) return out + '<div class="empty">' + esc(t.error) + '</div></section>';
-  out += '<div class="card">' + tbl('<th>Name</th><th>Access</th><th>Job</th><th>PIN</th><th>Last login</th><th>Open tasks</th>',
-    t.team.map(p => '<tr><td>' + esc(p.name || p.email) + '</td><td><span class="pill">' + (p.role === 'owner' ? 'Owner / manager' : 'Staff') + '</span></td><td>' +
-      esc(p.job || '-') + '</td><td>' + (p.has_pin ? '<span class="good">set</span>' : '<span class="dim">no</span>') + '</td><td>' + when(p.last_login_at) +
-      '</td><td>' + (p.open_tasks ? '<a href="#/work" style="color:var(--gold)">' + p.open_tasks + '</a>' : '0') + '</td></tr>')) + '</div></section>';
+  if (!t) return out + '</div><div class="empty">Loading the team...</div></section>';
+  if (t.error) return out + '</div><div class="empty">' + esc(t.error) + '</div></section>';
+  out += '<div class="k-note">Employees with a PIN log in on their phone at <b>' + esc(location.origin) + '/pin</b> with business code <b style="color:var(--gold);letter-spacing:2px">' +
+    esc(t.code || '') + '</b> and their PIN. They see the tasks you give them under <b>Client work</b>. Staff access has no money pages.</div></div>';
+  const ed = W.empEdit ? (t.employees || []).find(e => e.id === W.empEdit) : null;
+  const v = k => esc(ed && ed[k] != null ? String(ed[k]).slice(0, k === 'joining_date' ? 10 : 200) : '');
+  out += '<div class="card" style="margin-bottom:16px"><div class="k-label">' + (ed ? 'Edit ' + esc(ed.name) : 'Add an employee') + '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
+    '<input id="em-name" placeholder="Full name" value="' + v('name') + '" ' + wkInput + ' style="flex:1;min-width:170px">' +
+    '<input id="em-job" placeholder="Job, e.g. Sales, Designer" value="' + v('job') + '" ' + wkInput + ' style="flex:1;min-width:170px">' +
+    '<input id="em-phone" placeholder="Phone / WhatsApp" value="' + v('phone') + '" ' + wkInput + ' style="width:170px">' +
+    '<input id="em-email" placeholder="Email (optional)" value="' + v('email') + '" ' + wkInput + ' style="width:200px">' +
+    '<label class="k-note" style="display:flex;flex-direction:column;gap:2px">Joining date<input id="em-join" type="date" value="' + v('joining_date') + '" ' + wkInput + '></label></div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center">' +
+    '<input id="em-pin" inputmode="numeric" maxlength="6" placeholder="' + (ed && ed.has_pin ? 'New PIN (empty = keep)' : 'PIN 4-6 digits (optional)') + '" ' + wkInput + ' style="width:200px">' +
+    '<select id="em-access" ' + wkInput + '><option value="staff"' + (ed && ed.access === 'full' ? '' : ' selected') + '>Staff: tasks and daily work, no money</option>' +
+    '<option value="full"' + (ed && ed.access === 'full' ? ' selected' : '') + '>Full: everything, including money</option></select>' +
+    '<button class="primary" id="em-save">' + (ed ? 'Save changes' : 'Add employee') + '</button>' + (ed ? ' <button id="em-cancel">Cancel</button>' : '') + '</div>' +
+    '<div class="k-note" style="margin-top:6px">Give a PIN if they should log in and get tasks. Tell them the PIN yourself; easy PINs like 1234 are refused.</div></div>';
+  const emps = t.employees || [];
+  out += '<div class="card">' + tbl('<th>Employee</th><th>Job</th><th>Phone</th><th>Joined</th><th>Login</th><th>Open tasks</th><th></th>',
+    emps.map(e => '<tr' + (e.active ? '' : ' style="opacity:.55"') + '><td><b>' + esc(e.name) + '</b>' + (e.email ? '<div class="k-note">' + esc(e.email) + '</div>' : '') + '</td><td>' + esc(e.job || '-') +
+      '</td><td>' + esc(e.phone || '-') + '</td><td>' + esc(e.joining_date ? String(e.joining_date).slice(0, 10) : '-') + '</td><td>' +
+      (!e.active ? '<span class="dim">left</span>' : e.has_pin ? '<span class="good">PIN · ' + (e.access === 'full' ? 'full' : 'staff') + '</span>' : '<span class="dim">no login</span>') +
+      '</td><td>' + (e.open_tasks ? '<a href="#/work" style="color:var(--gold)">' + e.open_tasks + '</a>' : '0') + '</td><td style="white-space:nowrap">' +
+      (e.active ? '<button data-emedit="' + esc(e.id) + '">Edit</button> ' + (e.has_pin ? '<button data-emnopin="' + esc(e.id) + '">Remove PIN</button> ' : '') +
+        '<button data-emleft="' + esc(e.id) + '">Left</button>' : '<button data-emback="' + esc(e.id) + '">Rejoined</button>') + '</td></tr>')) + '</div>';
+  const others = (t.team || []).filter(u => !emps.some(e => String(e.user_id) === String(u.id)));
+  if (others.length) out += '<div class="card" style="margin-top:16px"><div class="k-label">Other logins to this business</div>' +
+    others.map(u => '<div class="k-note" style="margin-top:6px">' + esc(u.name || u.email) + ' · ' + (u.role === 'owner' ? 'owner' : 'staff') + '</div>').join('') + '</div>';
+  out += '</section>';
+  wkAct('#em-save', async () => {
+    const body = {name: wkVal('em-name'), job: wkVal('em-job'), phone: wkVal('em-phone'), email: wkVal('em-email'), joining_date: wkVal('em-join'), access: wkVal('em-access')};
+    if (!body.name) throw new Error('Write the employee\'s name.');
+    if (wkVal('em-pin')) body.pin = wkVal('em-pin');
+    if (ed) await api('/techdeva/work/employees/' + ed.id, {method:'PUT', body: JSON.stringify(body)});
+    else await api('/techdeva/work/employees', {method:'POST', body: JSON.stringify(body)});
+    alert(body.name + (ed ? ' saved.' : ' added.') + (body.pin ? ' They can log in with their PIN now.' : ''));
+    W.empEdit = null; wkFresh();
+  });
+  wkAct('#em-cancel', async () => { W.empEdit = null; paint(); });
+  wkAct('[data-emedit]', async b => { W.empEdit = b.getAttribute('data-emedit'); paint(); window.scrollTo(0, 0); });
+  const put = (id, body) => api('/techdeva/work/employees/' + id, {method:'PUT', body: JSON.stringify(body)}).then(wkFresh);
+  wkAct('[data-emnopin]', async b => { if (!confirm('Remove this PIN? They can no longer log in.')) { b.disabled = false; return; } await put(b.getAttribute('data-emnopin'), {remove_pin: true}); });
+  wkAct('[data-emleft]', async b => { if (!confirm('Mark as left? Their PIN stops working; their history stays.')) { b.disabled = false; return; } await put(b.getAttribute('data-emleft'), {active: false}); });
+  wkAct('[data-emback]', async b => { await put(b.getAttribute('data-emback'), {active: true}); });
   return out;
 };
 
@@ -1004,7 +1042,7 @@ VIEWS.work = function(){
     '<input id="tk-title" placeholder="e.g. Set up WhatsApp agent" ' + wkInput + ' style="flex:2;min-width:220px">' +
     '<select id="tk-cs" ' + wkInput + '><option value="">Client service (optional)...</option>' +
       cs.items.filter(i => i.status !== 'ended').map(i => '<option value="' + esc(i.id) + '"' + (W.newTaskCs === i.id ? ' selected' : '') + '>' + esc(i.client_name + ' — ' + i.service_name) + '</option>').join('') + '</select>' +
-    '<select id="tk-who" ' + wkInput + '><option value="">Give to...</option>' + team.team.map(p => '<option value="' + esc(p.id) + '">' + esc(p.name || p.email) + '</option>').join('') + '</select>' +
+    '<select id="tk-who" ' + wkInput + '><option value="">Give to...</option>' + team.team.filter(p => p.has_pin || !/@pin\.invalid$/.test(p.email || '')).map(p => '<option value="' + esc(p.id) + '">' + esc(p.name || p.email) + '</option>').join('') + '</select>' +
     '<input id="tk-due" type="date" ' + wkInput + '><button class="primary" id="tk-add">Add task</button></div></div>';
   const col = (st, label) => {
     let list = t.tasks.filter(x => x.status === st);

@@ -778,6 +778,11 @@ def phase14(ctx):
         s2, _ = call(O, "GET", path)
         check("A19", "founder reads %s, a client is refused" % path.rsplit("/", 1)[1], ok and s2 == 403,
               "founder HTTP %s, client HTTP %s" % (s, s2))
+    s, r = call(adm, "GET", "/techdeva/work/team")
+    check("A19", "founder sees the employee list", s == 200 and "employees" in r,
+          "HTTP %s employees=%s" % (s, len(r.get("employees") or []) if isinstance(r, dict) else "-"))
+    s, r = call(O, "POST", "/techdeva/work/employees", {"name": "live check"})
+    check("A19", "a client cannot add employees to TechDeva", s == 403, "HTTP %s" % s)
     s, r = call(O, "PUT", "/techdeva/work/home", {"tenant_id": ctx["qa"]})
     check("A19", "a client cannot make itself TechDeva's business", s == 403, "HTTP %s" % s)
     qa_is_home = str(home.get("id") or "") == str(ctx["qa"])

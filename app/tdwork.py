@@ -15,12 +15,14 @@ catalogue has rows (the catalogue is seeded when the home is chosen).
 """
 import datetime as _dt
 import json
+import uuid
 
 from fastapi import APIRouter, Body, Cookie, Header, HTTPException
 
 from .audit import record
-from .auth import AuthError, SESSION_COOKIE, resolve_scope
+from .auth import AuthError, SESSION_COOKIE, hash_password, resolve_scope
 from .db import tenant_session
+from .pins import ACCESS as PIN_ACCESS, _code, _pin_taken, check_pin
 
 HOME_KEY = "home_tenant_id"
 STATUSES = ("todo", "doing", "done")
@@ -176,7 +178,112 @@ def make_tdwork_router():
                              FROM users u LEFT JOIN staff s ON s.id = u.staff_id
                             WHERE u.tenant_id = %s ORDER BY u.role, 2""", (h["id"],))
             rows = [dict(r) for r in cur.fetchall()]
-        return {"home": dict(h), "team": rows}
+            cur.execute("""SELECT s.id, s.name, coalesce(s.role, '') AS job, coalesce(s.phone, '') AS phone,
+                                  coalesce(s.email, '') AS email, s.joining_date, s.active,
+                                  u.id AS user_id, u.role::text AS access, (u.pin_hash IS NOT NULL) AS has_pin,
+                                  (SELECT count(*) FROM td_tasks t WHERE t.assignee_user_id = u.id
+                                    AND t.status <> 'done') AS open_tasks
+                             FROM staff s LEFT JOIN users u ON u.staff_id = s.id
+                            WHERE s.tenant_id = %s ORDER BY s.active DESC, s.name""", (h["id"],))
+            emps = [dict(r) for r in cur.fetchall()]
+            code = _code(cur, h["id"])
+        for e in emps:
+            e["access"] = "full" if e["access"] == "owner" else ("staff" if e["access"] else None)
+        return {"home": dict(h), "team": rows, "employees": emps, "code": code}
+
+    # ---------------------------------------------------------------- employees
+    def _emp_fields(body):
+        f = {}
+        for k, col, n in (("name", "name", 80), ("job", "role", 80), ("phone", "phone", 30), ("email", "email", 120)):
+            if k in body:
+                f[col] = _text(body.get(k), n, k.capitalize(), required=(k == "name")) or None
+        if "joining_date" in body:
+            f["joining_date"] = _date(body.get("joining_date"), "Joining date")
+        return f
+
+    def _give_pin(cur, home_id, staff_id, name, pin, access, uid):
+        """Create or change the employee's PIN login in TechDeva's business."""
+        pin = check_pin(pin)
+        access = str(access or "staff")
+        if access not in PIN_ACCESS:
+            raise HTTPException(400, "Access must be staff or full.")
+        cur.execute("SELECT id FROM users WHERE staff_id = %s AND tenant_id = %s", (staff_id, home_id))
+        u = cur.fetchone()
+        if _pin_taken(cur, home_id, pin, except_user=u["id"] if u else None):
+            raise HTTPException(409, "Someone in the team already uses that PIN. Choose another.")
+        if u:
+            cur.execute("UPDATE users SET pin_hash = %s, pin_set_at = now(), role = %s WHERE id = %s",
+                        (hash_password(pin * 2), PIN_ACCESS[access], u["id"]))
+            return str(u["id"])
+        new_id = uuid.uuid4()
+        cur.execute("""INSERT INTO users (id, tenant_id, name, email, role, pin_hash, pin_set_at, staff_id)
+                       VALUES (%s, %s, %s, %s, %s, %s, now(), %s)""",
+                    (str(new_id), home_id, name, "pin+%s@pin.invalid" % new_id, PIN_ACCESS[access],
+                     hash_password(pin * 2), staff_id))
+        return str(new_id)
+
+    @router.post("/techdeva/work/employees")
+    def add_employee(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                     authorization: str | None = Header(None),
+                     td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Add an employee to TechDeva's own business, optionally with a PIN login."""
+        uid = _admin(x_tenant_id, x_role, authorization, td_session)
+        f = _emp_fields(body)
+        if not f.get("name"):
+            raise HTTPException(400, "Name is needed.")
+        with tenant_session(None, "techdeva_admin") as cur:
+            h = _need_home(cur)
+            cols = ["tenant_id"] + list(f)
+            cur.execute("INSERT INTO staff (%s) VALUES (%s) RETURNING id" % (", ".join(cols), ", ".join(["%s"] * len(cols))),
+                        [h["id"]] + list(f.values()))
+            sid = str(cur.fetchone()["id"])
+            login = None
+            if str(body.get("pin") or "").strip():
+                login = _give_pin(cur, h["id"], sid, f["name"], body.get("pin"), body.get("access"), uid)
+            _rec(cur, action="techdeva.employee_add", resource="staff", resource_id=sid, actor=str(uid),
+                 actor_type="human", status="ok",
+                 detail={"name": f["name"], "job": f.get("role"), "pin_login": bool(login),
+                         "access": (body.get("access") or "staff") if login else None}, error=None)
+        return {"id": sid, "user_id": login}
+
+    @router.put("/techdeva/work/employees/{staff_id}")
+    def edit_employee(staff_id: str, body: dict = Body(...), x_tenant_id: str | None = Header(None),
+                      x_role: str | None = Header(None), authorization: str | None = Header(None),
+                      td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Edit details, give or change the PIN, remove the PIN, or mark as left
+        (which also stops their PIN working; their history stays)."""
+        uid = _admin(x_tenant_id, x_role, authorization, td_session)
+        f = _emp_fields(body)
+        if "active" in body:
+            f["active"] = bool(body.get("active"))
+        with tenant_session(None, "techdeva_admin") as cur:
+            h = _need_home(cur)
+            cur.execute("SELECT id, name FROM staff WHERE id::text = %s AND tenant_id = %s", (staff_id, h["id"]))
+            st = cur.fetchone()
+            if not st:
+                raise HTTPException(404, "That employee is not in TechDeva's business.")
+            if f:
+                cur.execute("UPDATE staff SET %s, updated_at = now() WHERE id = %%s" % ", ".join("%s = %%s" % k for k in f),
+                            list(f.values()) + [st["id"]])
+            name = f.get("name") or st["name"]
+            if f.get("name"):
+                cur.execute("UPDATE users SET name = %s WHERE staff_id = %s AND tenant_id = %s", (name, st["id"], h["id"]))
+            if str(body.get("pin") or "").strip():
+                _give_pin(cur, h["id"], str(st["id"]), name, body.get("pin"), body.get("access"), uid)
+            elif body.get("access") in PIN_ACCESS:
+                cur.execute("UPDATE users SET role = %s WHERE staff_id = %s AND tenant_id = %s",
+                            (PIN_ACCESS[body["access"]], st["id"], h["id"]))
+            if body.get("remove_pin") or f.get("active") is False:
+                cur.execute("UPDATE users SET pin_hash = NULL, pin_set_at = now() WHERE staff_id = %s AND tenant_id = %s",
+                            (st["id"], h["id"]))
+            detail = {k: v for k, v in f.items()}
+            detail.update({"name": name, "pin_changed": bool(str(body.get("pin") or "").strip()),
+                           "pin_removed": bool(body.get("remove_pin") or f.get("active") is False)})
+            if body.get("access") in PIN_ACCESS:
+                detail["access"] = body["access"]
+            _rec(cur, action="techdeva.employee_edit", resource="staff", resource_id=staff_id, actor=str(uid),
+                 actor_type="human", status="ok", detail=detail, error=None)
+        return {"ok": True}
 
     # ---------------------------------------------------------------- catalogue
     @router.get("/techdeva/work/catalog")
