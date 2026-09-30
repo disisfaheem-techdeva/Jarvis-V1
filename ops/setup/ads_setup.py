@@ -14,9 +14,9 @@ Where each value comes from (Google Cloud console, project "TechDeva"):
       -> Web application; Authorised redirect URI:
          https://api.techdeva.net/oauth/google/callback
   GOOGLE_ADS_DEVELOPER_TOKEN
-      ads.google.com with TechDeva's MANAGER account -> Tools -> API Center.
-      Optional now: without it, clients can still connect Google; ad results
-      appear once the token is approved.
+      Optional. Since Sept 2026 Google grants Google Ads API access per Cloud
+      project (Cloud Console -> Google Ads API -> access level), so leave it
+      empty unless Google asks for one.
   GOOGLE_ADS_LOGIN_CUSTOMER_ID
       TechDeva's manager account id (123-456-7890). Only needed when client
       ad accounts are reached through TechDeva's manager account.
@@ -44,7 +44,7 @@ def main():
     if not cid.endswith(".apps.googleusercontent.com"):
         sys.exit("That does not look like a Google OAuth client ID; nothing changed.")
     sec = ask("Google OAuth client secret", secret=True)
-    dev = ask("Google Ads developer token (Enter to skip for now)", secret=True, required=False)
+    dev = ask("Google Ads developer token (Enter to skip: Google now grants access per Cloud project)", secret=True, required=False)
     mcc = "".join(c for c in ask("TechDeva manager account id, 123-456-7890 (Enter to skip)", required=False) if c.isdigit())
     if mcc and len(mcc) != 10:
         sys.exit("A Google Ads account id has 10 digits; nothing changed.")
@@ -81,7 +81,7 @@ def main():
     time.sleep(8)
     code = ("from app import oauth, ads\n"
             "print('google sign-in:', 'ready' if oauth.GOOGLE_CLIENT_ID and oauth.GOOGLE_SECRET else 'MISSING')\n"
-            "print('google ads results:', 'ready' if ads.GADS_DEV_TOKEN else 'waiting for the developer token')\n"
+            "print('google ads results:', 'ready (access level comes from the Cloud project)' if oauth.GOOGLE_CLIENT_ID else 'MISSING')\n"
             "print('facebook & instagram:', 'ready' if oauth.META_APP_ID and oauth.META_APP_SECRET else 'MISSING')\n"
             "print('redirect for Google:', oauth.OAUTH_REDIRECT_BASE + '/oauth/google/callback')\n")
     r = subprocess.run(["docker", "compose", "exec", "-T", "api", "python", "-c", code],

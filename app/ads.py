@@ -168,10 +168,12 @@ def _google_token(cur, tid, row, creds):
 
 
 def _gads(method, path, token, json_body=None):
-    if not GADS_DEV_TOKEN:
-        raise AdsError("Google Ads reporting is not switched on yet (TechDeva's Google Ads developer token "
-                       "is still being approved). The Google login itself is saved.")
-    h = {"Authorization": "Bearer " + token, "developer-token": GADS_DEV_TOKEN}
+    # Google moved API access levels from the developer token to the Cloud
+    # project (Sept 2026). A token is sent only when one is configured; if
+    # Google still wants one, its own error message reaches the owner.
+    h = {"Authorization": "Bearer " + token}
+    if GADS_DEV_TOKEN:
+        h["developer-token"] = GADS_DEV_TOKEN
     if GADS_LOGIN_CID:
         h["login-customer-id"] = GADS_LOGIN_CID
     try:
@@ -296,7 +298,7 @@ def make_ads_router():
         meta["pages"] = pages
         return {"setup": {"facebook": bool(oauth.META_APP_ID and oauth.META_APP_SECRET),
                           "google": bool(oauth.GOOGLE_CLIENT_ID and oauth.GOOGLE_SECRET),
-                          "google_ads_reporting": bool(GADS_DEV_TOKEN)},
+                          "google_ads_reporting": bool(oauth.GOOGLE_CLIENT_ID and oauth.GOOGLE_SECRET)},
                 "meta": meta, "google": google}
 
     def _live_accounts(tid, role, provider):

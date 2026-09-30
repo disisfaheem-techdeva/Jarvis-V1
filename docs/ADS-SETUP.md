@@ -26,7 +26,7 @@ What every business gets on its dashboard, once TechDeva's side below is done:
    - **APIs & Services → Library:** enable the **Google Ads API**, and optionally the **My Business Business Information API**.
    - **OAuth consent screen:** External, app name TechDeva. Add your privacy and terms pages.
    - **Credentials → Create credentials → OAuth client ID → Web application.** Authorised redirect URI: `https://api.techdeva.net/oauth/google/callback`.
-2. **Get a developer token.** At ads.google.com, sign in with TechDeva's **manager (MCC)** account and go to **Tools → API Center**. Apply for the token and ask for **Basic access**; Google usually takes a few days. Clients can connect before it's approved; results appear once it is.
+2. **Access level.** Google moved Google Ads API access from the developer token to the Cloud project (Sept 2026). In Cloud Console, open **Google Ads API → access level** and request Explorer (enough to start) or Basic. Basic needs the project's brand verification first. A developer token is optional.
 3. **Enter the keys on the server:**
    ```
    cd /opt/techdeva-platform/techdeva-platform
