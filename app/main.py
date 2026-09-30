@@ -94,6 +94,8 @@ from .advisor import make_advisor_router
 app.include_router(make_advisor_router())
 from .adpilot import make_adpilot_router
 app.include_router(make_adpilot_router())
+from .retention import make_retention_router
+app.include_router(make_retention_router())
 trial.install(app)
 
 # The two client-facing pages. The API image is built from ./app, so web/ is

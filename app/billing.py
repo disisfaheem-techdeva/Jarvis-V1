@@ -12,12 +12,14 @@ account, and that account (and its keys) is TechDeva's decision to open.
 Owner-only on the client side: the business's bill is not staff business.
 Prices are never set here; they come from what the founder recorded.
 """
+import datetime as dt
+
 from fastapi import APIRouter, Body, Cookie, Header, HTTPException
 
 from .audit import record
 from .auth import AuthError, SESSION_COOKIE, resolve_scope
 from .db import tenant_session
-from . import trial
+from . import retention, trial
 
 CLIENT_SETTINGS = ("payment_instructions",)
 METHODS = ("bank", "jazzcash", "easypaisa", "cash", "other")
@@ -90,6 +92,11 @@ def make_billing_router():
             c["amount"] = float(c["amount"])
         t["locked"] = trial.locked(tid)
         t["trial_days"] = trial.TRIAL_DAYS
+        # an unpaid ended trial: the day its data is deleted (Faheem's rule)
+        with tenant_session(None, "techdeva_admin") as cur:
+            d = retention.deletes_on(cur, tid)
+        t["deletes_on"] = d.isoformat() if d else None
+        t["delete_warning"] = bool(d and (d - dt.datetime.now(dt.timezone.utc)).days < retention.WARN_DAYS)
         return {"account": t, "invoices": invoices, "claims": claims,
                 "payment_instructions": how,
                 "due": sum(i["amount"] for i in invoices if i["status"] == "sent")}

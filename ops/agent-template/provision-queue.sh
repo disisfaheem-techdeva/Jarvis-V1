@@ -40,6 +40,32 @@ report() {  # report <request id> <status> [error]
     || echo "$(now) could not report $2 for $1"
 }
 
+# Businesses deleted by the trial data rule (db/45): remove their WhatsApp
+# agents with remove-agent.sh, which refuses irfan / clinic / salon /
+# workspace* and anything the template did not make.
+removals=$(curl -fsS "$API/techdeva/retention/agent-removals" "${auth[@]}" 2>/dev/null || true)
+printf '%s' "$removals" | python3 -c '
+import json, re, sys
+try:
+    rows = json.load(sys.stdin).get("removals") or []
+except ValueError:
+    rows = []
+for r in rows:
+    keys = [k for k in r.get("agent_keys") or [] if re.match(r"^[a-z][a-z0-9-]{1,30}$", k)]
+    print("%s\t%s" % (r["id"], " ".join(keys)))
+' | while IFS=$'\t' read -r DID KEYS; do
+  [ -n "$DID" ] || continue
+  if [ $DRY = 1 ]; then echo "$(now) would remove agents [$KEYS] of a deleted business"; continue; fi
+  ok=true; err=""
+  for K in $KEYS; do
+    if out=$(bash "$HERE/remove-agent.sh" --key "$K" --yes 2>&1); then echo "$out"; else ok=false; err="$K: $(printf '%s' "$out" | tail -1)"; echo "$out"; fi
+  done
+  body=$(python3 -c 'import json,sys;print(json.dumps({"removed":sys.argv[1]=="true","error":sys.argv[2]}))' "$ok" "$err")
+  curl -fsS -X POST "$API/techdeva/retention/agent-removals/$DID" "${auth[@]}" -H 'Content-Type: application/json' -d "$body" >/dev/null \
+    || echo "$(now) could not report agent removal $DID"
+  echo "$(now) deleted business agents [$KEYS]: removed=$ok"
+done
+
 list=$(curl -fsS "$API/techdeva/agent-requests?status=approved" "${auth[@]}") || { echo "$(now) cannot read the queue"; exit 1; }
 job=$(printf '%s' "$list" | python3 -c '
 import json, re, sys

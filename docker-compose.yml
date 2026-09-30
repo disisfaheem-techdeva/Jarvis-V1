@@ -128,6 +128,12 @@ services:
       GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${GOOGLE_ADS_LOGIN_CUSTOMER_ID:-}
       GOOGLE_ADS_API_VERSION: ${GOOGLE_ADS_API_VERSION:-v21}
       OAUTH_REDIRECT_BASE: ${OAUTH_REDIRECT_BASE:-http://localhost:8000}
+      # --- trial data deletion: the 3-day warning email (only when set) ---
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
       # --- generation (Build 3): provider is configurable, never hard-coded ---
       AI_PROVIDER: ${AI_PROVIDER:-anthropic}
       AI_MODEL: ${AI_MODEL:-}

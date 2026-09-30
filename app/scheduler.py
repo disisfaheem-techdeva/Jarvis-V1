@@ -69,6 +69,14 @@ class Scheduler:
         except Exception as e:
             print(f"[scheduler] ad autopilot skipped: {e}", flush=True)
 
+        # Trial data retention: warn 3 days before, delete unpaid trials 15 days
+        # after the trial ended (hourly inside).
+        try:
+            from .retention import run_due as retention_due
+            emitted += retention_due()
+        except Exception as e:
+            print(f"[scheduler] trial data retention skipped: {e}", flush=True)
+
         # Oversight: ask the Optimizer (13) to review performance on a cadence.
         # It only ever PROPOSES; the human approval gate is unchanged. Guarded by
         # hasattr so a persistence layer without the helper simply skips this.

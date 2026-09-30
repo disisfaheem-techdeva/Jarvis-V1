@@ -4938,7 +4938,10 @@ function lockScreen(){
       '<h1>Your free trial has ended</h1>' +
       '<p class="sub">' + esc(name) + ': your ' + esc((a.trial_days || 7) + '-day') + ' free trial' +
       (a.trial_ends_at ? ' ended on ' + esc(bilDate(a.trial_ends_at)) : ' has ended') + '. ' +
-      'Pay to unlock your dashboard. Your data is safe, and your WhatsApp agent is still answering your customers.</p>';
+      'Pay to unlock your dashboard.' + (a.deletes_on ? '' : ' Your WhatsApp agent is still answering your customers.') + '</p>' +
+      (a.deletes_on ? '<div class="lock-sec" style="border:1px solid ' + (a.delete_warning ? 'var(--danger)' : 'var(--line)') + ';border-radius:10px;padding:12px">' +
+        '<b style="color:' + (a.delete_warning ? 'var(--danger)' : 'inherit') + '">' + (a.delete_warning ? 'Your data will be deleted on ' : 'Your data is kept until ') + esc(bilDate(a.deletes_on)) + '.</b>' +
+        '<div class="sub" style="margin-top:4px">If your plan is not paid by then, everything is deleted for good: customers, bookings, invoices and your WhatsApp agent. Pay before then to keep it all.</div></div>' : '');
     if (!own) {
       h += '<p class="sub">Please ask the business owner to pay. The dashboard unlocks for everyone as soon as TechDeva receives it (usually within 2 hours).</p>';
     } else {

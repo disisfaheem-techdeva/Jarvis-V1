@@ -227,7 +227,7 @@ async function load(){
     api('/plans').catch(() => null),
     api('/techdeva/connections').catch(() => null)
   ]);
-  D = {book, health, ops, ai, inc, over, invoices, agents, claims, resets, plans, conns, usage: D.usage};
+  D = {book, health, ops, ai, inc, over, invoices, agents, claims, resets, plans, conns, usage: D.usage, ret: D.ret};
   // conversation counts ask every agent, so they arrive after the page
   api('/techdeva/usage').then(u => { D.usage = u; if (current() === 'clients' || current() === 'overview') paint(); }).catch(() => {});
   renderNav(); paint();
@@ -1072,6 +1072,62 @@ VIEWS.work = function(){
     if (!confirm('Delete this task?')) { b.disabled = false; return; }
     await api('/techdeva/work/tasks/' + b.getAttribute('data-tkdel'), {method:'DELETE'}); wkFresh();
   });
+  return out;
+};
+
+/* ======================================================== Part 21: trial data + server alert
+   Faheem's rules: only paying clients' data is kept (unpaid trials are deleted
+   15 days after the trial ended, owner warned 3 days before; "Keep" stops it),
+   and at 8 paying clients the console says it is time for a second server. */
+NAV.forEach(g => { if (g[0] === 'PLATFORM' && !g[1].some(x => x[0] === 'trialdata')) g[1].push(['trialdata', 'Trial data & server']); });
+TITLES.trialdata = ['Trial data & server', 'Unpaid trials are deleted 15 days after the trial ends. Paying clients against server room.'];
+function retLoad(){ api('/techdeva/retention').then(r => { D.ret = r; paint(); }).catch(() => {}); }
+setTimeout(retLoad, 500);
+setInterval(retLoad, 10 * 60 * 1000);
+function serverBanner(){
+  const r = D.ret;
+  if (!r || !r.server_alert) return '';
+  return '<div class="card" style="border:1px solid var(--gold);margin-bottom:16px"><div class="k-label" style="color:var(--gold)">Time to buy a new server</div>' +
+    '<div style="margin:6px 0">You have <b>' + r.paying + ' paying client' + (r.paying === 1 ? '' : 's') + '</b> (alert at ' + r.server_alert_at + '). This server fits about 6 more busy WhatsApp agents.</div>' +
+    '<div class="k-note">Buy a 16 GB VPS for client agents (holds about 35–40 busy clients) and tell Claude when it is ready, so new agents go there and the clinic stays alone on this server. ' +
+    '<a href="#/trialdata" style="color:var(--gold)">Details</a></div></div>';
+}
+const _overviewBeforeRet = VIEWS.overview;
+VIEWS.overview = function(){ return serverBanner() + _overviewBeforeRet.apply(this, arguments); };
+VIEWS.trialdata = function(){
+  const r = D.ret;
+  if (!r) { retLoad(); return '<div class="empty">Loading...</div>'; }
+  const day = s => s ? new Date(s).toLocaleDateString([], {day: 'numeric', month: 'short', year: 'numeric'}) : '-';
+  let out = serverBanner() + '<section><div class="grid" style="margin-top:0;margin-bottom:16px">' +
+    kpi('Paying clients', r.paying, 'marked paying, not test, not TechDeva') +
+    kpi('New server at', r.server_alert_at, 'paying clients') +
+    kpi('Trials to be deleted', r.upcoming.filter(u => !u.hold).length, 'unpaid, trial ended') + '</div>';
+  out += '<div class="card" style="margin-bottom:16px"><div class="k-label">Alert me to buy a new server at</div><div style="display:flex;gap:8px;margin-top:8px">' +
+    '<input id="ret-at" type="number" min="1" value="' + esc(r.server_alert_at) + '" style="background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;width:100px">' +
+    '<button class="primary" id="ret-at-save">Save</button><span class="k-note" style="align-self:center">paying clients</span></div></div>';
+  out += '<div class="card" style="margin-bottom:16px"><div class="k-label">Unpaid trials: data deleted ' + r.grace_days + ' days after the trial ends</div>' +
+    '<div class="k-note" style="margin:4px 0 10px">The owner sees the date on their locked dashboard, and is warned ' + r.warn_days + ' days before (plus an email if the server can send email). Keep = never delete while kept.</div>' +
+    tbl('<th>Business</th><th>Trial ended</th><th>Deleted on</th><th>Days left</th><th>Warned</th><th></th>',
+      r.upcoming.map(u => '<tr' + (u.hold ? ' style="opacity:.6"' : '') + '><td><b>' + esc(u.name) + '</b></td><td>' + day(u.trial_ends_at) + '</td><td>' +
+        (u.hold ? '<span class="dim">kept</span>' : '<span class="' + (u.days_left <= r.warn_days ? 'bad' : '') + '">' + day(u.deletes_on) + '</span>') + '</td><td>' +
+        (u.hold ? '-' : u.days_left) + '</td><td>' + (u.warned_at ? day(u.warned_at) + (u.emailed ? ' (email)' : '') : '<span class="dim">not yet</span>') + '</td><td>' +
+        '<button data-rethold="' + esc(u.id) + '" data-on="' + (u.hold ? '' : '1') + '">' + (u.hold ? 'Stop keeping' : 'Keep') + '</button></td></tr>')) + '</div>';
+  out += '<div class="card"><div class="k-label">Deleted</div>' + tbl('<th>Business</th><th>Trial ended</th><th>Deleted</th><th>Rows</th><th>WhatsApp agent</th>',
+    r.deleted.map(x => '<tr><td>' + esc(x.business_name) + '</td><td>' + day(x.trial_ended_at) + '</td><td>' + day(x.deleted_at) + '</td><td>' +
+      Object.values(x.rows_deleted || {}).reduce((a, b) => a + b, 0) + '</td><td>' +
+      (!(x.agent_keys || []).length ? '<span class="dim">none</span>' : x.agents_removed_at ? '<span class="good">removed</span>' :
+        '<span class="bad">' + (x.agent_error ? esc(x.agent_error) : 'waiting for the server job') + '</span><div class="k-note">' + esc(x.agent_keys.join(', ')) + '</div>') + '</td></tr>')) + '</div></section>';
+  setTimeout(() => {
+    const s = document.getElementById('ret-at-save');
+    if (s) s.onclick = async () => { s.disabled = true; try { await api('/techdeva/retention-settings', {method: 'PUT', body: JSON.stringify({server_alert_at: document.getElementById('ret-at').value})}); retLoad(); } catch (e) { alert(e.message); s.disabled = false; } };
+    document.querySelectorAll('[data-rethold]').forEach(b => b.onclick = async () => {
+      const on = !!b.getAttribute('data-on');
+      if (!on && !confirm('Stop keeping this business? Its data will be deleted on its deletion day if it has not paid.')) return;
+      b.disabled = true;
+      try { await api('/techdeva/retention/' + b.getAttribute('data-rethold'), {method: 'PUT', body: JSON.stringify({hold: on})}); retLoad(); }
+      catch (e) { alert(e.message); b.disabled = false; }
+    });
+  }, 0);
   return out;
 };
 </script></body></html>

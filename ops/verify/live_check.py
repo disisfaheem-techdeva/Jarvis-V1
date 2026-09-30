@@ -844,6 +844,32 @@ def phase16(ctx):
               "HTTP %s" % s2)
 
 
+def phase17(ctx):
+    """Trial data retention + server alert. Read-only: lists who would be
+    deleted and when, never deletes."""
+    O = ctx["owner"]
+    forced = sql("SELECT count(*) FROM pg_class WHERE relname IN ('data_retention','tenant_deletions') "
+                  "AND relrowsecurity AND relforcerowsecurity")
+    check("A22", "retention tables exist, founder-only", forced and forced[0][0] == "2",
+          "tables forced: %s" % (forced[0][0] if forced else "none"))
+    adm = token(None, "techdeva_admin", "live-check")
+    s, r = call(adm, "GET", "/techdeva/retention")
+    ok = s == 200 and all(k in r for k in ("upcoming", "deleted", "paying", "server_alert_at"))
+    check("A22", "founder sees upcoming deletions and paying clients", ok,
+          "HTTP %s paying=%s alert_at=%s" % (s, r.get("paying"), r.get("server_alert_at")) if isinstance(r, dict) else s)
+    s2, _ = call(O, "GET", "/techdeva/retention")
+    check("A22", "a business cannot see the deletion list", s2 == 403, "HTTP %s" % s2)
+    if ok:
+        ids = [u["id"] for u in r["upcoming"]]
+        bad = sql("SELECT name FROM tenants WHERE id::text IN (%s) AND (is_test OR status::text = 'active')"
+                  % (",".join("'%s'" % i for i in ids) or "''"))
+        check("A22", "no test or paying business is ever on the list", not bad, "found: %s" % bad if bad else "none")
+        for u in r["upcoming"]:
+            print("   %s: trial ended %s, %s" % (u["name"], str(u["trial_ends_at"])[:10],
+                                                  "KEPT" if u["hold"] else "deleted on %s (warned: %s)"
+                                                  % (str(u["deletes_on"])[:10], str(u["warned_at"] or "not yet")[:10])))
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)
