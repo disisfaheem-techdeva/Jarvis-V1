@@ -119,6 +119,15 @@ services:
       HERMES_TIMEOUT: ${HERMES_TIMEOUT:-8}
       HERMES_RETRIES: ${HERMES_RETRIES:-2}
       META_AD_LIBRARY_TOKEN: ${META_AD_LIBRARY_TOKEN:-}
+      # --- ad autopilot (growth planner): pauses and launches on its schedule ---
+      META_APP_ID: ${META_APP_ID:-}
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_SECRET: ${GOOGLE_SECRET:-}
+      GOOGLE_ADS_DEVELOPER_TOKEN: ${GOOGLE_ADS_DEVELOPER_TOKEN:-}
+      GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${GOOGLE_ADS_LOGIN_CUSTOMER_ID:-}
+      GOOGLE_ADS_API_VERSION: ${GOOGLE_ADS_API_VERSION:-v21}
+      OAUTH_REDIRECT_BASE: ${OAUTH_REDIRECT_BASE:-http://localhost:8000}
       # --- generation (Build 3): provider is configurable, never hard-coded ---
       AI_PROVIDER: ${AI_PROVIDER:-anthropic}
       AI_MODEL: ${AI_MODEL:-}

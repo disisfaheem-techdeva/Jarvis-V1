@@ -61,6 +61,14 @@ class Scheduler:
         except Exception as e:
             print(f"[scheduler] scheduled posts skipped: {e}", flush=True)
 
+        # Ad autopilot (growth planner): auto-pause over the owner's limit, and
+        # the weekly launch within the owner's daily cap. Throttled inside.
+        try:
+            from .adpilot import run_due as adpilot_due
+            emitted += adpilot_due()
+        except Exception as e:
+            print(f"[scheduler] ad autopilot skipped: {e}", flush=True)
+
         # Oversight: ask the Optimizer (13) to review performance on a cadence.
         # It only ever PROPOSES; the human approval gate is unchanged. Guarded by
         # hasattr so a persistence layer without the helper simply skips this.

@@ -6100,42 +6100,201 @@ VIEWS.clientwork = function(){
   var t = setInterval(function(){ if (S.me) { clearInterval(t); add(); } }, 500);
 })();
 
-/* ======================================================== Part 20: Growth advisor
-   Pro: up to 4 tips a week from the business's own numbers, each with the
-   figures behind it and one thing to do. Owner-only (it talks about money). */
+/* ======================================================== Part 20: Growth advisor + ad autopilot
+   Pro: up to 4 fixes and 3 next steps a week from the business's own numbers.
+   The ad autopilot (owner rules): pause a costly campaign (owner taps, or auto
+   over the owner's own limit), write campaigns (photo, headline, text,
+   hashtags, keywords) and launch them — by the owner, or by the planner only
+   within the owner's daily cap. Owner-only (it talks about money). */
+var ADV = { done: {}, edit: null };
 function advLoad(force){
   if (force) {
     var b = document.getElementById('adv_refresh'); if (b) b.disabled = true;
     return act('/advisor/refresh', { method: 'POST', body: {} }, 'Updated with the latest numbers.').then(function(r){
-      if (r.ok) { S.advisor = r.data; renderShell(); } else if (b) b.disabled = false;
+      if (r.ok) { S.advisor = r.data; ADV.done = {}; renderShell(); } else if (b) b.disabled = false;
     });
   }
   S.advisor = undefined; LOADING.advisor = false; need('advisor', '/advisor', true);
 }
+function pilotLoad(){ S.adpilot = undefined; LOADING.adpilot = false; need('adpilot', '/adpilot', true); }
+var AP_PROV = { meta: 'Facebook & Instagram', google: 'Google' };
+function apMoney(v){ return Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }); }
+function advTip(t, i){
+  var a = t.action, btn = '';
+  var done = ADV.done[t.key] || t.done;
+  if (done) btn = '<span class="tag" style="color:var(--growth)">' + esc(done) + '</span>';
+  else if (a && a.type === 'pause') btn = '<button class="btn" data-advpause="' + esc(t.key) + '">⏸ Pause this campaign</button>';
+  else if (a && a.type === 'create_campaign') btn = '<button class="btn primary" data-advcreate="' + esc(t.key) + '">✨ Write this campaign</button>';
+  else if (a && a.type === 'connect') btn = '<a class="btn" href="#/integrations">Connect ad accounts</a>';
+  return '<div style="padding:14px 16px;border-top:' + (i ? '1px solid var(--line)' : '0') + '">' +
+    '<div style="font-weight:700;margin-bottom:4px">' + esc(t.title) + '</div>' +
+    '<div class="card-note" style="margin-bottom:6px">' + esc(t.why) + '</div>' +
+    '<div>👉 ' + esc(t['do']) + '</div>' + (btn ? '<div style="margin-top:8px">' + btn + '</div>' : '') + '</div>';
+}
+function apDraft(d, p){
+  var m = (d.copy || {}).meta || {}, g = (d.copy || {}).google || {}, editing = ADV.edit === d.id;
+  var open = d.status === 'draft' || d.status === 'failed';
+  var tag = { draft: 'waiting for you', launched: 'live', paused: 'paused', failed: 'did not launch' }[d.status] || d.status;
+  var h = '<div style="padding:14px 16px;border-top:1px solid var(--line)">' +
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><b>' + esc(AP_PROV[d.provider]) + ' · ' + esc(d.service) + '</b>' +
+    '<span class="tag">' + esc(tag) + '</span><span class="card-note">' + apMoney(d.daily_budget) + ' a day' +
+    (d.created_by === 'planner' ? ' · written and launched by the planner' : '') + '</span></div>';
+  if (editing) {
+    if (d.provider === 'meta') {
+      h += '<div class="fld-grid" style="display:grid;gap:8px;max-width:640px">' +
+        '<label class="card-note">Headline (max 40)<input class="fld" id="apd_head" maxlength="40" value="' + esc(m.headline || '') + '"></label>' +
+        '<label class="card-note">Text (max 300)<textarea class="fld" id="apd_text" rows="3" maxlength="300">' + esc(m.primary_text || '') + '</textarea></label>' +
+        '<label class="card-note">Description (max 30)<input class="fld" id="apd_desc" maxlength="30" value="' + esc(m.description || '') + '"></label>' +
+        '<label class="card-note">Hashtags (space between)<input class="fld" id="apd_tags" value="' + esc((m.hashtags || []).map(function(x){ return '#' + x; }).join(' ')) + '"></label>' +
+        '<div class="card-note">Photo</div><div style="display:flex;gap:8px;flex-wrap:wrap">' +
+        (p.photos || []).map(function(u){ return '<label style="cursor:pointer"><input type="radio" name="apd_img" value="' + esc(u) + '"' + (u === d.image_url ? ' checked' : '') + '> <img src="' + esc(u) + '" style="width:72px;height:72px;object-fit:cover;border-radius:6px;vertical-align:middle"></label>'; }).join('') +
+        '</div>';
+    } else {
+      h += '<div style="display:grid;gap:8px;max-width:640px">' +
+        '<label class="card-note">Headlines, one per line (3 to 15, max 30 each)<textarea class="fld" id="apd_heads" rows="5">' + esc((g.headlines || []).join('\n')) + '</textarea></label>' +
+        '<label class="card-note">Descriptions, one per line (2 to 4, max 90 each)<textarea class="fld" id="apd_descs" rows="3">' + esc((g.descriptions || []).join('\n')) + '</textarea></label>' +
+        '<label class="card-note">Keywords, one per line<textarea class="fld" id="apd_keys" rows="4">' + esc((g.keywords || []).join('\n')) + '</textarea></label>';
+    }
+    h += '<label class="card-note">Daily budget<input class="fld" id="apd_budget" type="number" min="' + ((p.min_daily || {})[d.provider] || 300) + '" value="' + esc(d.daily_budget) + '" style="max-width:160px"></label></div>' +
+      '<div style="margin-top:10px;display:flex;gap:8px"><button class="btn primary" data-apsave="' + esc(d.id) + '">Save</button><button class="btn" data-apcancel="1">Cancel</button></div>';
+  } else if (d.provider === 'meta') {
+    h += '<div style="display:flex;gap:12px;flex-wrap:wrap">' + (d.image_url ? '<img src="' + esc(d.image_url) + '" style="width:110px;height:110px;object-fit:cover;border-radius:8px">' : '<div class="card-note">No photo yet: upload one on the Posts page.</div>') +
+      '<div style="flex:1;min-width:220px"><div style="font-weight:700">' + esc(m.headline || '') + '</div><div style="margin:4px 0;white-space:pre-wrap">' + esc(m.primary_text || '') + '</div>' +
+      '<div class="card-note">' + esc((m.hashtags || []).map(function(x){ return '#' + x; }).join(' ')) + '</div><div class="card-note">' + esc(m.description || '') + ' · button: WhatsApp</div></div></div>';
+  } else {
+    h += '<div style="font-weight:700">' + esc((g.headlines || []).slice(0, 3).join(' | ')) + '</div>' +
+      '<div class="card-note" style="margin:4px 0">' + esc((g.descriptions || []).join(' ')) + '</div>' +
+      '<div class="card-note">Keywords: ' + esc((g.keywords || []).join(', ')) + '</div>';
+  }
+  if (d.error) h += '<div class="card-note" style="color:var(--danger);margin-top:6px">' + esc(d.error) + '</div>';
+  if (!editing) {
+    var ext = d.external || {};
+    h += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
+      (open ? '<button class="btn primary" data-aplaunch="' + esc(d.id) + '" data-budget="' + esc(d.daily_budget) + '">🚀 Launch</button><button class="btn" data-apedit="' + esc(d.id) + '">Edit</button><button class="btn" data-apdiscard="' + esc(d.id) + '">Discard</button>' : '') +
+      (d.status === 'launched' && ext.campaign_id ? '<button class="btn" data-apstat="0" data-prov="' + esc(d.provider) + '" data-cid="' + esc(ext.campaign_id) + '" data-name="' + esc('TechDeva · ' + d.service) + '">⏸ Pause</button>' : '') +
+      (d.status === 'paused' && ext.campaign_id ? '<button class="btn" data-apstat="1" data-prov="' + esc(d.provider) + '" data-cid="' + esc(ext.campaign_id) + '" data-name="' + esc('TechDeva · ' + d.service) + '">▶ Turn back on</button>' : '') + '</div>';
+  }
+  return h + '</div>';
+}
+function apPanels(){
+  if (!need('adpilot', '/adpilot')) return panel('Ad autopilot', loading('Loading your ad settings...'));
+  var p = S.adpilot; if (!p) return '';
+  var s = p.settings || {}, con = p.connected || {};
+  var set = '<div style="padding:14px 16px">' +
+    '<div class="sub" style="margin-bottom:10px">Your rules for the planner. It never spends more than you allow here.</div>' +
+    '<label style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input type="checkbox" id="ap_auto"' + (s.auto_pause ? ' checked' : '') + '> <b>Auto-pause</b> any running campaign that costs more than</label>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px 24px"><input class="fld" id="ap_limit" type="number" min="1" placeholder="e.g. 800" value="' + esc(s.max_cost_per_result == null ? '' : s.max_cost_per_result) + '" style="max-width:130px"> per lead or chat, after it has spent at least <input class="fld" id="ap_min" type="number" min="0" value="' + esc(s.min_spend || 0) + '" style="max-width:110px"> in 7 days.</div>' +
+    '<div style="font-weight:600;margin:6px 0">Daily budget the planner may launch by itself</div>' +
+    '<div style="display:flex;gap:12px;flex-wrap:wrap"><label class="card-note">Facebook & Instagram per day<input class="fld" id="ap_mcap" type="number" min="0" value="' + esc(s.meta_daily_cap || 0) + '" style="max-width:150px"></label>' +
+    '<label class="card-note">Google per day<input class="fld" id="ap_gcap" type="number" min="0" value="' + esc(s.google_daily_cap || 0) + '" style="max-width:150px"></label></div>' +
+    '<div class="card-note" style="margin:4px 0 12px">0 = the planner never launches by itself; it only writes drafts for you. With a cap, it may launch one new campaign a week per platform, and all its campaigns together stay within the cap. In your ad account\'s currency.</div>' +
+    '<div style="display:flex;gap:12px;flex-wrap:wrap"><label class="card-note">Show ads in<select class="fld" id="ap_city"><option value="">the whole country</option>' + (p.cities || []).map(function(c){ return '<option value="' + esc(c) + '"' + (s.city === c ? ' selected' : '') + '>' + esc(c.charAt(0).toUpperCase() + c.slice(1)) + '</option>'; }).join('') + '</select></label>' +
+    '<label class="card-note">within km<input class="fld" id="ap_radius" type="number" min="1" max="80" value="' + esc(s.radius_km || 15) + '" style="max-width:90px"></label>' +
+    '<label class="card-note">Country<select class="fld" id="ap_country">' + (p.countries || []).map(function(c){ return '<option' + (s.country === c ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') + '</select></label>' +
+    '<label class="card-note">Website (for Google ads)<input class="fld" id="ap_web" placeholder="https://yourclinic.com" value="' + esc(s.website_url || '') + '" style="min-width:240px"></label></div>' +
+    '<div style="margin-top:12px"><button class="btn primary" id="ap_save">Save rules</button></div></div>';
+  var out = panel('Ad autopilot: your rules', set);
+  var neu = '<div style="padding:14px 16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+    '<select class="fld" id="ap_newprov"><option value="meta"' + (con.meta ? '' : ' disabled') + '>Facebook & Instagram' + (con.meta ? '' : ' (not connected)') + '</option><option value="google"' + (con.google ? '' : ' disabled') + '>Google' + (con.google ? '' : ' (not connected)') + '</option></select>' +
+    '<select class="fld" id="ap_newsvc"><option value="">Your best seller</option>' + (p.services || []).map(function(x){ return '<option>' + esc(x) + '</option>'; }).join('') + '</select>' +
+    '<button class="btn primary" id="ap_new"' + (con.meta || con.google ? '' : ' disabled') + '>✨ Write a campaign</button>' +
+    (con.meta || con.google ? '' : '<a class="btn" href="#/integrations">Connect ad accounts first</a>') + '</div>';
+  var drafts = p.drafts || [];
+  out += panel('Campaigns the planner wrote', neu + (drafts.length ? drafts.map(function(d){ return apDraft(d, p); }).join('') :
+    '<div style="padding:0 16px 14px" class="card-note">None yet. The planner writes the headline, text, hashtags and keywords and picks one of your photos; you check it and press Launch.</div>'));
+  var log = p.actions || [];
+  if (log.length) out += panel('What was done to your ads', log.map(function(x, i){
+    var what = { pause: 'Paused', resume: 'Turned back on', launch: 'Launched' }[x.kind] || x.kind;
+    var back = x.kind === 'pause' && x.status === 'done' && x.by_who === 'planner' ?
+      ' <button class="btn" data-apstat="1" data-prov="' + esc(x.provider) + '" data-cid="' + esc(x.campaign_id) + '" data-name="' + esc(x.campaign_name) + '">▶ Turn back on</button>' : '';
+    return '<div style="padding:10px 16px;border-top:' + (i ? '1px solid var(--line)' : '0') + '"><span class="card-note">' + esc(new Date(x.created_at).toLocaleString()) + '</span> · <b>' + esc(what) + '</b> ' + esc(x.campaign_name || x.campaign_id) +
+      ' <span class="card-note">(' + esc(AP_PROV[x.provider]) + ', by ' + (x.by_who === 'planner' ? 'the planner' : 'you') + ')</span>' +
+      (x.reason ? '<div class="card-note">' + esc(x.reason) + '</div>' : '') +
+      (x.status === 'failed' ? '<div class="card-note" style="color:var(--danger)">Did not work: ' + esc(x.error || '') + '</div>' : '') + back + '</div>';
+  }).join(''));
+  return out;
+}
 VIEWS.advisor = function(){
-  var out = '<h1>Growth advisor</h1><p class="sub">What your own numbers say this week, and one thing to do about each. Worked out from your leads, bookings, payments and ad results.</p>';
+  var out = '<h1>Growth advisor</h1><p class="sub">What your own numbers say this week, what to do next to grow, and your ads on autopilot within the rules you set.</p>';
   if (!need('advisor', '/advisor')) return out + panel('This week', loading('Reading this week\'s numbers...'));
   var d = S.advisor;
   if (!d) return out + panel('This week', errState('Could not read the advice right now.'));
   if (!d.available) return out + panel('Part of the Pro plan',
-    '<div style="padding:14px 16px"><div class="sub" style="margin-bottom:10px">You are on <b>' + esc(d.plan) + '</b>. The growth advisor comes with Pro: every week it reads your leads, bookings, payments and ad results and tells you what to do next.</div>' +
+    '<div style="padding:14px 16px"><div class="sub" style="margin-bottom:10px">You are on <b>' + esc(d.plan) + '</b>. The growth advisor comes with Pro: every week it reads your leads, bookings, payments and ad results, tells you what to do next, pauses ads that cost too much and writes new campaigns for you.</div>' +
     '<a class="btn primary" href="#/billing">See plans</a></div>');
   var when = d.generated_at ? new Date(d.generated_at).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
   out += '<div class="card-note" style="margin-bottom:12px">Week of ' + esc(d.week_start) + ' · updated ' + esc(when) +
     ' <button class="btn" id="adv_refresh" style="margin-left:8px">Refresh</button></div>' + actbar();
-  var tips = d.tips || [];
-  out += panel(d.headline || 'This week', tips.length ? tips.map(function(t, i){
-    return '<div style="padding:14px 16px;border-top:' + (i ? '1px solid var(--line)' : '0') + '">' +
-      '<div style="font-weight:700;margin-bottom:4px">' + esc(t.title) + '</div>' +
-      '<div class="card-note" style="margin-bottom:6px">' + esc(t.why) + '</div>' +
-      '<div>👉 ' + esc(t['do']) + '</div></div>';
-  }).join('') : '<div style="padding:14px 16px" class="sub">Nothing needs your attention this week. Your numbers are steady.</div>');
+  var tips = d.tips || [], steps = d.next_steps || [];
+  out += panel(d.headline || 'This week', tips.length ? tips.map(advTip).join('') : '<div style="padding:14px 16px" class="sub">Nothing needs fixing this week. Your numbers are steady.</div>');
+  if (steps.length) out += panel('What to do next to grow', steps.map(advTip).join(''));
+  out += apPanels();
   if ((d.history || []).length) out += panel('Earlier weeks', d.history.map(function(h){
     return '<div style="padding:10px 16px;border-top:1px solid var(--line)"><span class="card-note">Week of ' + esc(h.week_start) + '</span> · ' + esc(h.headline || '') + '</div>';
   }).join(''));
-  setTimeout(function(){ var b = document.getElementById('adv_refresh'); if (b) b.onclick = function(){ advLoad(true); }; }, 0);
+  setTimeout(advWire, 0);
   return out;
 };
+function advWire(){
+  var g = function(id){ return document.getElementById(id); };
+  var all = (S.advisor && (S.advisor.tips || []).concat(S.advisor.next_steps || [])) || [];
+  var byKey = function(k){ for (var i = 0; i < all.length; i++) if (all[i].key === k) return all[i]; return null; };
+  if (g('adv_refresh')) g('adv_refresh').onclick = function(){ advLoad(true); };
+  document.querySelectorAll('[data-advpause]').forEach(function(b){ b.onclick = function(){
+    var t = byKey(b.getAttribute('data-advpause')); if (!t) return;
+    if (!confirm('Pause "' + t.action.campaign_name + '"? It stops spending now. You can turn it back on any time.')) return;
+    b.disabled = true;
+    act('/adpilot/pause', { method: 'POST', body: { provider: t.action.provider, campaign_id: t.action.campaign_id, campaign_name: t.action.campaign_name, reason: t.why } }, 'Paused.')
+      .then(function(r){ if (r.ok) { ADV.done[t.key] = 'Paused ✓'; pilotLoad(); } else b.disabled = false; });
+  }; });
+  document.querySelectorAll('[data-advcreate]').forEach(function(b){ b.onclick = function(){
+    var t = byKey(b.getAttribute('data-advcreate')); if (!t) return;
+    b.disabled = true; b.textContent = 'Writing...';
+    act('/adpilot/drafts', { method: 'POST', body: { provider: t.action.provider, service: t.action.service } }, 'Written. Check it below and press Launch.')
+      .then(function(r){ if (r.ok) { ADV.done[t.key] = 'Written ✓ see below'; pilotLoad(); } else { b.disabled = false; b.textContent = '✨ Write this campaign'; } });
+  }; });
+  if (g('ap_save')) g('ap_save').onclick = function(){
+    var body = { auto_pause: g('ap_auto').checked, max_cost_per_result: g('ap_limit').value, min_spend: g('ap_min').value || 0,
+      meta_daily_cap: g('ap_mcap').value || 0, google_daily_cap: g('ap_gcap').value || 0, city: g('ap_city').value,
+      radius_km: g('ap_radius').value || 15, country: g('ap_country').value, website_url: g('ap_web').value };
+    g('ap_save').disabled = true;
+    act('/adpilot/settings', { method: 'PUT', body: body }, 'Rules saved.').then(function(r){ if (r.ok) pilotLoad(); else g('ap_save').disabled = false; });
+  };
+  if (g('ap_new')) g('ap_new').onclick = function(){
+    g('ap_new').disabled = true; g('ap_new').textContent = 'Writing...';
+    act('/adpilot/drafts', { method: 'POST', body: { provider: g('ap_newprov').value, service: g('ap_newsvc').value || null } }, 'Written. Check it and press Launch.')
+      .then(function(r){ if (r.ok) pilotLoad(); else { g('ap_new').disabled = false; g('ap_new').textContent = '✨ Write a campaign'; } });
+  };
+  document.querySelectorAll('[data-aplaunch]').forEach(function(b){ b.onclick = function(){
+    if (!confirm('Launch this campaign with a daily budget of ' + apMoney(b.getAttribute('data-budget')) + '? It starts spending today.')) return;
+    b.disabled = true; b.textContent = 'Launching...';
+    act('/adpilot/drafts/' + b.getAttribute('data-aplaunch') + '/launch', { method: 'POST', body: {} }, 'Launched. It is live now.')
+      .then(function(){ pilotLoad(); });
+  }; });
+  document.querySelectorAll('[data-apdiscard]').forEach(function(b){ b.onclick = function(){
+    if (!confirm('Discard this campaign draft?')) return;
+    act('/adpilot/drafts/' + b.getAttribute('data-apdiscard'), { method: 'DELETE' }, 'Discarded.').then(function(){ pilotLoad(); });
+  }; });
+  document.querySelectorAll('[data-apedit]').forEach(function(b){ b.onclick = function(){ ADV.edit = b.getAttribute('data-apedit'); renderShell(); }; });
+  document.querySelectorAll('[data-apcancel]').forEach(function(b){ b.onclick = function(){ ADV.edit = null; renderShell(); }; });
+  document.querySelectorAll('[data-apsave]').forEach(function(b){ b.onclick = function(){
+    var body = { daily_budget: g('apd_budget').value }, lines = function(id){ return g(id).value.split('\n').map(function(x){ return x.trim(); }).filter(Boolean); };
+    if (g('apd_head')) {
+      body.headline = g('apd_head').value; body.primary_text = g('apd_text').value; body.description = g('apd_desc').value;
+      body.hashtags = g('apd_tags').value.split(/\s+/).filter(Boolean);
+      var img = document.querySelector('input[name=apd_img]:checked'); if (img) body.image_url = img.value;
+    } else { body.headlines = lines('apd_heads'); body.descriptions = lines('apd_descs'); body.keywords = lines('apd_keys'); }
+    b.disabled = true;
+    act('/adpilot/drafts/' + b.getAttribute('data-apsave'), { method: 'PUT', body: body }, 'Saved.').then(function(r){ if (r.ok) { ADV.edit = null; pilotLoad(); } else b.disabled = false; });
+  }; });
+  document.querySelectorAll('[data-apstat]').forEach(function(b){ b.onclick = function(){
+    var on = b.getAttribute('data-apstat') === '1';
+    if (!confirm((on ? 'Turn back on "' : 'Pause "') + b.getAttribute('data-name') + '"?' + (on ? ' It starts spending again.' : ''))) return;
+    b.disabled = true;
+    act('/adpilot/pause', { method: 'POST', body: { provider: b.getAttribute('data-prov'), campaign_id: b.getAttribute('data-cid'), campaign_name: b.getAttribute('data-name'), resume: on } }, on ? 'Turned back on.' : 'Paused.')
+      .then(function(){ pilotLoad(); });
+  }; });
+}
 (function(){
   NAV.forEach(function(g){
     var i = -1; g.items.forEach(function(it, k){ if (it.id === 'ai') i = k; });

@@ -16,6 +16,7 @@ ad. Tokens never leave the server; the answers carry names and numbers only.
 Owner only: ad spend and the ad accounts are the owner's business.
 """
 import json
+import re
 import os
 import time
 from datetime import date, timedelta
@@ -131,13 +132,48 @@ def meta_performance(token, act_id, days):
         "level": "campaign", "date_preset": _META_PRESET[days], "limit": 100,
         "fields": "campaign_id,campaign_name,spend,impressions,clicks,actions,account_currency"})
     rows, cur = [], None
+    status = meta_campaign_status(token, act_id)
     for c in body.get("data") or []:
         cur = cur or c.get("account_currency")
-        rows.append({"name": c.get("campaign_name") or "", "spend": float(c.get("spend") or 0),
+        cid = str(c.get("campaign_id") or "")
+        rows.append({"id": cid, "status": status.get(cid), "name": c.get("campaign_name") or "",
+                     "spend": float(c.get("spend") or 0),
                      "impressions": int(float(c.get("impressions") or 0)), "clicks": int(float(c.get("clicks") or 0)),
                      "leads": _action(c.get("actions"), "lead", "onsite_conversion.lead_grouped"),
                      "chats": _action(c.get("actions"), "onsite_conversion.messaging_conversation_started_7d")})
     return rows, cur
+
+
+def meta_campaign_status(token, act_id):
+    """{campaign id: 'active' | 'paused' | other}, empty if Facebook will not say."""
+    try:
+        body = _meta_get("/act_%s/campaigns" % act_id, token, {"fields": "id,effective_status", "limit": 200})
+    except AdsError:
+        return {}
+    return {str(c.get("id")): str(c.get("effective_status") or "").lower() for c in body.get("data") or []}
+
+
+def _meta_post(path, token, data):
+    d = {k: (json.dumps(v) if isinstance(v, (dict, list, bool)) else v) for k, v in data.items()}
+    d["access_token"] = token
+    try:
+        r = requests.post(oauth.META_GRAPH + path, data=d, timeout=TIMEOUT)
+    except requests.RequestException:
+        raise AdsError("Facebook did not answer. Try again in a minute.")
+    try:
+        body = r.json()
+    except ValueError:
+        body = {}
+    if r.status_code >= 400 or "error" in body:
+        e = body.get("error") or {}
+        if e.get("code") == 190:
+            raise AdsError("The Facebook login has expired or was removed. Press Reconnect Facebook.")
+        raise AdsError("Facebook said: %s" % str(e.get("error_user_msg") or e.get("message") or r.text)[:240])
+    return body
+
+
+def meta_set_status(token, campaign_id, active):
+    _meta_post("/%s" % campaign_id, token, {"status": "ACTIVE" if active else "PAUSED"})
 
 
 # ------------------------------------------------------------------ Google
@@ -222,7 +258,7 @@ def google_performance(token, cid, days):
     else:
         end = date.today() - timedelta(days=1)
         cond = "BETWEEN '%s' AND '%s'" % (end - timedelta(days=days - 1), end)
-    q = ("SELECT campaign.name, campaign.status, customer.currency_code, metrics.cost_micros, "
+    q = ("SELECT campaign.id, campaign.name, campaign.status, customer.currency_code, metrics.cost_micros, "
          "metrics.impressions, metrics.clicks, metrics.conversions FROM campaign "
          "WHERE segments.date %s AND metrics.impressions > 0" % cond)
     rows, cur, token_ = {}, None, None
@@ -232,8 +268,11 @@ def google_performance(token, cid, days):
         for r in body.get("results") or []:
             c, m = r.get("campaign") or {}, r.get("metrics") or {}
             cur = cur or (r.get("customer") or {}).get("currencyCode")
-            x = rows.setdefault(c.get("name") or "", {"name": c.get("name") or "", "spend": 0.0, "impressions": 0,
-                                                      "clicks": 0, "leads": 0.0, "chats": 0.0})
+            gid = str(c.get("id") or c.get("name") or "")
+            x = rows.setdefault(gid, {"id": str(c.get("id") or ""), "name": c.get("name") or "",
+                                      "status": {"ENABLED": "active", "PAUSED": "paused"}.get(c.get("status"),
+                                                                                             str(c.get("status") or "").lower()),
+                                      "spend": 0.0, "impressions": 0, "clicks": 0, "leads": 0.0, "chats": 0.0})
             x["spend"] += float(m.get("costMicros") or 0) / 1e6
             x["impressions"] += int(m.get("impressions") or 0)
             x["clicks"] += int(m.get("clicks") or 0)
@@ -242,6 +281,37 @@ def google_performance(token, cid, days):
         if not token_:
             break
     return list(rows.values()), cur
+
+
+def google_set_status(token, cid, campaign_id, active):
+    _gads("POST", "/customers/%s/campaigns:mutate" % cid, token, {"operations": [{
+        "update": {"resourceName": "customers/%s/campaigns/%s" % (cid, campaign_id),
+                   "status": "ENABLED" if active else "PAUSED"},
+        "updateMask": "status"}]})
+
+
+def connection(tid, role, provider):
+    """(token, account id) for a connected platform with an ad account chosen,
+    or raises AdsError with a reason fit for the owner."""
+    with tenant_session(tid, role) as cur:
+        row, creds = _row(cur, tid, provider)
+        if not row:
+            raise AdsError("%s is not connected (Integrations)." % ("Facebook" if provider == "meta" else "Google"))
+        if not row["external_account"]:
+            raise AdsError("Choose which ad account to use (Integrations).")
+        tok = creds.get("access_token") if provider == "meta" else _google_token(cur, tid, row, creds)
+        return tok, row["external_account"], creds
+
+
+def set_campaign_status(tid, role, provider, campaign_id, active):
+    if not re.match(r"^\d{1,30}$", str(campaign_id or "")):
+        raise AdsError("That campaign id is not valid.")
+    tok, acct, _ = connection(tid, role, provider)
+    if provider == "meta":
+        meta_set_status(tok, campaign_id, active)
+    else:
+        google_set_status(tok, acct, campaign_id, active)
+    forget(tid)
 
 
 def google_autoselect(tid):

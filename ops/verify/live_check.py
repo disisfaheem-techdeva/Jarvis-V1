@@ -823,6 +823,27 @@ def phase15(ctx):
                                                     len(r.get("tips") or []) if isinstance(r, dict) else "-"))
 
 
+def phase16(ctx):
+    """Ad autopilot (Pro): owner-only, Pro-only, rules validated. Read-only on
+    live: it never pauses, writes or launches anything."""
+    O, OP = ctx["owner"], ctx["operator"]
+    forced = sql("SELECT count(*) FROM pg_class WHERE relname IN ('ad_pilot_settings','ad_drafts','ad_actions') "
+                 "AND relrowsecurity AND relforcerowsecurity")
+    check("A21", "autopilot tables exist with row level security forced", forced and forced[0][0] == "3",
+          "tables forced: %s" % (forced[0][0] if forced else "none"))
+    s, r = call(OP, "GET", "/adpilot")
+    check("A21", "staff cannot see or change the ads", s == 403, "HTTP %s" % s)
+    s, r = call(O, "GET", "/adpilot")
+    ok = s == 402 or (s == 200 and "settings" in r and "drafts" in r)
+    check("A21", "owner gets the autopilot (or the Pro note)", ok, "HTTP %s" % s)
+    if s == 200:
+        s2, r2 = call(O, "PUT", "/adpilot/settings", {"meta_daily_cap": 50})
+        check("A21", "a daily cap too small to run an ad is refused", s2 == 400, "HTTP %s" % s2)
+        s2, r2 = call(O, "POST", "/adpilot/pause", {"provider": "meta", "campaign_id": "not-a-number"})
+        check("A21", "a bad campaign id is refused before any ad platform call", s2 == 400 and "not valid" in json.dumps(r2),
+              "HTTP %s" % s2)
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)
