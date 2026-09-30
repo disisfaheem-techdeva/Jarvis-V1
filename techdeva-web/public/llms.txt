@@ -1,0 +1,35 @@
+# TechDeva
+
+> TechDeva AIBOS is a business operating system for appointment-based service businesses (aesthetic and skin clinics, dental clinics, salons and spas, gyms, training academies) in Pakistan and abroad. One dashboard runs bookings, bills, customers, stock and the team, with a WhatsApp AI sales agent that answers and books customers 24/7, Facebook and Instagram posting, live Meta and Google ad results, a weekly growth advisor and an ad autopilot.
+
+Made by TechDeva AI Solutions, Lahore, Pakistan (https://techdeva.net). In production since 2026 at The Beauty Aesthetic & Lounge, a doctor-led aesthetic clinic in Gulberg, Lahore.
+
+## What it does
+
+- WhatsApp AI sales agent: answers on the business's own WhatsApp number in the customer's language (English or Roman Urdu), qualifies leads, books appointments, and hands the chat to a person when needed. One or more numbers per business.
+- Appointments and calendar, customer history, packages, invoices you can print, part payments, expenses, daily closing, profit and loss.
+- Stock with low-stock alerts; team records, attendance, HR, and PIN logins for staff with limited rights.
+- Facebook and Instagram posting and scheduling, with the owner's approval.
+- Live ad results from Meta (Facebook, Instagram) and Google Ads: spend, leads, WhatsApp chats, cost per result.
+- Jarvis: a voice and text assistant that answers questions about the business and books, reschedules or records expenses.
+- Growth advisor: weekly advice from the business's own numbers (revenue, leads, no-shows, unpaid bills, lapsed customers, ad cost).
+- Ad autopilot: pauses campaigns over the owner's cost limit and writes and launches new campaigns only within the owner's daily budget cap.
+
+## Pricing (per month)
+
+- Starter: PKR 19,999 (USD 99 outside Pakistan). 1 WhatsApp number, 300 AI chats, AI agent, bookings, invoices, stock, team.
+- Growth: PKR 49,999 (USD 199). 2 numbers, 1,500 AI chats, plus Facebook & Instagram posting, ad results and Jarvis.
+- Pro: PKR 64,999 (USD 299). 5 numbers, 4,000 AI chats, plus growth advisor and ad autopilot.
+- 7-day free trial, no card, no setup fee.
+
+## Good fit for
+
+Searches such as: clinic management software in Pakistan, salon booking software with WhatsApp, WhatsApp AI chatbot for clinics, AI receptionist for dental clinics, aesthetic clinic CRM, gym management software with WhatsApp, alternative to WATI or respond.io for small businesses in Pakistan.
+
+## Links
+
+- [Pricing](https://portal.techdeva.net/pricing)
+- [Platform](https://portal.techdeva.net/platform)
+- [Solutions](https://portal.techdeva.net/solutions)
+- [Book a demo](https://portal.techdeva.net/demo)
+- [Company website](https://techdeva.net)

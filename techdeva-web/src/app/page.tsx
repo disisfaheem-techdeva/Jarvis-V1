@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { SiteHeader } from "@/components/SiteHeader";
 import { CtaBand, SiteFooter } from "@/components/SiteFooter";
@@ -9,8 +10,19 @@ const FEATURES = [
   { title: "WhatsApp AI agent", body: "Your own agent answers customers on your business number in their language, and you can reply from the dashboard." },
   { title: "Jarvis, your voice assistant", body: "Ask about your figures, change prices or hours, or attach a photo and have a post drafted, just by talking." },
   { title: "Money & stock", body: "Expenses, daily closing, profit and loss, and stock that adds up from every movement." },
-  { title: "Team & permissions", body: "Staff, attendance and HR. Front-desk logins can book and take payments; prices and deletions stay with the owner." },
+  { title: "Team & permissions", body: "Staff, attendance and HR. Each person logs in with their own PIN; front desk can book and take payments, prices and deletions stay with the owner." },
+  { title: "Facebook & Instagram posting", body: "Write or dictate a post, add your photo and publish or schedule it to your Page and Instagram from the dashboard." },
+  { title: "Live ad results", body: "Spend, leads, WhatsApp chats and cost per result from your Meta and Google ads, next to the bookings they brought." },
+  { title: "Growth advisor & ad autopilot", body: "Every week it reads your numbers and says what to fix and what to do next. It can pause ads that cost too much and write new campaigns, within limits you set." },
 ];
+
+export const metadata: Metadata = {
+  title: { absolute: "TechDeva: clinic & salon software with a WhatsApp AI agent" },
+  description:
+    "The AI business operating system for clinics, salons, gyms and academies in Pakistan and abroad: bookings, bills, customers, " +
+    "stock, team, a WhatsApp AI agent that answers and books 24/7, social posting, ad results and a growth advisor. 7-day free trial.",
+  alternates: { canonical: "/" },
+};
 
 export default function Home() {
   return (
@@ -29,7 +41,8 @@ export default function Home() {
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg text-[var(--muted)]">
           One dashboard for your clinic, salon or academy: bookings, bills, customers, stock, your team,
-          a WhatsApp agent and a voice assistant. The AI does the routine work; you approve what matters.
+          a WhatsApp AI agent, social posting, ad results and a growth advisor. The AI does the routine work;
+          you set the limits and approve what matters.
         </p>
         <div className="mt-9 flex flex-col justify-center gap-3 sm:flex-row">
           <a href={SIGNUP_URL} className="td-btn-primary px-6 py-3 text-sm font-medium">

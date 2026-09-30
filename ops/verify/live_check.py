@@ -870,6 +870,17 @@ def phase17(ctx):
                                                   % (str(u["deletes_on"])[:10], str(u["warned_at"] or "not yet")[:10])))
 
 
+def phase18(ctx):
+    """New packages (1 Oct 2026): the public price list the website reads."""
+    s, r = call(None, "GET", "/plans")
+    plans = {p["key"]: p for p in (r.get("plans") or [])} if isinstance(r, dict) else {}
+    want = {"starter": (19999, 99, 1, 300), "growth": (49999, 199, 2, 1500), "pro": (64999, 299, 5, 4000)}
+    got = {k: (int(p["price_pkr"] or 0), int(p.get("price_usd") or 0), p["max_numbers"], p["max_conversations"])
+           for k, p in plans.items()}
+    check("A23", "public price list has the new packages in PKR and USD", s == 200 and all(got.get(k) == v for k, v in want.items()),
+          "HTTP %s %s" % (s, got))
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)

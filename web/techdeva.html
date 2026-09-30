@@ -531,9 +531,10 @@ const VIEWS = {
       '<div class="sub" style="margin-top:8px">Pick a plan and the fee becomes the plan price (type a different fee after, for a discount). ' +
       'Type a fee and press Tab to save it. Hide removes a client from this book without deleting anything.</div></section>' +
       '<section><h2>Plans</h2><div class="card" style="padding:6px 8px">' +
-      tbl('<th>Plan</th><th class="num">Price (PKR / month)</th><th class="num">WhatsApp numbers</th><th class="num">Conversations / month</th><th></th>',
+      tbl('<th>Plan</th><th class="num">Price (PKR / month)</th><th class="num">Abroad (USD / month)</th><th class="num">WhatsApp numbers</th><th class="num">Conversations / month</th><th></th>',
         ((D.plans && D.plans.plans) || []).map(p => '<tr><td class="name">' + esc(p.name) + '</td>' +
           '<td class="num"><input class="fee" data-pp="' + esc(p.key) + '" value="' + (p.price_pkr != null ? Math.round(p.price_pkr) : '') + '" placeholder="talk to us"></td>' +
+          '<td class="num"><input class="fee" data-pu="' + esc(p.key) + '" value="' + (p.price_usd != null ? Math.round(p.price_usd) : '') + '" placeholder="talk to us"></td>' +
           '<td class="num"><input class="fee" data-pn="' + esc(p.key) + '" value="' + p.max_numbers + '"></td>' +
           '<td class="num"><input class="fee" data-pc="' + esc(p.key) + '" value="' + p.max_conversations + '"></td>' +
           '<td><button class="tiny primary" data-psave="' + esc(p.key) + '">Save</button></td></tr>')) +
@@ -753,7 +754,7 @@ function wireClients(){
   });
   el.querySelectorAll('[data-psave]').forEach(b => b.onclick = async () => {
     const k = b.getAttribute('data-psave'), v = a => el.querySelector('[' + a + '="' + k + '"]').value;
-    try { await api('/techdeva/plans/' + k, {method:'PUT', body: JSON.stringify({price_pkr: v('data-pp'), max_numbers: v('data-pn'), max_conversations: v('data-pc')})});
+    try { await api('/techdeva/plans/' + k, {method:'PUT', body: JSON.stringify({price_pkr: v('data-pp'), price_usd: v('data-pu'), max_numbers: v('data-pn'), max_conversations: v('data-pc')})});
           b.textContent = 'Saved'; load(); }
     catch (e) { alert(e.message); }
   });

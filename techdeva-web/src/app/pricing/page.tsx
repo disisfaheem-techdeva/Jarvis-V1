@@ -1,83 +1,84 @@
-"use client";
-
-import Link from "next/link";
-import { useEffect, useState } from "react";
+import type { Metadata } from "next";
+import { JsonLd } from "@/components/JsonLd";
 import { MarketingPage } from "@/components/MarketingPage";
-import { API_BASE } from "@/lib/api";
-import { SIGNUP_URL, TRIAL_DAYS } from "@/lib/links";
+import { TRIAL_DAYS } from "@/lib/links";
+import { SITE_URL } from "@/lib/site";
+import { PACKAGES } from "./packages";
+import { PricingCards } from "./PricingCards";
 
-type Plan = { key: string; name: string; price_pkr: number | null; max_numbers: number; max_conversations: number };
+export const metadata: Metadata = {
+  title: "Pricing: Starter, Growth and Pro packages",
+  description:
+    "TechDeva packages from PKR 19,999 a month (USD 99 abroad): a WhatsApp AI agent, bookings, invoices, stock, team and HR, " +
+    "social posting, ad results, Jarvis and a growth advisor with ad autopilot. Replaces tools that cost up to PKR 170,000 a month. " +
+    "7-day free trial, no setup fee.",
+  alternates: { canonical: "/pricing" },
+  openGraph: { url: "/pricing", title: "TechDeva pricing: Starter, Growth and Pro" },
+};
 
-// Shown until the live price list loads (and if it cannot be reached). The
-// live list comes from the founder console, so a price changed there shows here.
-const FALLBACK: Plan[] = [
-  { key: "starter", name: "Starter", price_pkr: 20000, max_numbers: 1, max_conversations: 500 },
-  { key: "growth", name: "Growth", price_pkr: 34999, max_numbers: 2, max_conversations: 1500 },
-  { key: "pro", name: "Pro", price_pkr: null, max_numbers: 5, max_conversations: 4000 },
-];
+const FAQ = [
+  ["How much does TechDeva cost?",
+    "Starter is PKR 19,999 a month, Growth PKR 49,999 and Pro PKR 64,999. Outside Pakistan the same packages are USD 99, 199 and 299 a month."],
+  ["Is there a free trial?",
+    `Yes. Every package starts with a ${TRIAL_DAYS}-day free trial with no card and no setup fee. Onboarding and connecting your WhatsApp are included.`],
+  ["What does TechDeva replace?",
+    "A WhatsApp chatbot tool (like WATI or respond.io), booking software (like Vagaro or Fresha), accounting and inventory apps (like Zoho Books and Zoho Inventory), a social media scheduler, an ad reporting dashboard, a team and HR app, an AI assistant, and an ad automation tool."],
+  ["What is an AI chat?",
+    "One customer who writes to your business on WhatsApp in a month, however many messages they send. If you go over, your agent keeps answering and we talk to you about the next package."],
+  ["Which businesses is it for?",
+    "Aesthetic and skin clinics, dental clinics, salons and spas, gyms, and training academies: any business that books appointments and gets enquiries on WhatsApp."],
+  ["What happens after the trial?",
+    "Your dashboard locks until the first payment. You can pay by bank transfer, JazzCash or Easypaisa in Pakistan."],
+] as const;
 
-const n = (v: number) => v.toLocaleString("en-US");
+const LD = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Product",
+      name: "TechDeva AIBOS",
+      url: `${SITE_URL}/pricing`,
+      description: "Business dashboard with a WhatsApp AI agent for clinics, salons, gyms and academies.",
+      brand: { "@type": "Brand", name: "TechDeva" },
+      offers: PACKAGES.flatMap((p) => [
+        { "@type": "Offer", name: p.name, price: String(p.pkr), priceCurrency: "PKR", url: `${SITE_URL}/pricing` },
+        { "@type": "Offer", name: `${p.name} (outside Pakistan)`, price: String(p.usd), priceCurrency: "USD", url: `${SITE_URL}/pricing` },
+      ]),
+    },
+    {
+      "@type": "FAQPage",
+      mainEntity: FAQ.map(([q, a]) => ({ "@type": "Question", name: q, acceptedAnswer: { "@type": "Answer", text: a } })),
+    },
+  ],
+};
 
 export default function PricingPage() {
-  const [plans, setPlans] = useState<Plan[]>(FALLBACK);
-
-  useEffect(() => {
-    fetch(`${API_BASE}/plans`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d && Array.isArray(d.plans) && d.plans.length) setPlans(d.plans);
-      })
-      .catch(() => {});
-  }, []);
-
   return (
     <MarketingPage
+      wide
       eyebrow="Pricing"
-      title="Simple monthly plans"
-      body={`Every plan includes the full business dashboard, Jarvis and Facebook & Instagram posting. Plans differ in how many WhatsApp numbers your AI agent answers, and how many customer conversations a month. Start with a ${TRIAL_DAYS}-day free trial.`}
+      title="Pick your package. Drop your other tools."
+      body={`Each package replaces tools a clinic, salon or academy pays for separately. The bigger the package, the more of your marketing runs on its own. Every package starts with a ${TRIAL_DAYS}-day free trial and has no setup fee.`}
     >
-      <div className="mt-8 grid gap-4 md:grid-cols-3">
-        {plans.map((p) => (
-          <div key={p.key} className={`td-card flex flex-col p-6 ${p.key === "growth" ? "ring-1 ring-[var(--accent)]" : ""}`}>
-            <div className="flex items-center justify-between">
-              <div className="font-semibold text-white">{p.name}</div>
-              {p.key === "growth" ? <span className="text-xs text-[var(--accent)]">Most popular</span> : null}
-            </div>
-            <div className="mt-3 text-2xl font-semibold text-white">
-              {p.price_pkr != null ? (
-                <>
-                  PKR {n(Math.round(p.price_pkr))}
-                  <span className="text-sm font-normal text-[var(--muted)]"> / month</span>
-                </>
-              ) : (
-                "Talk to us"
-              )}
-            </div>
-            <ul className="mt-4 space-y-2 text-sm text-[var(--muted)]">
-              <li>
-                <b className="text-white">{p.max_numbers}</b> WhatsApp number{p.max_numbers === 1 ? "" : "s"} with its own AI agent
-              </li>
-              <li>
-                Up to <b className="text-white">{n(p.max_conversations)}</b> customer conversations a month
-              </li>
-              <li>Appointments, bills, customers, stock, team and reports</li>
-              <li>Jarvis voice assistant and social posting</li>
-            </ul>
-            <div className="mt-auto pt-6">
-              {p.price_pkr != null ? (
-                <a href={SIGNUP_URL} className="td-btn-primary inline-block px-4 py-2 text-sm">Start free trial</a>
-              ) : (
-                <Link href="/demo" className="td-btn-ghost inline-block px-4 py-2 text-sm">Talk to us</Link>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
+      <JsonLd data={LD} />
+      <PricingCards />
       <p className="mt-6 text-sm text-[var(--muted)]">
-        A conversation is one customer who writes to your business on WhatsApp in a month, however many messages they
-        send. If you go over, your agent keeps answering and we talk to you about the next plan. After the {TRIAL_DAYS}-day
-        trial your dashboard stays locked until the first payment.
+        In Pakistan: Starter PKR 19,999, Growth PKR 49,999, Pro PKR 64,999 a month. Outside Pakistan: USD 99, 199 and 299 a month.
+        Tool prices are 2026 monthly list prices of each vendor, converted at PKR 277 per US dollar; WhatsApp message fees and ad
+        spend are extra with those tools too.
       </p>
+
+      <section className="mt-14 max-w-3xl">
+        <h2 className="text-2xl font-semibold text-white">Questions about pricing</h2>
+        <dl className="mt-6 space-y-5">
+          {FAQ.map(([q, a]) => (
+            <div key={q}>
+              <dt className="font-medium text-white">{q}</dt>
+              <dd className="mt-1 text-sm text-[var(--muted)]">{a}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
     </MarketingPage>
   );
 }

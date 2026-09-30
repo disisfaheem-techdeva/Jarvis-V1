@@ -1,4 +1,7 @@
+import type { Metadata } from "next";
 import { SidebarLayout } from "@/components/SidebarLayout";
+
+export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 const NAV = [
   { href: "/portal", label: "Overview" },

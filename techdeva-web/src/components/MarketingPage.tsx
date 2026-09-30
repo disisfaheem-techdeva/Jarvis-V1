@@ -7,17 +7,19 @@ export function MarketingPage({
   body,
   children,
   cta = true,
+  wide = false,
 }: {
   eyebrow: string;
   title: string;
   body: string;
   children?: React.ReactNode;
   cta?: boolean;
+  wide?: boolean;
 }) {
   return (
     <div className="min-h-screen bg-[var(--background)]">
       <SiteHeader />
-      <main className="mx-auto max-w-3xl px-5 py-16 sm:py-20">
+      <main className={`mx-auto ${wide ? "max-w-6xl" : "max-w-3xl"} px-5 py-16 sm:py-20`}>
         <div className="text-sm font-medium uppercase tracking-wider text-[var(--accent)]">{eyebrow}</div>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">{title}</h1>
         <p className="mt-4 text-[var(--muted)]">{body}</p>

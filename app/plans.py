@@ -43,11 +43,12 @@ def month_start():
 
 
 def all_plans(cur):
-    cur.execute("SELECT key, name, price_pkr, max_numbers, max_conversations FROM plans ORDER BY sort, key")
+    cur.execute("SELECT key, name, price_pkr, price_usd, max_numbers, max_conversations FROM plans ORDER BY sort, key")
     out = []
     for r in cur.fetchall():
         r = dict(r)
         r["price_pkr"] = float(r["price_pkr"]) if r["price_pkr"] is not None else None
+        r["price_usd"] = float(r["price_usd"]) if r["price_usd"] is not None else None
         out.append(r)
     return out
 
@@ -63,7 +64,7 @@ def plan_for(tenant_id):
         r = cur.fetchone()
     if not r:
         return {"key": DEFAULT_PLAN, "name": "Starter", "price_pkr": None, "max_numbers": 1,
-                "max_conversations": 500, "chosen": False}
+                "max_conversations": 300, "chosen": False}
     r = dict(r)
     r["price_pkr"] = float(r["price_pkr"]) if r["price_pkr"] is not None else None
     return r
@@ -188,6 +189,18 @@ def make_plans_router():
                 if price < 0:
                     raise HTTPException(400, "The price cannot be negative.")
             sets.append("price_pkr = %s"); vals.append(price)
+        if "price_usd" in body:
+            raw = body.get("price_usd")
+            if raw in (None, ""):
+                usd = None
+            else:
+                try:
+                    usd = float(str(raw).replace(",", "").replace("$", ""))
+                except ValueError:
+                    raise HTTPException(400, "The dollar price must be a number (or empty for 'talk to us').")
+                if usd < 0:
+                    raise HTTPException(400, "The price cannot be negative.")
+            sets.append("price_usd = %s"); vals.append(usd)
         for k, lo, hi in (("max_numbers", 1, 20), ("max_conversations", 1, 1000000)):
             if k in body:
                 try:
@@ -205,7 +218,7 @@ def make_plans_router():
             if not cur.fetchone():
                 raise HTTPException(404, "No such plan.")
             record(cur, action="techdeva.plan.edit", resource="plans", resource_id=key, actor=uid,
-                   status="ok", detail={k: body.get(k) for k in ("price_pkr", "max_numbers", "max_conversations") if k in body})
+                   status="ok", detail={k: body.get(k) for k in ("price_pkr", "price_usd", "max_numbers", "max_conversations") if k in body})
             return {"plans": all_plans(cur)}
 
     @router.put("/techdeva/clients/{tenant_id}/plan")
