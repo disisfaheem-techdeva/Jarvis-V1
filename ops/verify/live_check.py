@@ -799,6 +799,30 @@ def phase14(ctx):
     check("A19", "moving a task that is not yours is refused cleanly", s in (403, 404), "HTTP %s" % s)
 
 
+def phase15(ctx):
+    """Growth advisor (Pro): owner-only, Pro-only, never a made-up number.
+    Read-only on live unless the QA business is on Pro (then it builds this
+    week's QA report, which cleanup removes)."""
+    O, OP = ctx["owner"], ctx["operator"]
+    forced = sql("SELECT relforcerowsecurity FROM pg_class WHERE relname = 'advisor_reports'")
+    check("A20", "advisor table exists with row level security forced", forced and forced[0][0] == "t",
+          "forced=%s" % (forced[0][0] if forced else "missing"))
+    s, r = call(OP, "GET", "/advisor")
+    check("A20", "staff cannot see the growth advisor", s == 403, "HTTP %s" % s)
+    had = sql("SELECT count(*) FROM advisor_reports WHERE tenant_id='%s'" % ctx["qa"])[0][0]
+    s, r = call(O, "GET", "/advisor")
+    if had == "0":      # a report this run made for QA goes again
+        sql("DELETE FROM advisor_reports WHERE tenant_id='%s'" % ctx["qa"])
+    ok = s == 200 and isinstance(r, dict) and "available" in r
+    if ok and r.get("available"):
+        ok = isinstance(r.get("tips"), list) and len(r["tips"]) <= 4 and all(
+            t.get("title") and t.get("why") and t.get("do") for t in r["tips"])
+    check("A20", "owner gets the advisor (or the Pro upsell)", ok,
+          "HTTP %s plan=%s available=%s tips=%s" % (s, r.get("plan") if isinstance(r, dict) else "-",
+                                                    r.get("available") if isinstance(r, dict) else "-",
+                                                    len(r.get("tips") or []) if isinstance(r, dict) else "-"))
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)

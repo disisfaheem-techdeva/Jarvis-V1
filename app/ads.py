@@ -279,6 +279,35 @@ def _provider_status(cur, tid, provider):
             "last_error": (r or {}).get("last_error")}
 
 
+def performance_for(tid, role, days):
+    """Live ad results per platform for the last `days` days (cached 15 min).
+    Used by the Ad results page and the growth advisor."""
+    def one(provider):
+        out = {"provider": provider, "connected": False, "account": None, "campaigns": [],
+               "totals": None, "currency": None, "error": None}
+        try:
+            with tenant_session(tid, role) as cur:
+                row, creds = _row(cur, tid, provider)
+                if not row:
+                    return out
+                out["connected"], out["account"] = True, row["external_account"] or None
+                if not out["account"]:
+                    out["error"] = "Choose which ad account to show (Integrations)."
+                    return out
+                tok = creds.get("access_token") if provider == "meta" else _google_token(cur, tid, row, creds)
+            rows, cur_ = (meta_performance(tok, out["account"], days) if provider == "meta"
+                          else google_performance(tok, out["account"], days))
+            rows.sort(key=lambda r: -r["spend"])
+            out.update(campaigns=rows, totals=_totals(rows), currency=cur_)
+        except AdsError as e:
+            out["error"] = str(e)
+        return out
+
+    return _cached(tid, "perf:%d" % days, PERF_TTL, lambda: {
+        "days": days, "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "platforms": [one("meta"), one("google")]})
+
+
 def make_ads_router():
     router = APIRouter(prefix="/ads", tags=["ads"])
 
@@ -354,30 +383,7 @@ def make_ads_router():
         if days not in (7, 30, 90):
             raise HTTPException(400, "days must be 7, 30 or 90")
 
-        def one(provider):
-            out = {"provider": provider, "connected": False, "account": None, "campaigns": [],
-                   "totals": None, "currency": None, "error": None}
-            try:
-                with tenant_session(tid, role) as cur:
-                    row, creds = _row(cur, tid, provider)
-                    if not row:
-                        return out
-                    out["connected"], out["account"] = True, row["external_account"] or None
-                    if not out["account"]:
-                        out["error"] = "Choose which ad account to show (Integrations)."
-                        return out
-                    tok = creds.get("access_token") if provider == "meta" else _google_token(cur, tid, row, creds)
-                rows, cur_ = (meta_performance(tok, out["account"], days) if provider == "meta"
-                              else google_performance(tok, out["account"], days))
-                rows.sort(key=lambda r: -r["spend"])
-                out.update(campaigns=rows, totals=_totals(rows), currency=cur_)
-            except AdsError as e:
-                out["error"] = str(e)
-            return out
-
-        return _cached(tid, "perf:%d" % days, PERF_TTL, lambda: {
-            "days": days, "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "platforms": [one("meta"), one("google")]})
+        return performance_for(tid, role, days)
 
     @router.post("/disconnect/{provider}")
     def disconnect(provider: str, x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),

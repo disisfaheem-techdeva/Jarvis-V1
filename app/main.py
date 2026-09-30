@@ -90,6 +90,8 @@ from .ads import make_ads_router
 app.include_router(make_ads_router())
 from .tdwork import make_tdwork_router
 app.include_router(make_tdwork_router())
+from .advisor import make_advisor_router
+app.include_router(make_advisor_router())
 trial.install(app)
 
 # The two client-facing pages. The API image is built from ./app, so web/ is
