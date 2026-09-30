@@ -869,6 +869,19 @@ def list_integrations(x_tenant_id: str | None = Header(None),
                               (credentials <> '{}'::jsonb) AS has_credentials
                        FROM integrations ORDER BY provider""")
         rows = {r["provider"]: dict(r) for r in cur.fetchall()}
+        # WhatsApp numbers live in whatsapp_connections (one row per number)
+        # since several numbers per business; the old integrations row is
+        # not written any more, so it alone showed "Never connected".
+        cur.execute("""SELECT phone_number, display_name, connected_at FROM whatsapp_connections
+                        WHERE status = 'connected' ORDER BY connected_at""")
+        wa = cur.fetchall()
+    import datetime as _dt
+    if wa:
+        rows["whatsapp"] = {"provider": "whatsapp", "status": "connected", "has_credentials": True,
+                            "health": "ok",
+                            "external_account": ", ".join(r["phone_number"] or r["display_name"] or "connected"
+                                                          for r in wa)[:200],
+                            "connected_at": wa[0]["connected_at"] or _dt.datetime.now(_dt.timezone.utc)}
 
     out = []
     for provider in KNOWN_PROVIDERS:
