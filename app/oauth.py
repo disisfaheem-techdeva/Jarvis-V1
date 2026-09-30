@@ -124,8 +124,10 @@ def meta_diagnose() -> dict:
 # Meta permissions needed for ads + publishing + insights
 META_SCOPES = ("ads_management,pages_manage_posts,pages_read_engagement,pages_show_list,"
                "instagram_basic,instagram_content_publish,business_management")
-# Google scopes for Ads API + Business Profile
-GOOGLE_SCOPES = "https://www.googleapis.com/auth/adwords https://www.googleapis.com/auth/business.manage"
+# Only what the dashboard uses (Google Ads results). Google's verification
+# rejects apps that ask for more; add business.manage back only together with
+# a Business Profile feature that uses it.
+GOOGLE_SCOPES = "https://www.googleapis.com/auth/adwords"
 
 
 # ---------- Meta OAuth ----------
