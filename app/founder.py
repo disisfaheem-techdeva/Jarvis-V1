@@ -332,3 +332,55 @@ def operations(x_tenant_id: str | None = Header(None),
                                 "collected": float(pay["collected"]),
                                 "payments": pay["payments"]},
             "signups": signups}
+
+
+@router.get("/techdeva/connections")
+def connections(x_tenant_id: str | None = Header(None),
+                x_role: str | None = Header(None),
+                authorization: str | None = Header(None),
+                td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+    """How many clients have connected each channel, and which account.
+
+    Read-only. Clients connect everything themselves from their own dashboard;
+    this only shows the result. Names and numbers only: a stored login is
+    opened just to count its pages and Instagram accounts, and never returned."""
+    _admin(x_tenant_id, x_role, authorization, td_session)
+    from .crypto import decrypt_json
+    with tenant_session(None, "techdeva_admin") as cur:
+        cur.execute("SELECT id, name, status::text AS status FROM tenants WHERE NOT is_test ORDER BY name")
+        clients = {str(r["id"]): {"id": str(r["id"]), "name": r["name"], "status": r["status"],
+                                  "whatsapp": [], "facebook": [], "instagram": [], "google": None,
+                                  "facebook_connected": False, "google_connected": False}
+                   for r in cur.fetchall()}
+        cur.execute("SELECT tenant_id, phone_number, display_name FROM whatsapp_connections "
+                    "WHERE status = 'connected' ORDER BY connected_at")
+        for r in cur.fetchall():
+            c = clients.get(str(r["tenant_id"]))
+            if c:
+                c["whatsapp"].append(r["phone_number"] or r["display_name"] or "connected")
+        cur.execute("SELECT tenant_id, provider, external_account, credentials FROM integrations "
+                    "WHERE provider IN ('meta', 'google') AND status = 'connected'")
+        for r in cur.fetchall():
+            c = clients.get(str(r["tenant_id"]))
+            if not c:
+                continue
+            if r["provider"] == "google":
+                c["google_connected"], c["google"] = True, r["external_account"] or None
+                continue
+            c["facebook_connected"] = True
+            try:
+                creds = decrypt_json(r["credentials"], str(r["tenant_id"]), "meta") or {}
+            except Exception:
+                creds = {}
+            for p in creds.get("pages") or []:
+                c["facebook"].append(p.get("name") or "page")
+                if p.get("ig_username"):
+                    c["instagram"].append("@" + p["ig_username"])
+    rows = list(clients.values())
+    return {"clients": rows, "totals": {
+        "clients": len(rows),
+        "whatsapp": sum(1 for c in rows if c["whatsapp"]),
+        "facebook": sum(1 for c in rows if c["facebook_connected"]),
+        "instagram": sum(1 for c in rows if c["instagram"]),
+        "google": sum(1 for c in rows if c["google_connected"]),
+        "none": sum(1 for c in rows if not (c["whatsapp"] or c["facebook_connected"] or c["google_connected"]))}}

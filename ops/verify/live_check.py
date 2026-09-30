@@ -747,6 +747,13 @@ def phase13(ctx):
     plats = {p.get("provider"): p for p in (r.get("platforms") or [])} if isinstance(r, dict) else {}
     check("A18", "ad results answer for Facebook and Google", s == 200 and set(plats) == {"meta", "google"},
           "HTTP %s %s" % (s, {k: (v.get("connected"), v.get("error")) for k, v in plats.items()}))
+    adm = token(None, "techdeva_admin", "live-check")
+    s, r = call(adm, "GET", "/techdeva/connections")
+    t = r.get("totals", {}) if isinstance(r, dict) else {}
+    check("A18", "founder sees how many clients are connected", s == 200 and "clients" in t and
+          "access_token" not in json.dumps(r), "HTTP %s %s" % (s, t))
+    s, r = call(O, "GET", "/techdeva/connections")
+    check("A18", "a client cannot see the founder's connections list", s == 403, "HTTP %s" % s)
     print("   setup on this server: facebook=%s google=%s google_ads_results=%s"
           % (setup.get("facebook"), setup.get("google"), setup.get("google_ads_reporting")))
 

@@ -134,7 +134,7 @@ nav a.on{background:#1f1b10}
 let TOKEN = null, D = {};
 const NAV = [
   ['RUNNING THE BUSINESS', [
-    ['jarvis','Jarvis'], ['overview','Overview'], ['requests','Requests'], ['clients','Clients'], ['pipeline','Pipeline & trials']]],
+    ['jarvis','Jarvis'], ['overview','Overview'], ['requests','Requests'], ['clients','Clients'], ['connections','Connections'], ['pipeline','Pipeline & trials']]],
   ['WHAT THE AI DELIVERS', [
     ['bookings','Bookings'], ['workforce','AI workforce'], ['approvals','Waiting on you']]],
   ['MONEY', [
@@ -145,6 +145,7 @@ const NAV = [
 const TITLES = {jarvis:['Jarvis','Pick a client, then say or type what to change for them.'],
   overview:['Overview','The whole business on one screen.'],
   clients:['Clients','Everyone onboard, what they pay, and what they are getting.'],
+  connections:['Connections','Which clients have connected WhatsApp, Facebook, Instagram and Google. Clients connect these themselves in their dashboard.'],
   pipeline:['Pipeline & trials','Who signed up and who is still on a trial.'],
   requests:['Requests','Things clients asked for that need you: agents, payments, password resets.'],
   bookings:['Bookings','Appointments the AI has put in your clients diaries.'],
@@ -212,7 +213,7 @@ function show(){
 function current(){ return (location.hash.replace('#/','') || 'overview'); }
 
 async function load(){
-  const [book, health, ops, ai, inc, over, invoices, agents, claims, resets, plans] = await Promise.all([
+  const [book, health, ops, ai, inc, over, invoices, agents, claims, resets, plans, conns] = await Promise.all([
     api('/techdeva/book'),
     api('/techdeva/health').catch(() => null),
     api('/techdeva/operations').catch(() => null),
@@ -223,9 +224,10 @@ async function load(){
     api('/techdeva/agent-requests').catch(() => null),
     api('/techdeva/payment-claims').catch(() => null),
     api('/techdeva/password-resets').catch(() => null),
-    api('/plans').catch(() => null)
+    api('/plans').catch(() => null),
+    api('/techdeva/connections').catch(() => null)
   ]);
-  D = {book, health, ops, ai, inc, over, invoices, agents, claims, resets, plans, usage: D.usage};
+  D = {book, health, ops, ai, inc, over, invoices, agents, claims, resets, plans, conns, usage: D.usage};
   // conversation counts ask every agent, so they arrive after the page
   api('/techdeva/usage').then(u => { D.usage = u; if (current() === 'clients' || current() === 'overview') paint(); }).catch(() => {});
   renderNav(); paint();
@@ -460,6 +462,26 @@ function clientRows(rows){
 }
 
 const VIEWS = {
+  connections(){
+    const c = D.conns;
+    if (!c) return '<div class="empty">Could not read the connections.</div>';
+    const t = c.totals, n = t.clients || 0;
+    const pct = x => n ? Math.round(100 * x / n) + '% of clients' : '';
+    const cell = (ok, list) => ok ? '<span style="color:var(--good,#5FD44A)">&#10003;</span> ' + esc((list || []).join(', ')) : '<span style="color:var(--muted,#8A99B8)">&mdash;</span>';
+    return '<section><div class="grid">' +
+      kpi('Clients', n, '') +
+      kpi('WhatsApp connected', t.whatsapp + ' / ' + n, pct(t.whatsapp)) +
+      kpi('Facebook connected', t.facebook + ' / ' + n, pct(t.facebook)) +
+      kpi('Instagram connected', t.instagram + ' / ' + n, pct(t.instagram)) +
+      kpi('Google connected', t.google + ' / ' + n, pct(t.google)) +
+      kpi('Nothing connected yet', t.none, t.none ? 'may need a nudge' : 'everyone has started', t.none ? 'warn' : '') +
+      '</div><div class="card" style="margin-top:14px;overflow:auto">' +
+      tbl('<th>Client</th><th>Status</th><th>WhatsApp</th><th>Facebook</th><th>Instagram</th><th>Google Ads</th>',
+        c.clients.map(r => '<tr><td>' + esc(r.name || 'Unnamed') + '</td><td>' + esc(r.status) + '</td><td>' +
+          cell(r.whatsapp.length, r.whatsapp) + '</td><td>' + cell(r.facebook_connected, r.facebook) + '</td><td>' +
+          cell(r.instagram.length, r.instagram) + '</td><td>' + cell(r.google_connected, r.google ? [r.google] : []) + '</td></tr>')) +
+      '</div></section>';
+  },
   jarvis(){
     const cs = ((D.book && D.book.clients) || []);
     return '<section><div class="card" style="padding:16px">' +
