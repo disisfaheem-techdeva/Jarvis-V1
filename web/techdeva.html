@@ -944,7 +944,7 @@ VIEWS.team = function(){
         '<button data-emleft="' + esc(e.id) + '">Left</button>' : '<button data-emback="' + esc(e.id) + '">Rejoined</button>') + '</td></tr>')) + '</div>';
   const others = (t.team || []).filter(u => !emps.some(e => String(e.user_id) === String(u.id)));
   if (others.length) out += '<div class="card" style="margin-top:16px"><div class="k-label">Other logins to this business</div>' +
-    others.map(u => '<div class="k-note" style="margin-top:6px">' + esc(u.name || u.email) + ' · ' + (u.role === 'owner' ? 'owner' : 'staff') + '</div>').join('') + '</div>';
+    others.map(u => '<div class="k-note" style="margin-top:6px">' + esc(u.name || u.email) + ' · ' + (u.role === 'techdeva_admin' ? 'founder' : u.role === 'owner' ? 'owner' : 'staff') + '</div>').join('') + '</div>';
   out += '</section>';
   wkAct('#em-save', async () => {
     const body = {name: wkVal('em-name'), job: wkVal('em-job'), phone: wkVal('em-phone'), email: wkVal('em-email'), joining_date: wkVal('em-join'), access: wkVal('em-access')};
