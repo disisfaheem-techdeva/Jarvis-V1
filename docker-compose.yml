@@ -58,6 +58,12 @@ services:
       META_APP_SECRET: ${META_APP_SECRET:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_SECRET: ${GOOGLE_SECRET:-}
+      # Google Ads reporting: TechDeva's developer token (Google Ads API
+      # Center) and, when client accounts are reached through TechDeva's
+      # manager account, that manager's customer id. ops/setup/ads_setup.py
+      GOOGLE_ADS_DEVELOPER_TOKEN: ${GOOGLE_ADS_DEVELOPER_TOKEN:-}
+      GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${GOOGLE_ADS_LOGIN_CUSTOMER_ID:-}
+      GOOGLE_ADS_API_VERSION: ${GOOGLE_ADS_API_VERSION:-v21}
       OAUTH_REDIRECT_BASE: ${OAUTH_REDIRECT_BASE:-http://localhost:8000}
       META_AD_LIBRARY_TOKEN: ${META_AD_LIBRARY_TOKEN:-}
       # --- client portal / auth (Build 2) ---

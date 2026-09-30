@@ -40,7 +40,8 @@ GOOGLE_SECRET = os.environ.get("GOOGLE_SECRET", "")
 # rstrip("/"): the redirect_uri must be byte-identical in the authorize call,
 # the token call and Meta's "Valid OAuth Redirect URIs" list.
 OAUTH_REDIRECT_BASE = os.environ.get("OAUTH_REDIRECT_BASE", "http://localhost:8000").strip().rstrip("/")
-META_GRAPH = "https://graph.facebook.com/v21.0"
+# overridable like the AI base URLs, so a gateway or a stub can stand in
+META_GRAPH = os.environ.get("META_GRAPH_BASE", "https://graph.facebook.com").strip().rstrip("/") + "/v21.0"
 
 
 def meta_redirect_uri() -> str:

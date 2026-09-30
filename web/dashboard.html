@@ -5899,6 +5899,142 @@ VIEWS.console = function(){
     '<div class="card-note" style="margin:14px 0">Posts Jarvis drafts wait for your approval in <a href="#/needshuman">Needs Human</a>.</div>');
 };
 
+/* ======================================================== Part 18: ad accounts
+   Integrations: Facebook & Instagram and Google Ads cards (connect, see the
+   pages / Instagram accounts found, choose the ad account, reconnect,
+   disconnect). Marketing: live ad results from Meta and Google (owner only). */
+var ADS = { acc: {}, days: 30, busy: false, arm: {} };
+function adsMoney(v, cur){ return (cur || 'PKR') + ' ' + Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }); }
+function adsCard(p, st, setup){
+  var isMeta = p === 'meta', d = st[p] || {};
+  var title = isMeta ? 'Facebook & Instagram' : 'Google Ads & Business Profile';   // panel() escapes titles
+  var ready = isMeta ? setup.facebook : setup.google;
+  var h = '<div style="padding:14px 16px">';
+  if (!ready) {
+    h += '<div class="card-note">TechDeva is finishing the ' + (isMeta ? 'Facebook' : 'Google') + ' app setup. The Connect button appears here as soon as it is ready.</div></div>';
+    return panel(title, h, '<span class="tag">coming soon</span>');
+  }
+  if (!d.connected) {
+    h += '<div class="sub" style="margin-bottom:10px">' + (isMeta
+      ? 'Connect once to post to your Facebook page and Instagram, and to see your Facebook &amp; Instagram ad results here.'
+      : 'Connect once to see your Google Ads results here (and your Google Business Profile).') + '</div>' +
+      (d.last_error ? '<div class="card-note" style="color:var(--danger);margin-bottom:8px">Last attempt: ' + esc(d.last_error) + '</div>' : '') +
+      '<a class="btn primary" href="/connect/' + p + '">Connect ' + (isMeta ? 'Facebook &amp; Instagram' : 'Google') + '</a>' +
+      (isMeta ? '<div class="card-note" style="margin-top:8px">Your Instagram must be a Business or Creator account linked to your Facebook page.</div>' : '');
+    return panel(title, h + '</div>', '<span class="tag">not connected</span>');
+  }
+  if (isMeta) {
+    var pages = d.pages || [];
+    h += pages.length ? '<div style="margin-bottom:10px">' + pages.map(function(pg){
+        return '<div style="margin:4px 0"><b>' + esc(pg.name || 'Page') + '</b> · ' +
+          (pg.instagram ? 'Instagram <b>@' + esc(pg.instagram) + '</b>' : '<span style="color:var(--warn)">no Instagram linked</span>') + '</div>';
+      }).join('') + '</div>' +
+      (pages.some(function(pg){ return !pg.instagram; }) ? '<div class="card-note" style="margin-bottom:10px">To add Instagram: in the Instagram app switch to a Business account and link it to this Facebook page (Meta Business Suite → Settings → Instagram accounts), then press Reconnect.</div>' : '')
+      : '<div class="card-note" style="margin-bottom:10px;color:var(--warn)">No Facebook page came through. Press Reconnect and tick your page when Facebook asks.</div>';
+  } else if (!setup.google_ads_reporting) {
+    h += '<div class="card-note" style="margin-bottom:10px">Google is connected. Ad results appear once TechDeva\'s Google Ads access is approved by Google.</div>';
+  }
+  var acc = ADS.acc[p];
+  h += '<div style="margin:6px 0 10px"><span class="card-note">Ad account used for results:</span> <b>' + esc(d.account || 'not chosen yet') + '</b></div>';
+  if (acc === 'loading') h += '<div class="card-note">Asking ' + (isMeta ? 'Facebook' : 'Google') + ' for your ad accounts…</div>';
+  else if (acc && acc.error) h += '<div class="card-note" style="color:var(--danger)">' + esc(acc.error) + '</div>';
+  else if (acc && acc.accounts) {
+    h += acc.accounts.length
+      ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"><select class="fld" id="ads_pick_' + p + '" style="flex:1;min-width:200px">' +
+        acc.accounts.map(function(a){ return '<option value="' + esc(a.id) + '"' + (String(a.id) === String(d.account) ? ' selected' : '') + '>' +
+          esc(a.name) + ' (' + esc(a.id) + ')' + (a.currency ? ' · ' + esc(a.currency) : '') + (a.manager ? ' · manager' : '') + '</option>'; }).join('') +
+        '</select><button class="btn primary" data-adssave="' + p + '">Use this account</button></div>'
+      : '<div class="card-note">This login has no ad accounts yet.</div>';
+  }
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-adsload="' + p + '">Choose ad account</button>' +
+       '<a class="btn" href="/connect/' + p + '">Reconnect</a>' +
+       '<button class="btn" data-adsoff="' + p + '">' + (ADS.arm[p] ? 'Tap again to disconnect' : 'Disconnect') + '</button></div>';
+  return panel(title, h + '</div>', '<span class="tag" style="color:var(--growth)">connected</span>');
+}
+function adsWire(){
+  setTimeout(function(){
+    document.querySelectorAll('[data-adsload]').forEach(function(b){ b.onclick = function(){
+      var p = b.getAttribute('data-adsload'); ADS.acc[p] = 'loading'; renderShell();
+      api('/ads/accounts?provider=' + p).then(function(r){
+        ADS.acc[p] = r.ok ? r.data : { error: (r.data && r.data.detail) || ('Could not list the accounts (' + r.status + ').') }; renderShell();
+      });
+    }; });
+    document.querySelectorAll('[data-adssave]').forEach(function(b){ b.onclick = function(){
+      var p = b.getAttribute('data-adssave'), sel = document.getElementById('ads_pick_' + p);
+      if (!sel || !sel.value) return;
+      b.disabled = true;
+      api('/ads/accounts', { method: 'PUT', body: { provider: p, account_id: sel.value } }).then(function(r){
+        b.disabled = false;
+        if (!r.ok) { say((r.data && r.data.detail) || 'Not saved.'); return; }
+        ADS.acc[p] = undefined; say('Ad account saved.');
+        need('ads_status', '/ads/status', true); Object.keys(S).forEach(function(k){ if (/^ads_perf_/.test(k)) S[k] = undefined; });
+      });
+    }; });
+    document.querySelectorAll('[data-adsoff]').forEach(function(b){ b.onclick = function(){
+      var p = b.getAttribute('data-adsoff');
+      if (!ADS.arm[p]) { ADS.arm[p] = true; renderShell(); setTimeout(function(){ ADS.arm[p] = false; }, 6000); return; }
+      ADS.arm[p] = false; b.disabled = true;
+      api('/ads/disconnect/' + p, { method: 'POST' }).then(function(r){
+        say(r.ok ? 'Disconnected.' : ((r.data && r.data.detail) || 'Not disconnected.'));
+        ADS.acc[p] = undefined; need('ads_status', '/ads/status', true);
+      });
+    }; });
+  }, 0);
+}
+var _viewIntegrationsBefore18 = VIEWS.integrations;
+VIEWS.integrations = function(){
+  var base = _viewIntegrationsBefore18();
+  if (!isOwner()) return base;
+  var top = '<h2>Ads &amp; social accounts</h2>';
+  if (!need('ads_status', '/ads/status')) top += panel('Accounts', loading('Checking your accounts...'));
+  else if (!S.ads_status) top += panel('Accounts', errState('Could not read the ad accounts.'));
+  else { var st = S.ads_status; top += adsCard('meta', st, st.setup || {}) + adsCard('google', st, st.setup || {}); adsWire(); }
+  // keep the page title first, then the cards, then everything that was there
+  var cut = base.indexOf('</p>') + 4;
+  return base.slice(0, cut) + top + base.slice(cut);
+};
+function adsPerfHTML(){
+  var key = 'ads_perf_' + ADS.days;
+  var sw = '<select class="fld" id="ads_days" style="width:auto">' + [7, 30, 90].map(function(n){
+    return '<option value="' + n + '"' + (ADS.days === n ? ' selected' : '') + '>Last ' + n + ' days</option>'; }).join('') + '</select>';
+  if (!need(key, '/ads/performance?days=' + ADS.days)) return panel('Ad results', loading('Reading your ad results...'), sw);
+  if (!S[key]) return panel('Ad results', errState('Could not read the ad results.'), sw);
+  var plats = S[key].platforms || [], body = '';
+  plats.forEach(function(pl){
+    var name = pl.provider === 'meta' ? 'Facebook &amp; Instagram ads' : 'Google Ads';
+    if (!pl.connected) { body += '<div style="padding:12px 16px;border-bottom:1px solid var(--line)"><b>' + name + '</b> · <span class="card-note">not connected — <a href="#/integrations">connect on Integrations</a></span></div>'; return; }
+    if (pl.error) { body += '<div style="padding:12px 16px;border-bottom:1px solid var(--line)"><b>' + name + '</b><div class="card-note" style="color:var(--warn)">' + esc(pl.error) + '</div></div>'; return; }
+    var t = pl.totals || {}, c = pl.currency;
+    var cpl = (t.leads + t.chats) > 0 ? adsMoney(t.spend / (t.leads + t.chats), c) : '—';
+    body += '<div style="padding:12px 16px;border-bottom:1px solid var(--line)"><b>' + name + '</b> <span class="card-note">account ' + esc(pl.account) + '</span>' +
+      '<div class="grid" style="margin-top:8px">' + metric('Spent', adsMoney(t.spend, c)) + metric('Times shown (impressions)', Number(t.impressions || 0).toLocaleString()) +
+      metric('Clicks', Number(t.clicks || 0).toLocaleString()) + metric(pl.provider === 'meta' ? 'Leads + WhatsApp chats' : 'Conversions', Math.round((t.leads || 0) + (t.chats || 0))) +
+      metric('Cost per result', cpl) + '</div>' +
+      ((pl.campaigns || []).length ? '<div class="tbl-wrap"><table><thead><tr><th>Campaign</th><th>Spent</th><th>Impressions</th><th>Clicks</th><th>' +
+        (pl.provider === 'meta' ? 'Leads</th><th>WhatsApp chats' : 'Conversions</th><th>') + '</th><th>Cost per result</th></tr></thead><tbody>' +
+        pl.campaigns.map(function(r){
+          var res = (r.leads || 0) + (r.chats || 0);
+          return '<tr><td>' + esc(r.name) + '</td><td>' + adsMoney(r.spend, c) + '</td><td>' + Number(r.impressions).toLocaleString() + '</td><td>' +
+            Number(r.clicks).toLocaleString() + '</td><td>' + Math.round(r.leads || 0) + '</td><td>' + (pl.provider === 'meta' ? Math.round(r.chats || 0) : '') +
+            '</td><td>' + (res > 0 ? adsMoney(r.spend / res, c) : '—') + '</td></tr>';
+        }).join('') + '</tbody></table></div>'
+        : '<div class="card-note">No ads ran in this period.</div>') + '</div>';
+  });
+  setTimeout(function(){ var d = document.getElementById('ads_days'); if (d) d.onchange = function(){ ADS.days = Number(d.value) || 30; renderShell(); }; }, 0);
+  return panel('Ad results (live from the ad platforms)', body + '<div class="card-note" style="padding:8px 16px">Updated ' +
+    esc(String(S[key].fetched_at || '').replace('T', ' ').slice(0, 16)) + ' UTC · refreshed every 15 minutes.</div>', sw);
+}
+var _viewMarketingBefore18 = VIEWS.marketing;
+VIEWS.marketing = function(){
+  var h = _viewMarketingBefore18();
+  if (!isOwner() || !S.mkt) return h;
+  // live results sit right after the summary tiles; the old Facebook-only box points to Integrations
+  h = h.replace(/<a class="btn primary" href="\/connect\/meta">Connect Facebook &amp; Instagram<\/a>/,
+    '<a class="btn primary" href="#/integrations">Connect on Integrations</a>');
+  var at = h.indexOf('<div class="panel"><div class="panel-head">');   // first real panel, after the summary tiles
+  return at > -1 ? h.slice(0, at) + adsPerfHTML() + h.slice(at) : h + adsPerfHTML();
+};
+
 window.addEventListener('hashchange', function(){
   // Every section reads fresh data when it is opened, so something added in
   // one section (a staff member, a product, a booking) shows up in the others.

@@ -86,6 +86,8 @@ app.include_router(make_billing_router())
 app.include_router(make_provisioning_router())
 app.include_router(make_plans_router())
 app.include_router(make_pins_router())
+from .ads import make_ads_router
+app.include_router(make_ads_router())
 trial.install(app)
 
 # The two client-facing pages. The API image is built from ./app, so web/ is
@@ -673,6 +675,9 @@ def connect_start(provider: str,
         raise HTTPException(e.status, e.message)
     if not tenant_id:
         raise HTTPException(400, "tenant required")
+    if _role not in ("owner", "techdeva_admin"):
+        # linking the business's ad accounts is the owner's decision
+        raise HTTPException(403, "Only the business owner can connect accounts.")
     if provider == "meta":
         return RedirectResponse(meta_auth_url(issue_oauth_state(tenant_id, "meta")))
     if provider == "google":
@@ -717,6 +722,7 @@ def meta_callback(code: str = "", state: str = "", error: str = ""):
         "<h1 style='color:#5FD44A'>✓ Facebook & Instagram connected!</h1>"
         f"<p>Ad account: {ext or 'will be set up'}</p>"
         "<p>You can close this window. TechDeva is ready to run your campaigns.</p>"
+        "<p><a style='color:#6C8CFF' href='/dashboard#/integrations'>Back to the dashboard</a></p>"
         "</body></html>"
     )
 
@@ -750,13 +756,27 @@ def google_callback(code: str = "", state: str = "", error: str = ""):
     try:
         token_data = google_exchange_code(code)
     except Exception as e:
-        return HTMLResponse(f"<h2>Token exchange failed</h2><p>{e}</p>", 500)
+        why = "Google refused the sign-in (%s)." % type(e).__name__
+        print("[oauth] google callback failed: %s" % type(e).__name__, flush=True)
+        save_failure(tenant_id, "google", why)
+        return HTMLResponse("<h2>Google did not connect</h2><p>%s</p>"
+                            "<p><a href='/dashboard#/integrations'>Back to the dashboard</a></p>" % _html.escape(why), 500)
+    import time as _t
+    if token_data.get("expires_in"):
+        token_data["expires_at"] = _t.time() + float(token_data["expires_in"])
     save_connection(P, tenant_id, "google", token_data, "")
+    picked = None
+    try:
+        from .ads import google_autoselect
+        picked = google_autoselect(tenant_id)
+    except Exception as e:      # reporting may not be switched on yet; the login is saved regardless
+        print("[oauth] google account discovery skipped: %s" % type(e).__name__, flush=True)
     return HTMLResponse(
         "<html><body style='background:#0A0E1A;color:#EAF1FF;font-family:sans-serif;text-align:center;padding:60px'>"
-        "<h1 style='color:#5FD44A'>✓ Google connected!</h1>"
-        "<p>Google Ads and Business Profile are now linked.</p>"
-        "<p>You can close this window.</p>"
+        "<h1 style='color:#5FD44A'>✓ Google connected</h1>"
+        + ("<p>Google Ads account %s is linked.</p>" % _html.escape(picked) if picked
+           else "<p>Next: choose your Google Ads account on the Integrations page.</p>") +
+        "<p><a style='color:#6C8CFF' href='/dashboard#/integrations'>Back to the dashboard</a></p>"
         "</body></html>"
     )
 

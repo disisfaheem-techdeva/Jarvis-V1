@@ -729,6 +729,28 @@ def phase12(ctx):
         sql("DELETE FROM executions WHERE tenant_id='%s' AND resource_id IN ('%s','%s')" % (tid, aid, inv))
 
 
+def phase13(ctx):
+    """Ad accounts (Part 18): owner-only, honest about what is set up, never a
+    token in the answer. Read-only; the QA business has no ad login."""
+    O, OP = ctx["owner"], ctx["operator"]
+    s, r = call(O, "GET", "/ads/status")
+    setup = r.get("setup", {}) if isinstance(r, dict) else {}
+    check("A18", "ad accounts status answers", s == 200 and "meta" in r and "google" in r,
+          "HTTP %s setup=%s" % (s, setup))
+    check("A18", "no token leaks into the answer", "access_token" not in json.dumps(r) and "refresh_token" not in json.dumps(r),
+          "checked the whole reply")
+    s, r = call(OP, "GET", "/ads/status")
+    check("A18", "staff cannot see ad accounts or spend", s == 403, "HTTP %s" % s)
+    s, r = call(OP, "GET", "/connect/google")
+    check("A18", "staff cannot connect accounts", s == 403, "HTTP %s" % s)
+    s, r = call(O, "GET", "/ads/performance?days=30")
+    plats = {p.get("provider"): p for p in (r.get("platforms") or [])} if isinstance(r, dict) else {}
+    check("A18", "ad results answer for Facebook and Google", s == 200 and set(plats) == {"meta", "google"},
+          "HTTP %s %s" % (s, {k: (v.get("connected"), v.get("error")) for k, v in plats.items()}))
+    print("   setup on this server: facebook=%s google=%s google_ads_results=%s"
+          % (setup.get("facebook"), setup.get("google"), setup.get("google_ads_reporting")))
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)
