@@ -4604,7 +4604,7 @@ function boot(){
    posts are published by the platform's worker at that time; the owner can
    take one back to a draft until then. Nothing goes public without the owner. */
 // imgs: the new post's pictures in order, each { src: preview, url: link once uploaded }
-var PST = { imgs: [], busy: false, MAX: 10 };
+var PST = { imgs: [], busy: false, MAX: 10, page: null };
 function pstWhen(s){
   if (!s) return '';
   var d = new Date(s);
@@ -4623,9 +4623,19 @@ VIEWS.posts = function(){
     return out + panel('Posts', loading('Loading posts...'));
   if (S.social_posts === null) return out + panel('Posts', errState('Could not read your posts.'));
   var acc = S.social_acc || {}, own = isOwner();
-  var pages = (acc.pages || []).map(function(p){ return p.name + (p.instagram ? ' + Instagram' + (typeof p.instagram === 'string' ? ' @' + p.instagram : '') : ''); }).join(', ');
+  var pgLabel = function(p){ return p.name + (p.instagram ? ' + Instagram' + (typeof p.instagram === 'string' ? ' @' + p.instagram : '') : ''); };
+  var pgList = acc.pages || [];
+  if (PST.page && !pgList.some(function(p){ return p.id === PST.page; })) PST.page = null;
+  if (!PST.page) PST.page = acc.page_id || null;
   out += acc.connected
-    ? '<div class="card-note" style="margin-bottom:12px">Posting to: <b>' + esc(pages) + '</b></div>'
+    ? (pgList.length === 1
+        ? '<div class="card-note" style="margin-bottom:12px">Posting to: <b>' + esc(pgLabel(pgList[0])) + '</b></div>'
+        : panel('Which Facebook Page?', '<div style="padding:14px 16px"><div class="sub" style="margin-bottom:8px">Your Facebook login manages ' + pgList.length +
+            ' Pages. Choose the one this business posts to. Instagram posts go to the Instagram account linked to that Page.</div>' +
+            '<select id="ps_page" class="fld" style="max-width:420px;width:100%">' +
+            (PST.page ? '' : '<option value="">Choose a Page…</option>') +
+            pgList.map(function(p){ return '<option value="' + esc(p.id) + '"' + (p.id === PST.page ? ' selected' : '') + '>' + esc(pgLabel(p)) + '</option>'; }).join('') +
+            '</select></div>'))
     : panel(acc.facebook_login ? 'No Facebook Page to post to' : 'Connect first', '<div style="padding:14px 16px"><div class="sub" style="margin-bottom:10px">' +
         (acc.facebook_login
           ? 'Facebook is connected, but no Facebook Page came through, so posts can only be saved as drafts. Press Reconnect and, when Facebook asks, tick your Page (and its Instagram). If your Page is in a Business Portfolio, choose that business too.'
@@ -4656,7 +4666,7 @@ VIEWS.posts = function(){
   out += actbar();
   groups.forEach(function(g){
     out += panel(g[0] + ' (' + g[1].length + ')', g[1].length
-      ? g[1].map(function(p){ return pstCard(p, own, acc.connected); }).join('')
+      ? g[1].map(function(p){ return pstCard(p, own, acc.connected, pgList); }).join('')
       : '<div class="card-note" style="padding:12px 16px">Nothing here.</div>');
   });
   setTimeout(pstWire, 0);
@@ -4674,12 +4684,14 @@ function pstImgHTML(){
       (waiting ? ', ' + waiting + ' still uploading…' : ' ready.') + '</div>';
 }
 function pstImgs(p){ return (p.image_urls && p.image_urls.length) ? p.image_urls : (p.image_url ? [p.image_url] : []); }
-function pstCard(p, own, connected){
+function pstCard(p, own, connected, pgList){
   var res = p.results || {};
   var errs = Object.keys(res).filter(function(k){ return res[k] && res[k].ok === false; })
     .map(function(k){ return k + ': ' + (res[k].error || 'failed'); });
   if (res.error) errs.push(res.error);
   var meta = esc((p.platforms || []).join(' + ')) + ' · <span class="tag">' + esc(PST_LABEL[p.status] || p.status) + '</span>';
+  var onPage = (res.facebook && res.facebook.page) || ((pgList || []).filter(function(x){ return x.id === p.page_id; })[0] || {}).name;
+  if (onPage && p.status !== 'draft') meta += ' · Page <b>' + esc(onPage) + '</b>';
   if (p.status === 'scheduled') meta += ' · goes out <b>' + esc(pstWhen(p.scheduled_at)) + '</b>';
   else if (p.published_at) meta += ' · ' + esc(pstWhen(p.published_at));
   else meta += ' · written ' + esc(pstWhen(p.created_at));
@@ -4705,6 +4717,11 @@ function pstReload(){ S.social_posts = undefined; LOADING.social_posts = false; 
 function pstWire(){
   var g = function(id){ return document.getElementById(id); };
   if (g('ps_pick')) g('ps_pick').onclick = function(){ g('ps_file').click(); };
+  if (g('ps_page')) g('ps_page').onchange = function(){ PST.page = g('ps_page').value || null; };
+  var needPage = function(){
+    if (g('ps_page') && !PST.page) { say('Choose which Facebook Page to post to (top of this page).'); g('ps_page').focus(); return true; }
+    return false;
+  };
   var redraw = function(){ var b = g('ps_img'); if (b) { b.innerHTML = pstImgHTML(); pstWire(); } };
   document.querySelectorAll('[data-psrm]').forEach(function(b){
     b.onclick = function(){ PST.imgs.splice(+b.getAttribute('data-psrm'), 1); redraw(); };
@@ -4740,9 +4757,10 @@ function pstWire(){
   };
   document.querySelectorAll('[data-pnow]').forEach(function(b){
     b.onclick = function(){
+      if (needPage()) return;
       if (!b.getAttribute('data-armed')) { b.setAttribute('data-armed', '1'); b.textContent = 'Tap again to post publicly'; return; }
       b.disabled = true; b.textContent = 'Posting…';
-      act('/social/posts/' + b.getAttribute('data-pnow') + '/publish', { method: 'POST' }, 'Posted.').then(pstReload);
+      act('/social/posts/' + b.getAttribute('data-pnow') + '/publish', { method: 'POST', body: { page_id: PST.page } }, 'Posted.').then(pstReload);
     };
   });
   document.querySelectorAll('[data-psch]').forEach(function(b){
@@ -4750,8 +4768,9 @@ function pstWire(){
       var id = b.getAttribute('data-psch'), v = (g('pat_' + id) || {}).value;
       var d = v ? new Date(v) : null;
       if (!d || isNaN(d)) { say('Pick a date and time.'); return; }
+      if (needPage()) return;
       b.disabled = true;
-      act('/social/posts/' + id + '/schedule', { method: 'POST', body: { at: d.toISOString() } }, 'Scheduled for ' + pstWhen(d) + '.')
+      act('/social/posts/' + id + '/schedule', { method: 'POST', body: { at: d.toISOString(), page_id: PST.page } }, 'Scheduled for ' + pstWhen(d) + '.')
         .then(function(r){ if (r.ok) pstReload(); else b.disabled = false; });
     };
   });

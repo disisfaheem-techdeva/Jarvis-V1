@@ -888,6 +888,9 @@ def phase19(ctx):
     s, r = call(ctx["owner"], "GET", "/social/accounts")
     check("A24", "posts page can tell 'no Facebook Page' from 'not connected'",
           s == 200 and isinstance(r, dict) and "facebook_login" in r, "HTTP %s %s" % (s, r))
+    check("A27", "posts page gets Page ids so the owner chooses the Page (never the first one)",
+          s == 200 and isinstance(r, dict) and "page_id" in r and all("id" in p for p in r.get("pages") or []),
+          "pages=%d chosen=%s" % (len((r or {}).get("pages") or []), (r or {}).get("page_id")))
     pics = ["https://example.com/qa-%d.jpg" % i for i in (1, 2, 3)]
     s, r = call(ctx["owner"], "POST", "/social/posts", {"caption": "QA several pictures", "platforms": ["facebook"],
                                                         "image_urls": pics + [pics[0]]})

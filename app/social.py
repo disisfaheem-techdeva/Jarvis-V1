@@ -41,7 +41,7 @@ def is_our_media(url):
     pre = PUBLIC_BASE + "/media/"
     return url.startswith(pre) and bool(_TOKEN.match(url[len(pre):].replace(".jpg", "", 1)))
 PLATFORMS = ("facebook", "instagram")
-COLS = ("id, platforms, caption, image_url, image_urls, status, results, source, created_by, "
+COLS = ("id, platforms, caption, image_url, image_urls, page_id, status, results, source, created_by, "
         "approved_by, created_at, updated_at, published_at, scheduled_at")
 SCHEDULE_MAX_DAYS = 90
 MAX_IMAGES = 10  # Facebook multi-photo and Instagram carousel both stop at 10
@@ -134,6 +134,65 @@ def _meta_pages(cur, tid):
     return [p for p in (creds.get("pages") or []) if p.get("id") and p.get("access_token")]
 
 
+def _pick_page(pages, page_id):
+    """The Page a post goes to. With several Pages the owner must choose:
+    guessing would post a business's content on someone else's Page."""
+    if page_id:
+        for p in pages:
+            if str(p["id"]) == str(page_id):
+                return p
+        raise HTTPException(409, "That Facebook Page is no longer connected. Choose another Page.")
+    if len(pages) == 1:
+        return pages[0]
+    raise HTTPException(409, "Choose which Facebook Page to post to (top of the Posts page).")
+
+
+def _chosen_page(cur, pages, page_id, post_id):
+    """The Page named now, else the one already on this post, else the Page
+    the owner last chose for any post (so Jarvis and the Approve buttons
+    elsewhere follow the owner's choice). Never a guess."""
+    if not page_id:
+        cur.execute("SELECT page_id FROM social_posts WHERE id = %s", (post_id,))
+        row = cur.fetchone()
+        page_id = row and row["page_id"]
+    if not page_id and len(pages) > 1:
+        cur.execute("SELECT page_id FROM social_posts WHERE page_id IS NOT NULL "
+                    "ORDER BY updated_at DESC LIMIT 1")
+        row = cur.fetchone()
+        ids = {str(p["id"]) for p in pages}
+        page_id = row["page_id"] if row and row["page_id"] in ids else None
+    return _pick_page(pages, page_id)
+
+
+def _graph_err(r, body):
+    e = body.get("error") or {}
+    msg = e.get("error_user_msg") or e.get("message") or r.text[:200]
+    code = "/".join(str(x) for x in (e.get("code"), e.get("error_subcode")) if x)
+    return (msg + (" (code %s)" % code if code else ""))[:300]
+
+
+def _ig_ready(container, tok, wait=60):
+    """Instagram processes each uploaded picture before it can be published;
+    publishing too early fails with 'An unknown error has occurred'."""
+    import time
+    end = time.time() + wait
+    while True:
+        try:
+            r = requests.get(GRAPH + "/" + str(container),
+                             params={"fields": "status_code,status", "access_token": tok}, timeout=20)
+            body = r.json()
+        except (requests.RequestException, ValueError):
+            body = {}
+        st = body.get("status_code")
+        if st in ("FINISHED", "PUBLISHED"):
+            return None
+        if st in ("ERROR", "EXPIRED"):
+            return "Instagram could not use a picture: %s" % (body.get("status") or st)
+        if time.time() > end:
+            return "Instagram took too long to process the pictures. Try again in a minute."
+        time.sleep(2)
+
+
 def _graph_post(path, data):
     try:
         r = requests.post(GRAPH + path, data=data, timeout=40)
@@ -144,8 +203,7 @@ def _graph_post(path, data):
     except ValueError:
         body = {}
     if r.status_code >= 400 or "error" in body:
-        msg = (body.get("error") or {}).get("message") or r.text[:200]
-        return None, msg[:300]
+        return None, _graph_err(r, body)
     return body, None
 
 
@@ -190,12 +248,18 @@ def _publish_instagram(page, caption, images):
                                                        "access_token": tok})
             if err:
                 return {"ok": False, "error": "picture %d: %s" % (i + 1, err)}
+            err = _ig_ready(item.get("id"), tok)
+            if err:
+                return {"ok": False, "error": "picture %d: %s" % (i + 1, err)}
             kids.append(str(item.get("id")))
         body, err = _graph_post("/%s/media" % ig, {"media_type": "CAROUSEL", "children": ",".join(kids),
                                                    "caption": caption, "access_token": tok})
     else:
         body, err = _graph_post("/%s/media" % ig,
                                 {"image_url": images[0], "caption": caption, "access_token": tok})
+    if err:
+        return {"ok": False, "error": err}
+    err = _ig_ready(body.get("id"), tok)
     if err:
         return {"ok": False, "error": err}
     body2, err = _graph_post("/%s/media_publish" % ig,
@@ -205,7 +269,7 @@ def _publish_instagram(page, caption, images):
     return {"ok": True, "id": body2.get("id"), "account": page.get("ig_username")}
 
 
-def publish_post(tid, role, post_id, actor, claim_from):
+def publish_post(tid, role, post_id, actor, claim_from, page_id=None):
     """Claim the post first so a double click (or the worker and a person at
     once) can never post twice, then talk to Meta outside any transaction."""
     with tenant_session(tid, role) as cur:
@@ -213,16 +277,16 @@ def publish_post(tid, role, post_id, actor, claim_from):
         if not pages:
             raise HTTPException(409, "Connect Facebook first (Integrations, "
                                      "Connect Facebook), then approve again.")
-        cur.execute("UPDATE social_posts SET status = 'publishing', "
+        page = _chosen_page(cur, pages, page_id, post_id)
+        cur.execute("UPDATE social_posts SET status = 'publishing', page_id = %s, "
                     "approved_by = COALESCE(approved_by, %s), updated_at = now() "
                     "WHERE id = %s AND (status = ANY(%s) "
                     "OR (status = 'publishing' AND updated_at < now() - interval '10 minutes')) "
-                    "RETURNING " + COLS, (actor, post_id, list(claim_from)))
+                    "RETURNING " + COLS, (str(page["id"]), actor, post_id, list(claim_from)))
         post = cur.fetchone()
         if not post:
             raise HTTPException(409, "That post is not waiting for approval.")
         post = dict(post)
-    page = pages[0]
     images = post_images(post)
     results = {}
     if "facebook" in post["platforms"]:
@@ -284,10 +348,15 @@ def make_social_router():
             pages = _meta_pages(cur, tid)
             cur.execute("SELECT 1 FROM integrations WHERE provider = 'meta' AND status = 'connected' LIMIT 1")
             logged_in = bool(cur.fetchone())
+            cur.execute("SELECT page_id FROM social_posts WHERE page_id IS NOT NULL "
+                        "ORDER BY updated_at DESC LIMIT 1")
+            last = cur.fetchone()
         # facebook_login: Facebook is connected; connected: it also gave us a
         # Page we may post to (posting needs both).
-        return {"connected": bool(pages), "facebook_login": logged_in,
-                "pages": [{"name": p.get("name"),
+        ids = [str(p.get("id")) for p in pages]
+        chosen = ids[0] if len(ids) == 1 else (last["page_id"] if last and last["page_id"] in ids else None)
+        return {"connected": bool(pages), "facebook_login": logged_in, "page_id": chosen,
+                "pages": [{"id": str(p.get("id")), "name": p.get("name"),
                            "instagram": p.get("ig_username") or (True if p.get("ig_id") else None)}
                           for p in pages]}
 
@@ -398,7 +467,7 @@ def make_social_router():
         return {"ok": True}
 
     @router.post("/posts/{post_id}/publish")
-    def publish(post_id: str, tenant: str | None = None,
+    def publish(post_id: str, body: dict | None = Body(None), tenant: str | None = None,
                 x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
                 authorization: str | None = Header(None),
                 td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
@@ -407,7 +476,8 @@ def make_social_router():
         tid, role, uid = _ident(x_tenant_id, x_role, authorization, td_session, tenant)
         _owner_only(role)
         _client_decides(x_tenant_id, x_role, authorization, td_session)
-        return publish_post(tid, role, post_id, str(uid), ("draft", "failed"))
+        return publish_post(tid, role, post_id, str(uid), ("draft", "failed"),
+                            page_id=(body or {}).get("page_id"))
 
     @router.post("/posts/{post_id}/schedule")
     def schedule(post_id: str, body: dict = Body(...), tenant: str | None = None,
@@ -421,9 +491,11 @@ def make_social_router():
         _client_decides(x_tenant_id, x_role, authorization, td_session)
         at = str(body.get("at") or "").strip()
         with tenant_session(tid, role) as cur:
-            if not _meta_pages(cur, tid):
+            pages = _meta_pages(cur, tid)
+            if not pages:
                 raise HTTPException(409, "Connect Facebook first (Integrations, "
                                          "Connect Facebook), then schedule again.")
+            page = _chosen_page(cur, pages, body.get("page_id"), post_id)
             try:
                 cur.execute("SELECT %s::timestamptz AS at, %s::timestamptz > now() + interval '1 minute' AS future, "
                             "%s::timestamptz < now() + make_interval(days => %s) AS near",
@@ -436,14 +508,14 @@ def make_social_router():
             if not chk["near"]:
                 raise HTTPException(400, "A post can be scheduled up to %d days ahead." % SCHEDULE_MAX_DAYS)
             cur.execute("UPDATE social_posts SET status = 'scheduled', scheduled_at = %s, approved_by = %s, "
-                        "updated_at = now() WHERE id = %s AND status IN ('draft','failed') RETURNING " + COLS,
-                        (chk["at"], str(uid), post_id))
+                        "page_id = %s, updated_at = now() WHERE id = %s AND status IN ('draft','failed') "
+                        "RETURNING " + COLS, (chk["at"], str(uid), str(page["id"]), post_id))
             row = cur.fetchone()
             if not row:
                 raise HTTPException(409, "Only a draft can be scheduled.")
             record(cur, action="social.schedule", resource="social_posts", resource_id=post_id,
                    actor=str(uid), actor_type="human", status="ok",
-                   detail={"at": chk["at"].isoformat()}, error=None)
+                   detail={"at": chk["at"].isoformat(), "page": page.get("name")}, error=None)
         return {"post": dict(row)}
 
     @router.post("/posts/{post_id}/unschedule")
