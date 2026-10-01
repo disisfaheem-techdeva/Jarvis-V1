@@ -19,7 +19,13 @@ DSN = os.environ.get(
 
 @contextmanager
 def tenant_session(tenant_id: str | None, role: str):
-    """Yield a cursor scoped to a tenant + role. techdeva_admin passes tenant_id=None."""
+    """Yield a cursor scoped to a tenant + role. techdeva_admin passes tenant_id=None.
+
+    Founder + one business never means "every business": is_admin() would
+    open all rows while the caller believes it is inside one. Acting for a
+    single business, the founder is that business's owner, fenced to it."""
+    if role == "techdeva_admin" and tenant_id:
+        role = "owner"
     with psycopg.connect(DSN, row_factory=dict_row) as conn:
         with conn.cursor() as cur:
             # set_config(..., is_local=true) -> scoped to this transaction only

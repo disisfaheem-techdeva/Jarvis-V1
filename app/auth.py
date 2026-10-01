@@ -124,6 +124,12 @@ def _unb64u(s: str) -> bytes:
 def issue_token(*, tenant_id: str | None, user_id: str, role: str,
                 ttl: int | None = None) -> str:
     """Sign a session token. `tenant_id` is None only for techdeva_admin."""
+    if role == "techdeva_admin":
+        # The founder belongs to no business. A founder token that also named
+        # a business would reach the database as "admin + that business", and
+        # is_admin() opens every business's rows -- one business's screens
+        # would then show all of them mixed together.
+        tenant_id = None
     claims = {
         "t": str(tenant_id) if tenant_id else None,
         "u": str(user_id),
@@ -151,6 +157,10 @@ def verify_token(token: str) -> dict:
         raise AuthError("session expired")
     if claims.get("r") not in {"techdeva_admin", "owner", "operator"}:
         raise AuthError("bad role in token")
+    if claims.get("r") == "techdeva_admin":
+        claims["t"] = None          # tokens issued before the rule above
+    elif not claims.get("t"):
+        raise AuthError("token names no business")
     return claims
 
 

@@ -928,6 +928,27 @@ def phase20(ctx):
     check("A32", "sales tables have forced row-level security", forced and int(forced[0][0]) == 4, "forced=%s" % (forced[0][0] if forced else None))
 
 
+def phase21(ctx):
+    """No business sees another's rows (1 Oct 2026). Read-only: the founder
+    login never carries a business, and "founder + one business" reaches
+    the database fenced to that one business."""
+    acct = sql("SELECT count(*) FROM users WHERE role = 'techdeva_admin' AND tenant_id IS NOT NULL")
+    check("A33", "founder account attached to no business (else every login was mixed)",
+          acct and int(acct[0][0]) == 0, "founder accounts attached to a business: %s (the code now ignores it)" % (acct[0][0] if acct else "?"))
+    base = [LOCAL_PY] if LOCAL_PY else ["docker", "compose", "exec", "-T", "api", "python"]
+    out = sh(base + ["-c", (
+        "from app.auth import issue_token, verify_token\n"
+        "from app.db import tenant_session\n"
+        "print(verify_token(issue_token(tenant_id=%r, user_id='check', role='techdeva_admin', ttl=60))['t'])\n"
+        "with tenant_session(%r, 'techdeva_admin') as cur:\n"
+        "    cur.execute('SELECT count(DISTINCT tenant_id) AS n FROM services')\n"
+        "    print(cur.fetchone()['n'])") % (ctx["qa"], ctx["qa"])]).split()
+    check("A34", "a founder login that names a business is cut back to no business",
+          len(out) == 2 and out[0] == "None", "token business=%s" % (out[0] if out else "?"))
+    check("A35", "founder acting for one business sees only that business's rows",
+          len(out) == 2 and out[1] in ("0", "1"), "businesses visible=%s" % (out[1] if len(out) == 2 else out))
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)
