@@ -89,7 +89,9 @@ Fields:
             add_lead: name, phone, service
             add_expense: description, amount (number, PKR), category, method
                 (cash, card, bank, jazzcash, easypaisa), spent_on (YYYY-MM-DD)
-            schedule_post: caption (finished post text, as for kind post),
+            schedule_post: caption (finished post text, laid out exactly as
+                for kind post: headline, description, call to action,
+                3 to 5 hashtags),
                 platforms, at (ISO time with +05:00, e.g.
                 2026-10-02T18:00:00+05:00), at_words (e.g. "Friday 6 pm")
           appointment_id must be the "id" of one of upcoming_appointments in
@@ -117,10 +119,25 @@ Fields:
               business_hours: day_of_week (0=Sun,1=Mon,2=Tue,3=Wed,4=Thu,
                               5=Fri,6=Sat), opens ("HH:MM"), closes ("HH:MM"),
                               is_closed (true/false)
-  "caption": if kind is post, the finished social media caption, ready to
+  "caption": if kind is post, the finished Facebook/Instagram post, ready to
             publish, written for the business's customers in the business's
-            own voice, using only facts the owner gave. Include a short call
-            to action. Hashtags only if the owner asked for them.
+            own voice (English unless the owner wrote the post content in
+            Roman Urdu or Urdu). Lay it out exactly like this, with a blank
+            line between the parts:
+              1. Headline: one short hook line (under 10 words) naming the
+                 service or offer. This is what people see before "See more".
+              2. Description: two or three short lines -- what it is, who it
+                 is for, and the offer, price or dates ONLY if the owner said
+                 them or they are in BUSINESS FACTS.
+              3. Call to action: one line telling people how to book (message
+                 on WhatsApp, call, or visit), with the phone or area only if
+                 it is in BUSINESS FACTS.
+              4. Hashtags: 3 to 5 relevant hashtags on the last line (the
+                 service, the kind of business, the city, the business name),
+                 no spaces inside a tag. Never more than 5: Instagram allows 5.
+            At most two emoji. Never invent prices, discounts, dates, results
+            or promises ("guaranteed", "permanent", "100%"), and no medical
+            claims.
   "platforms": if kind is post, an array of "facebook" and/or "instagram";
             both if the owner did not say
   "image_url": if kind is post and the owner gave an https picture link, that
@@ -227,6 +244,44 @@ def _clean_prefs(raw):
 # Appended to the classifier so the reply sounds right when spoken.
 LANG_RULE = ("\n\nLanguage: write \"reply\" in the same language and script the owner used "
              "(English, Urdu script, or Roman Urdu). Keep it short and natural to say aloud.")
+
+
+def _attached_images(body):
+    """Pictures the owner attached in Jarvis: image_urls (several) or the
+    older single image_url. Only links this platform issued; at most 10."""
+    from .social import MAX_IMAGES, is_our_media
+    raw = body.get("image_urls") if isinstance(body.get("image_urls"), list) else []
+    raw = raw + [body.get("image_url")]
+    out = []
+    for u in raw:
+        if isinstance(u, str) and is_our_media(u) and u not in out:
+            out.append(u)
+    return out[:MAX_IMAGES]
+
+
+def _tidy_caption(text):
+    """Instagram takes at most 5 hashtags; extra ones after the fifth are
+    dropped so a Jarvis caption can always go to both platforms."""
+    seen = []
+    def keep(m):
+        tag = m.group(0)
+        if tag.lower() in seen or len(seen) >= 5:
+            return ""
+        seen.append(tag.lower())
+        return tag
+    text = re.sub(r"#[\w\u0600-\u06ff]+", keep, str(text or ""))
+    text = re.sub(r"[ \t]+\n", "\n", re.sub(r"[ \t]{2,}", " ", text))
+    return text.strip()
+
+
+def _post_platforms(platforms, images):
+    """Instagram cannot publish a post without a picture: drop it and say so."""
+    from .social import _clean_platforms
+    plats = _clean_platforms(platforms)
+    if not images and "instagram" in plats:
+        plats = [p for p in plats if p != "instagram"] or ["facebook"]
+        return plats, " Instagram needs a picture, so this one is for Facebook only. Attach a picture if you want it on Instagram too."
+    return plats, ""
 
 
 # ------------------------------------------------------------------ facts
@@ -529,8 +584,10 @@ def make_console_router():
         # can listen to. Timing goes back in headers so a slow turn can be
         # pinned on the model or the voice, not guessed at.
         voice = bool(body.get("voice"))
-        if body.get("image_url"):
-            message += "\n[The owner attached a picture to this message, for a social media post.]"
+        attached = _attached_images(body)
+        if attached:
+            message += ("\n[The owner attached %d picture%s to this message, for a social media post.]"
+                        % (len(attached), "" if len(attached) == 1 else "s"))
         system = CLASSIFY + LANG_RULE + FACTS_RULE + (VOICE_RULE if voice else "")
         t0 = time.time()
         try:
@@ -565,6 +622,14 @@ def make_console_router():
                 v = str(args.get(k) or "").strip().lower()
                 if v and not any(w in heard for w in re.findall(r"[a-z0-9\u0600-\u06ff]{3,}", v)):
                     args.pop(k, None)
+            if action == "schedule_post":
+                args.pop("image_url", None)
+                args["image_urls"] = attached
+                args["platforms"], note = _post_platforms(args.get("platforms"), attached)
+                if note:
+                    args["_note"] = note
+                if args.get("caption"):
+                    args["caption"] = _tidy_caption(args["caption"])
             if action in ja.CONFIRM:
                 try:
                     question = ja.describe(tid, role, action, args, founder)
@@ -621,15 +686,19 @@ def make_console_router():
         if kind == "post":
             if role not in ("owner", "techdeva_admin"):
                 raise HTTPException(403, "Only the business owner can post for the business.")
-            from .social import create_draft, is_our_media
-            # A picture the owner attached in Jarvis wins over any link the
-            # model extracted; only links this platform issued are accepted.
-            attached = body.get("image_url") if is_our_media(body.get("image_url")) else None
+            from .social import create_draft
+            # Pictures the owner attached in Jarvis win over any link the
+            # model extracted; only links this platform issued are attached.
+            images = attached or ([out["image_url"]] if out.get("image_url") else [])
+            plats, note = _post_platforms(out.get("platforms"), images)
             with tenant_session(tid, role) as cur:
-                draft = create_draft(cur, tid, uid, out.get("caption") or message,
-                                     out.get("platforms"), attached or out.get("image_url") or None)
+                draft = create_draft(cur, tid, uid, _tidy_caption(out.get("caption") or message),
+                                     plats, image_urls=images)
+            n = len(images)
             return {"kind": "post", "post": draft,
-                    "reply": "I drafted this post. Check it, then press Approve & post."}
+                    "reply": "I drafted this post" + (" with your %d pictures" % n if n > 1 else
+                                                      " with your picture" if n else "") +
+                             ". Check it, then press Approve & post." + note}
         if kind == "business":
             if role not in ("owner", "techdeva_admin"):
                 raise HTTPException(403, "Only the business owner can change business details.")

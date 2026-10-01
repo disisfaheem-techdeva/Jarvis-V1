@@ -771,7 +771,7 @@ function loadPosts(){
       return '<div style="padding:12px 14px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:var(--card)">' +
         '<div class="sub">' + esc((p.platforms || []).join(' + ')) + ' &middot; ' + esc(p.status) +
         ' &middot; ' + esc(String(p.created_at).slice(0,16).replace('T',' ')) + '</div>' +
-        (p.image_url ? '<img src="' + esc(p.image_url) + '" alt="" style="max-width:220px;border-radius:8px;margin:8px 0;display:block">' : '') +
+        (pstImgs(p).length ? '<div class="pst-imgs">' + pstImgs(p).map(function(u){ return '<img src="' + esc(u) + '" alt="" class="pst-img">'; }).join('') + '</div>' : '') +
         '<div style="white-space:pre-wrap;margin:6px 0">' + esc(p.caption) + '</div>' +
         (errs.length ? '<div class="sub" style="color:var(--danger)">' + esc(errs.join(' | ')) + '</div>' : '') +
         (waiting ? '<div style="margin-top:8px"><button class="btn" data-pub="' + esc(p.id) + '">Approve &amp; post</button> ' +
@@ -4381,21 +4381,32 @@ function jvToJpeg(file){
     rd.readAsDataURL(file);
   });
 }
+// Pictures attached for a post, in order: each { src: preview, url: link once uploaded }
+function jvImgs(){ if (!JV.imgs) JV.imgs = []; return JV.imgs; }
+function jvImgsBusy(){ return jvImgs().some(function(m){ return !m.url; }); }
+function jvImgUrls(){ return jvImgs().map(function(m){ return m.url; }).filter(Boolean); }
 function jvAttachHTML(){
-  if (!JV.img) return '';
-  return '<div class="jv-att"><img src="' + JV.img + '" alt=""><span class="card-note">' + (JV.imgUrl ? 'Picture ready for the post' : 'Uploading picture…') +
-    '</span><button class="btn" id="jv-att-x" title="Remove picture">✕</button></div>';
+  var a = jvImgs(); if (!a.length) return '';
+  return '<div class="jv-att">' + a.map(function(m, i){
+      return '<div class="pst-thumb"><img src="' + m.src + '" alt="Picture ' + (i + 1) + '">' + (m.url ? '' : '<span class="pst-up">Uploading…</span>') +
+        '<button type="button" class="pst-x" data-jvrm="' + i + '" aria-label="Remove picture ' + (i + 1) + '">×</button></div>';
+    }).join('') +
+    '<span class="card-note">' + (jvImgsBusy() ? 'Uploading…' : a.length + (a.length === 1 ? ' picture' : ' pictures') + ' ready for the post') + '</span></div>';
 }
-function jvRenderAttach(){ var el = document.getElementById('jv-attach'); if (el) { el.innerHTML = jvAttachHTML(); var x = document.getElementById('jv-att-x'); if (x) x.onclick = function(){ JV.img = JV.imgUrl = null; jvRenderAttach(); }; } }
+function jvRenderAttach(){
+  var el = document.getElementById('jv-attach'); if (!el) return;
+  el.innerHTML = jvAttachHTML();
+  el.querySelectorAll('[data-jvrm]').forEach(function(b){ b.onclick = function(){ jvImgs().splice(+b.getAttribute('data-jvrm'), 1); jvRenderAttach(); }; });
+}
 function consoleSend(){
   var box = document.getElementById('con-in'), out = document.getElementById('con-out');
   if (!box || !box.value.trim() || JV.state === 'processing') return;
-  if (JV.img && !JV.imgUrl) { jvSet('error', 'The picture is still uploading. Try again in a moment.'); return; }
+  if (jvImgsBusy()) { jvSet('error', 'The pictures are still uploading. Try again in a moment.'); return; }
   var msg = box.value.trim(), spoken = JARVIS_SPOKEN; JARVIS_SPOKEN = false;
   var t0 = Date.now(); JV.timing = '';
   jvSet('processing', '“' + msg.slice(0, 80) + (msg.length > 80 ? '…' : '') + '”');
   var body = { message: msg, voice: !!(spoken || JV.conv) };
-  if (JV.imgUrl) body.image_url = JV.imgUrl;
+  if (jvImgUrls().length) body.image_urls = jvImgUrls();
   fetch('/console', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function(r){
       var st = r.headers.get('Server-Timing') || '', m = /think;dur=(\d+)/.exec(st);
@@ -4417,8 +4428,8 @@ function consoleSend(){
       if (d.kind === 'teach') { extra = '<div class="sub" style="margin-top:8px">Your agent will now follow: <em>' + esc(d.lesson || '') + '</em></div>'; loadLessons(); }
       if (d.kind === 'dashboard') { PREFS = d.prefs || PREFS; applyBrand(); extra = '<div class="sub" style="margin-top:8px">Applied: ' + esc(JSON.stringify(d.changed || {})) + '</div>'; }
       if (d.kind === 'post') {
-        extra = '<div class="sub" style="margin-top:8px">Nothing is public yet. Review it under Social posts below' + (d.post && d.post.image_url ? ' (with your picture)' : '') + '.</div>';
-        JV.img = JV.imgUrl = null; jvRenderAttach(); loadPosts();
+        extra = '<div class="sub" style="margin-top:8px">Nothing is public yet. Review it under Social posts below' + (d.post && d.post.image_url ? ' (with your pictures)' : '') + '.</div>';
+        JV.imgs = []; jvRenderAttach(); loadPosts();
       }
       if (d.kind === 'business') {
         need('biz_' + d.resource, '/business/' + d.resource, true);
@@ -4448,7 +4459,7 @@ VIEWS.console = function(){
     '<div class="jv-inrow"><button class="btn jv-clip" id="jv-clip" type="button" title="Attach a picture for a post">📎</button>' +
     '<textarea id="con-in" class="fld" rows="2" placeholder="Or type here. Example: Post this on Facebook and Instagram: Hair PRP 20% off this week."></textarea>' +
     '<button id="con-go" class="btn primary" type="button">Send</button></div>' +
-    '<input type="file" id="jv-file" accept="image/*" style="display:none">' +
+    '<input type="file" id="jv-file" accept="image/*" multiple style="display:none">' +
     '<div id="con-out" style="margin-top:14px"></div></div></div>';
   out += '<h2>Social posts</h2>' + panel('Waiting for your approval', actbar() + '<div id="con-posts">' + loading('Loading posts...') + '</div>');
   out += '<h2>What your WhatsApp agent has been taught</h2>' + panel('Lessons', '<div id="con-les">' + loading('Loading...') + '</div>');
@@ -4458,16 +4469,22 @@ VIEWS.console = function(){
     if (g('con-in')) g('con-in').onkeydown = function(e){ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); consoleSend(); } };
     if (g('jv-clip')) g('jv-clip').onclick = function(){ g('jv-file').click(); };
     if (g('jv-file')) g('jv-file').onchange = function(){
-      var f = g('jv-file').files && g('jv-file').files[0]; if (!f) return;
+      var files = Array.prototype.slice.call(g('jv-file').files || []); g('jv-file').value = '';
+      if (!files.length) return;
       if (!isOwner()) { jvSet('error', 'Only the business owner can post for the business.'); return; }
-      jvToJpeg(f).then(function(jpeg){
-        JV.img = jpeg; JV.imgUrl = null; jvRenderAttach();
-        return api('/social/media', { method: 'POST', body: { image: jpeg } });
-      }).then(function(r){
-        if (!r || !r.ok) throw new Error((r && r.data && r.data.detail) || 'The picture was not saved.');
-        JV.imgUrl = r.data.url; jvRenderAttach();
-        var box = g('con-in'); if (box && !box.value.trim()) box.placeholder = 'Say what the post should say, e.g. "Post this: Hair PRP 20% off this week"';
-      }).catch(function(e){ JV.img = JV.imgUrl = null; jvRenderAttach(); jvSet('error', e.message); });
+      var room = 10 - jvImgs().length;
+      if (files.length > room) jvSet('error', room > 0 ? 'A post can have 10 pictures, so only the first ' + room + ' were added.' : 'A post can have 10 pictures.');
+      files.slice(0, Math.max(room, 0)).forEach(function(f){
+        var m = { src: '', url: null };
+        jvToJpeg(f).then(function(jpeg){
+          m.src = jpeg; jvImgs().push(m); jvRenderAttach();
+          return api('/social/media', { method: 'POST', body: { image: jpeg } });
+        }).then(function(r){
+          if (!r || !r.ok) throw new Error((r && r.data && r.data.detail) || 'A picture was not saved.');
+          m.url = r.data.url; jvRenderAttach();
+          var box = g('con-in'); if (box && !box.value.trim()) box.placeholder = 'Say what the post is about, e.g. "Post these: Hair PRP 20% off this week"';
+        }).catch(function(e){ var i = jvImgs().indexOf(m); if (i !== -1) jvImgs().splice(i, 1); jvRenderAttach(); jvSet('error', e.message); });
+      });
     };
     jvRenderAttach(); wireConsoleMic(); loadPosts(); loadLessons();
   }, 0);
@@ -4479,7 +4496,7 @@ VIEWS.console = function(){
     '.jv-mic{min-width:190px;padding:10px 16px;font-size:14px}' +
     '.jv-inrow{display:flex;gap:8px;align-items:flex-end}.jv-inrow textarea{flex:1;min-width:0;resize:vertical}' +
     '.jv-clip{font-size:17px;padding:8px 11px}' +
-    '.jv-att{display:flex;align-items:center;gap:10px;margin-bottom:8px}.jv-att img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}' +
+    '.jv-att{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}.jv-att .pst-thumb,.jv-att .pst-thumb img{width:64px;height:64px}' +
     '@media(max-width:560px){.jv-mic{min-width:0;flex:1}.jv-head{gap:10px}}';
   document.head.appendChild(st);
 })();
@@ -5491,7 +5508,7 @@ function consoleSend(opt){
   if (opt && opt.confirm) { body = { confirm: opt.confirm }; msg = opt.label || 'Yes'; }
   else {
     if (!box || !box.value.trim()) return;
-    if (JV.img && !JV.imgUrl) { jvSet('error', 'The picture is still uploading. Try again in a moment.'); return; }
+    if (jvImgsBusy()) { jvSet('error', 'The pictures are still uploading. Try again in a moment.'); return; }
     msg = box.value.trim();
     if (JV.pending) {
       var p = JV.pending, yn = jvYesNo(msg); JV.pending = null;
@@ -5499,7 +5516,7 @@ function consoleSend(opt){
       if (yn === 'no') { box.value = ''; jvHist('user', msg); return jvLocal('Okay, I\'ve left it as it is.'); }
     }
     body = { message: msg, history: JV.hist.slice(-8) };
-    if (JV.imgUrl) body.image_url = JV.imgUrl;
+    if (jvImgUrls().length) body.image_urls = jvImgUrls();
   }
   var spoken = !!(JARVIS_SPOKEN || JV.conv); JARVIS_SPOKEN = false;
   body.voice = spoken;
@@ -5522,7 +5539,7 @@ function consoleSend(opt){
         if (d.kind === 'dashboard') { PREFS = d.prefs || PREFS; applyBrand(); }
         if (d.kind === 'post') {
           extra = '<div class="jv-x">Nothing is public yet. <a href="#/needshuman">Review it in Needs Human</a></div>';
-          JV.img = JV.imgUrl = null; jvRenderAttach(); loadPosts();
+          JV.imgs = []; jvRenderAttach(); loadPosts();
         }
         if (d.kind === 'business') { need('biz_' + d.resource, '/business/' + d.resource, true); }
         if (d.kind === 'confirm') {
@@ -5599,7 +5616,7 @@ VIEWS.console = function(){
     return m + ' <button id="jv-voice" class="btn" type="button" title="Quick: your browser\'s voice, instant. Natural: the studio voice, a second or two slower. Urdu always uses the studio voice." onclick="jvToggleVoice(this)">' + jvVoiceLabel() + '</button>';
   });
   h = h.replace('Ask about figures, change prices, services, staff and hours, teach your WhatsApp agent, or attach a picture and ask for a post.',
-    'Ask about your figures, book, move or cancel appointments, add customers, leads and expenses, change prices, services, staff and hours, teach your WhatsApp agent, open any page, or attach a picture and ask for a post.');
+    'Ask about your figures, book, move or cancel appointments, add customers, leads and expenses, change prices, services, staff and hours, teach your WhatsApp agent, open any page, or attach pictures (up to 10) and ask for a post.');
   setTimeout(function(){
     jvShowOut();
     var go = document.getElementById('con-go'); if (go) go.onclick = function(){ consoleSend(); };
@@ -5919,7 +5936,7 @@ VIEWS.needshuman = function(){
     var errs = Object.keys(res).filter(function(k){ return res[k] && !res[k].ok; }).map(function(k){ return k + ': ' + (res[k].error || 'failed'); });
     return '<div style="padding:14px 16px;border-bottom:1px solid var(--line)">' +
       '<div class="card-note">' + esc((p.platforms || []).join(' + ')) + ' · ' + esc(p.status === 'failed' ? 'failed to post' : 'draft') + ' · ' + esc(String(p.created_at).slice(0, 16).replace('T', ' ')) + '</div>' +
-      (p.image_url ? '<img src="' + esc(p.image_url) + '" alt="" style="max-width:220px;border-radius:8px;margin:8px 0;display:block">' : '') +
+      (pstImgs(p).length ? '<div class="pst-imgs">' + pstImgs(p).map(function(u){ return '<img src="' + esc(u) + '" alt="" class="pst-img">'; }).join('') + '</div>' : '') +
       '<div style="white-space:pre-wrap;margin:6px 0">' + esc(p.caption) + '</div>' +
       (errs.length ? '<div class="card-note" style="color:var(--danger)">' + esc(errs.join(' | ')) + '</div>' : '') +
       '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" data-nhpub="' + esc(p.id) + '">Approve &amp; post</button>' +

@@ -180,8 +180,12 @@ def describe(tid, role, action, args, founder=False):
     if action == "schedule_post":
         _need(args, "caption", "post text")
         _need(args, "at", "date and time to post")
-        return "Schedule this post for {}: “{}”?".format(
-            args.get("at_words") or args["at"], str(args["caption"])[:140])
+        n = len(args.get("image_urls") or [])
+        where = " and ".join(p.capitalize() for p in (args.get("platforms") or ["facebook", "instagram"]))
+        pics = " with {} picture{}".format(n, "" if n == 1 else "s") if n else ""
+        return "Schedule this post on {}{} for {}: “{}”?{}".format(
+            where, pics, args.get("at_words") or args["at"], str(args["caption"])[:140],
+            args.get("_note") or "")
     return "Go ahead?"
 
 
@@ -265,10 +269,11 @@ def run(tid, role, uid, action, args, founder=False):
             raise ActionError("scheduling a post is the client's own decision, so they have to do it")
         if role not in ("owner", "techdeva_admin"):
             raise ActionError("only the business owner can post for the business")
-        from .social import create_draft
+        from .social import create_draft, is_our_media
+        imgs = [u for u in (args.get("image_urls") or []) if isinstance(u, str) and is_our_media(u)]
         with tenant_session(tid, role) as cur:
             draft = create_draft(cur, tid, uid, _need(args, "caption", "post text"),
-                                 args.get("platforms"), args.get("image_url") or None)
+                                 args.get("platforms"), image_urls=imgs)
         try:
             out = _call(tid, role, uid, "POST", "/social/posts/%s/schedule" % draft["id"],
                         {"at": _need(args, "at", "date and time to post")})
