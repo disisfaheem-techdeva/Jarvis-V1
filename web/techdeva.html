@@ -3,9 +3,9 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>TechDeva Founder Console</title>
 <style>
-:root{--bg:#0B0B0F;--panel:#17161D;--panel2:#111016;--line:#2E2B37;--text:#F4F1EA;
-  --muted:#A29D8F;--accent:#E8C547;--tech:#4DA6F0;--growth:#34D07C;--warn:#E0A458;
-  --danger:#E06A6A;--gold:#E8C547;--r:12px}
+:root{--bg:#060509;--panel:#121019;--panel2:#0B0A11;--line:#2A2438;--text:#F3F0FA;
+  --muted:#A49CB8;--accent:#8B5CF6;--tech:#4DA6F0;--growth:#34D07C;--warn:#E0A458;
+  --danger:#E06A6A;--gold:#A78BFA;--r:12px}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);
   font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
@@ -15,13 +15,13 @@ aside{background:var(--panel2);border-right:1px solid var(--line);padding:20px 0
 .brand{padding:0 20px 18px;font-weight:800;letter-spacing:.14em;font-size:13px;color:var(--muted)}
 .brand b{color:var(--gold)}
 nav{flex:1;overflow:auto}
-.navgrp{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#5c6a8a;
+.navgrp{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#7C6FA0;
   padding:16px 20px 6px}
 nav a{display:flex;justify-content:space-between;gap:8px;align-items:center;
   padding:8px 20px;color:var(--muted);text-decoration:none;font-size:13.5px;
   border-left:2px solid transparent}
-nav a:hover{color:var(--text);background:#0c1220}
-nav a.on{color:var(--text);background:#141c30;border-left-color:var(--accent);font-weight:600}
+nav a:hover{color:var(--text);background:#15112A}
+nav a.on{color:var(--text);background:#1E1736;border-left-color:var(--accent);font-weight:600}
 nav a .tag{font-size:11px;color:var(--warn)}
 .sidefoot{padding:14px 20px 0;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
 .sidefoot a{color:var(--gold);text-decoration:none}
@@ -34,7 +34,7 @@ h1{margin:0;font-size:24px;letter-spacing:-.02em}
 button{background:var(--panel);color:var(--text);border:1px solid var(--line);
   border-radius:9px;padding:8px 14px;font:inherit;cursor:pointer}
 button:hover{border-color:var(--accent)}
-button.primary{background:var(--accent);border-color:var(--accent);color:#08101f;font-weight:600}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
 button.tiny{padding:4px 9px;font-size:12px;border-radius:7px}
 .grid{display:grid;gap:14px;margin-top:18px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px}
@@ -61,7 +61,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .bars{display:flex;align-items:flex-end;gap:10px;height:120px;padding-top:10px}
 .bar{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:6px;height:100%}
 .bar i{display:block;width:100%;border-radius:6px 6px 0 0;min-height:2px;
-  background:linear-gradient(180deg,var(--accent),#2a3f86)}
+  background:linear-gradient(180deg,var(--accent),#3B1F7A)}
 .bar span{font-size:10px;color:var(--muted)}
 .empty{color:var(--muted);padding:24px;text-align:center;border:1px dashed var(--line);border-radius:var(--r)}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:nowrap}
@@ -78,15 +78,15 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 #login input{width:100%;margin:8px 0;padding:11px;background:var(--panel2);
   border:1px solid var(--line);border-radius:9px;color:var(--text);font:inherit}
 .err{color:var(--danger);font-size:13px;min-height:18px}
-/* Founder identity: gold, not the clients' blue, so this screen is never
+/* Founder identity: violet on black, not the clients' blue, so this screen is never
    mistaken for a business dashboard. */
 body::before{content:"";position:fixed;left:0;right:0;top:0;height:3px;z-index:50;
-  background:linear-gradient(90deg,#E8C547,#B8862B,#E8C547)}
+  background:linear-gradient(90deg,#8B5CF6,#5B2EC9,#8B5CF6)}
 .role-badge{display:inline-block;margin:6px 20px 4px;padding:3px 10px;border-radius:999px;font-size:10.5px;
-  font-weight:700;letter-spacing:.12em;color:#1a1405;background:linear-gradient(90deg,#E8C547,#C99A32)}
-.scope{font-size:12px;color:var(--gold);border:1px solid #5a4a1a;background:#1d1809;border-radius:999px;padding:4px 11px;white-space:nowrap}
-nav a.on{background:#1f1b10}
-.bar i{background:linear-gradient(180deg,#E8C547,#7a5c16)}
+  font-weight:700;letter-spacing:.12em;color:#fff;background:linear-gradient(90deg,#8B5CF6,#6D3FE0)}
+.scope{font-size:12px;color:var(--gold);border:1px solid #4C3A86;background:#171026;border-radius:999px;padding:4px 11px;white-space:nowrap}
+nav a.on{background:#1E1736}
+.bar i{background:linear-gradient(180deg,#A78BFA,#4C1D95)}
 #menubtn{display:none}
 @media(max-width:900px){
   .shell{grid-template-columns:1fr}
@@ -891,6 +891,8 @@ function wkAct(sel, fn){
     try { await fn(b); } catch (e) { alert(e.message); b.disabled = false; }
   }), 0);
 }
+// After Edit: bring the form (now right under that row) into view, cursor in the first box.
+function wkFocus(id){ setTimeout(() => { const e = document.getElementById(id); if (e) { e.scrollIntoView({block: 'center'}); e.focus(); } }, 30); }
 const wkVal = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
 const wkInput = 'style="background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;font:inherit"';
 
@@ -922,7 +924,7 @@ VIEWS.team = function(){
     esc(t.code || '') + '</b> and their PIN. They see the tasks you give them under <b>Client work</b>. Staff access has no money pages.</div></div>';
   const ed = W.empEdit ? (t.employees || []).find(e => e.id === W.empEdit) : null;
   const v = k => esc(ed && ed[k] != null ? String(ed[k]).slice(0, k === 'joining_date' ? 10 : 200) : '');
-  out += '<div class="card" style="margin-bottom:16px"><div class="k-label">' + (ed ? 'Edit ' + esc(ed.name) : 'Add an employee') + '</div>' +
+  const form = '<div class="card" id="em-form" style="margin-bottom:16px' + (ed ? ';border:1px solid var(--gold)' : '') + '"><div class="k-label">' + (ed ? 'Edit ' + esc(ed.name) : 'Add an employee') + '</div>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
     '<input id="em-name" placeholder="Full name" value="' + v('name') + '" ' + wkInput + ' style="flex:1;min-width:170px">' +
     '<input id="em-job" placeholder="Job, e.g. Sales, Designer" value="' + v('job') + '" ' + wkInput + ' style="flex:1;min-width:170px">' +
@@ -936,6 +938,7 @@ VIEWS.team = function(){
     '<option value="full"' + (ed && ed.access === 'full' ? ' selected' : '') + '>Full: everything, including money</option></select>' +
     '<button class="primary" id="em-save">' + (ed ? 'Save changes' : 'Add employee') + '</button>' + (ed ? ' <button id="em-cancel">Cancel</button>' : '') + '</div>' +
     '<div class="k-note" style="margin-top:6px">Give a PIN if they should log in and get tasks. Tell them the PIN yourself; easy PINs like 1234 are refused.</div></div>';
+  if (!ed) out += form;
   const emps = t.employees || [];
   out += '<div class="card">' + tbl('<th>Employee</th><th>Job</th><th>Phone</th><th>Joined</th><th>Salary</th><th>Login</th><th>Open tasks</th><th></th>',
     emps.map(e => '<tr' + (e.active ? '' : ' style="opacity:.55"') + '><td><b>' + esc(e.name) + '</b>' + (e.email ? '<div class="k-note">' + esc(e.email) + '</div>' : '') + '</td><td>' + esc(e.job || '-') +
@@ -944,7 +947,8 @@ VIEWS.team = function(){
       (!e.active ? '<span class="dim">left</span>' : e.has_pin ? '<span class="good">PIN · ' + (e.access === 'full' ? 'full' : 'staff') + '</span>' : '<span class="dim">no login</span>') +
       '</td><td>' + (e.open_tasks ? '<a href="#/work" style="color:var(--gold)">' + e.open_tasks + '</a>' : '0') + '</td><td style="white-space:nowrap">' +
       (e.active ? '<button data-emedit="' + esc(e.id) + '">Edit</button> ' + (e.has_pin ? '<button data-emnopin="' + esc(e.id) + '">Remove PIN</button> ' : '') +
-        '<button data-emleft="' + esc(e.id) + '">Left</button>' : '<button data-emback="' + esc(e.id) + '">Rejoined</button>') + '</td></tr>')) + '</div>';
+        '<button data-emleft="' + esc(e.id) + '">Left</button>' : '<button data-emback="' + esc(e.id) + '">Rejoined</button>') + '</td></tr>' +
+      (ed && ed.id === e.id ? '<tr><td colspan="8">' + form + '</td></tr>' : ''))) + '</div>';
   const others = (t.team || []).filter(u => !emps.some(e => String(e.user_id) === String(u.id)));
   if (others.length) out += '<div class="card" style="margin-top:16px"><div class="k-label">Other logins to this business</div>' +
     others.map(u => '<div class="k-note" style="margin-top:6px">' + esc(u.name || u.email) + ' · ' + (u.role === 'techdeva_admin' ? 'founder' : u.role === 'owner' ? 'owner' : 'staff') + '</div>').join('') + '</div>';
@@ -959,7 +963,7 @@ VIEWS.team = function(){
     W.empEdit = null; wkFresh();
   });
   wkAct('#em-cancel', async () => { W.empEdit = null; paint(); });
-  wkAct('[data-emedit]', async b => { W.empEdit = b.getAttribute('data-emedit'); paint(); window.scrollTo(0, 0); });
+  wkAct('[data-emedit]', async b => { W.empEdit = b.getAttribute('data-emedit'); paint(); wkFocus('em-name'); });
   const put = (id, body) => api('/techdeva/work/employees/' + id, {method:'PUT', body: JSON.stringify(body)}).then(wkFresh);
   wkAct('[data-emnopin]', async b => { if (!confirm('Remove this PIN? They can no longer log in.')) { b.disabled = false; return; } await put(b.getAttribute('data-emnopin'), {remove_pin: true}); });
   wkAct('[data-emleft]', async b => { if (!confirm('Mark as left? Their PIN stops working; their history stays.')) { b.disabled = false; return; } await put(b.getAttribute('data-emleft'), {active: false}); });
@@ -973,7 +977,8 @@ VIEWS.catalog = function(){
   if (c.error) return '<div class="empty">' + esc(c.error) + '</div>';
   if (!c.home) return wkNoHome();
   const ed = W.catEdit ? c.items.find(i => i.id === W.catEdit) : null;
-  let out = '<section><div class="card" style="margin-bottom:16px"><div class="k-label">' + (ed ? 'Edit ' + esc(ed.name) : 'Add a service') + '</div>' +
+  let out = '<section>';
+  const form = '<div class="card" id="ct-form" style="margin-bottom:16px' + (ed ? ';border:1px solid var(--gold)' : '') + '"><div class="k-label">' + (ed ? 'Edit ' + esc(ed.name) : 'Add a service') + '</div>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
     '<input id="ct-name" placeholder="Name, e.g. Meta ads management" ' + wkInput + ' value="' + esc(ed ? ed.name : '') + '" style="flex:2;min-width:200px">' +
     '<select id="ct-cat" ' + wkInput + '>' + CATS.map(k => '<option' + ((ed ? ed.category : 'ads') === k ? ' selected' : '') + '>' + k + '</option>').join('') + '</select>' +
@@ -982,11 +987,13 @@ VIEWS.catalog = function(){
     '<input id="ct-desc" placeholder="What is included (optional)" ' + wkInput + ' value="' + esc(ed ? ed.description : '') + '" style="width:100%;margin-top:8px;box-sizing:border-box">' +
     '<div style="margin-top:10px"><button class="primary" id="ct-save">' + (ed ? 'Save changes' : 'Add to catalogue') + '</button>' +
     (ed ? ' <button id="ct-cancel">Cancel</button>' : '') + '</div></div>';
+  if (!ed) out += form;
   out += '<div class="card">' + tbl('<th>Service</th><th>Type</th><th>Price</th><th>Clients on it</th><th>Status</th><th></th>',
     c.items.map(i => '<tr><td><b>' + esc(i.name) + '</b>' + (i.description ? '<div class="k-note">' + esc(i.description) + '</div>' : '') + '</td><td>' + esc(i.category) +
       '</td><td>' + wkPrice(i.price, i.billing) + '</td><td>' + (i.active_clients || 0) + '</td><td>' +
       (i.active ? '<span class="good">selling</span>' : '<span class="dim">stopped</span>') + '</td><td style="white-space:nowrap"><button data-ctedit="' + esc(i.id) + '">Edit</button> ' +
-      '<button data-cttog="' + esc(i.id) + '" data-on="' + (i.active ? '1' : '') + '">' + (i.active ? 'Stop selling' : 'Sell again') + '</button></td></tr>')) + '</div>' +
+      '<button data-cttog="' + esc(i.id) + '" data-on="' + (i.active ? '1' : '') + '">' + (i.active ? 'Stop selling' : 'Sell again') + '</button></td></tr>' +
+      (ed && ed.id === i.id ? '<tr><td colspan="6">' + form + '</td></tr>' : ''))) + '</div>' +
     '<div class="k-note" style="margin-top:10px">Plan prices here are what you charge. The limits of each plan (numbers, conversations) are on the Plans panel under Clients.</div></section>';
   wkAct('#ct-save', async () => {
     const body = {name: wkVal('ct-name'), category: wkVal('ct-cat'), price: wkVal('ct-price'), billing: wkVal('ct-bill'), description: wkVal('ct-desc')};
@@ -996,7 +1003,7 @@ VIEWS.catalog = function(){
     W.catEdit = null; wkFresh();
   });
   wkAct('#ct-cancel', async () => { W.catEdit = null; paint(); });
-  wkAct('[data-ctedit]', async b => { W.catEdit = b.getAttribute('data-ctedit'); paint(); window.scrollTo(0, 0); });
+  wkAct('[data-ctedit]', async b => { W.catEdit = b.getAttribute('data-ctedit'); paint(); wkFocus('ct-name'); });
   wkAct('[data-cttog]', async b => { await api('/techdeva/work/catalog/' + b.getAttribute('data-cttog'), {method:'PUT', body: JSON.stringify({active: !b.getAttribute('data-on')})}); wkFresh(); });
   return out;
 };
