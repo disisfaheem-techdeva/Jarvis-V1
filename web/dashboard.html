@@ -4603,7 +4603,8 @@ function boot(){
    Write a post (with a picture), then post it now or pick a time. Scheduled
    posts are published by the platform's worker at that time; the owner can
    take one back to a draft until then. Nothing goes public without the owner. */
-var PST = { img: null, imgUrl: null, busy: false };
+// imgs: the new post's pictures in order, each { src: preview, url: link once uploaded }
+var PST = { imgs: [], busy: false, MAX: 10 };
 function pstWhen(s){
   if (!s) return '';
   var d = new Date(s);
@@ -4625,8 +4626,11 @@ VIEWS.posts = function(){
   var pages = (acc.pages || []).map(function(p){ return p.name + (p.instagram ? ' + Instagram' + (typeof p.instagram === 'string' ? ' @' + p.instagram : '') : ''); }).join(', ');
   out += acc.connected
     ? '<div class="card-note" style="margin-bottom:12px">Posting to: <b>' + esc(pages) + '</b></div>'
-    : panel('Connect first', '<div class="sub" style="margin-bottom:8px">Facebook is not connected yet. You can write drafts now; posting needs the connection.</div>' +
-        '<a class="btn primary" href="/connect/meta">Connect Facebook &amp; Instagram</a>');
+    : panel(acc.facebook_login ? 'No Facebook Page to post to' : 'Connect first', '<div style="padding:14px 16px"><div class="sub" style="margin-bottom:10px">' +
+        (acc.facebook_login
+          ? 'Facebook is connected, but no Facebook Page came through, so posts can only be saved as drafts. Press Reconnect and, when Facebook asks, tick your Page (and its Instagram). If your Page is in a Business Portfolio, choose that business too.'
+          : 'Facebook is not connected yet. You can write drafts now; posting needs the connection.') + '</div>' +
+        '<a class="btn primary" href="/connect/meta">' + (acc.facebook_login ? 'Reconnect Facebook &amp; Instagram' : 'Connect Facebook &amp; Instagram') + '</a></div>');
   if (own) {
     out += panel('New post',
       '<div style="padding:14px 16px">' +
@@ -4635,10 +4639,10 @@ VIEWS.posts = function(){
         '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">' +
           '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ps_fb" checked> Facebook</label>' +
           '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ps_ig" checked> Instagram</label>' +
-          '<button class="btn" id="ps_pick" type="button">📎 Add picture</button>' +
-          '<input type="file" id="ps_file" accept="image/*" style="display:none">' +
+          '<button class="btn" id="ps_pick" type="button">📎 Add pictures</button>' +
+          '<input type="file" id="ps_file" accept="image/*" multiple style="display:none">' +
         '</div>' +
-        '<div class="card-note" style="margin-top:8px">Instagram needs a picture. Pictures are sent as JPEG, up to 4 MB.</div>' +
+        '<div class="card-note" style="margin-top:8px">Add up to 10 pictures: several pictures go out as one Facebook album post and one Instagram carousel. Instagram needs at least one picture. Each picture is sent as JPEG, up to 4 MB.</div>' +
         '<div style="margin-top:12px"><button class="btn primary" id="ps_save" type="button">Save as draft</button></div>' +
       '</div>');
   }
@@ -4659,11 +4663,17 @@ VIEWS.posts = function(){
   return out;
 };
 function pstImgHTML(){
-  if (!PST.img) return '';
-  return '<div style="display:flex;gap:10px;align-items:center"><img src="' + PST.img + '" alt="" style="width:84px;height:84px;object-fit:cover;border-radius:8px">' +
-    '<span class="card-note">' + (PST.imgUrl ? 'Picture ready.' : 'Uploading picture…') + '</span>' +
-    '<button class="btn" id="ps_rm" type="button">Remove</button></div>';
+  if (!PST.imgs.length) return '';
+  var waiting = PST.imgs.filter(function(m){ return !m.url; }).length;
+  return '<div style="display:flex;gap:10px;flex-wrap:wrap">' + PST.imgs.map(function(m, i){
+      return '<div class="pst-thumb"><img src="' + m.src + '" alt="Picture ' + (i + 1) + '">' +
+        (m.url ? '' : '<span class="pst-up">Uploading…</span>') +
+        '<button type="button" class="pst-x" data-psrm="' + i + '" aria-label="Remove picture ' + (i + 1) + '">×</button></div>';
+    }).join('') + '</div>' +
+    '<div class="card-note" style="margin-top:6px">' + PST.imgs.length + ' of ' + PST.MAX + ' pictures' +
+      (waiting ? ', ' + waiting + ' still uploading…' : ' ready.') + '</div>';
 }
+function pstImgs(p){ return (p.image_urls && p.image_urls.length) ? p.image_urls : (p.image_url ? [p.image_url] : []); }
 function pstCard(p, own, connected){
   var res = p.results || {};
   var errs = Object.keys(res).filter(function(k){ return res[k] && res[k].ok === false; })
@@ -4679,13 +4689,14 @@ function pstCard(p, own, connected){
       (connected ? '<button class="btn primary" data-pnow="' + esc(p.id) + '">Post now</button>' +
         '<input type="datetime-local" class="fld" id="pat_' + esc(p.id) + '" min="' + pstLocalMin() + '" value="' + pstLocalMin() + '" style="max-width:220px">' +
         '<button class="btn" data-psch="' + esc(p.id) + '">Schedule</button>' : '') +
-      '<button class="btn" data-pdis="' + esc(p.id) + '">Discard</button></div>';
+      '<button class="btn" data-pdis="' + esc(p.id) + '">Discard</button>' +
+      (connected ? '' : '<span class="card-note">Post now and Schedule appear once a Facebook Page is connected (see the top of this page).</span>') + '</div>';
   } else if (own && p.status === 'scheduled') {
     acts = '<div style="margin-top:10px"><button class="btn" data-punsch="' + esc(p.id) + '">Cancel schedule (back to draft)</button></div>';
   }
   return '<div class="pst-card">' +
     '<div class="card-note">' + meta + '</div>' +
-    (p.image_url ? '<img src="' + esc(p.image_url) + '" alt="" class="pst-img">' : '') +
+    (pstImgs(p).length ? '<div class="pst-imgs">' + pstImgs(p).map(function(u){ return '<img src="' + esc(u) + '" alt="" class="pst-img">'; }).join('') + '</div>' : '') +
     '<div style="white-space:pre-wrap;margin:6px 0">' + esc(p.caption) + '</div>' +
     (errs.length ? '<div class="card-note" style="color:var(--danger)">' + esc(errs.join(' | ')) + '</div>' : '') +
     acts + '</div>';
@@ -4694,16 +4705,25 @@ function pstReload(){ S.social_posts = undefined; LOADING.social_posts = false; 
 function pstWire(){
   var g = function(id){ return document.getElementById(id); };
   if (g('ps_pick')) g('ps_pick').onclick = function(){ g('ps_file').click(); };
-  if (g('ps_rm')) g('ps_rm').onclick = function(){ PST.img = PST.imgUrl = null; g('ps_img').innerHTML = ''; };
+  var redraw = function(){ var b = g('ps_img'); if (b) { b.innerHTML = pstImgHTML(); pstWire(); } };
+  document.querySelectorAll('[data-psrm]').forEach(function(b){
+    b.onclick = function(){ PST.imgs.splice(+b.getAttribute('data-psrm'), 1); redraw(); };
+  });
   if (g('ps_file')) g('ps_file').onchange = function(){
-    var f = g('ps_file').files && g('ps_file').files[0]; if (!f) return;
-    jvToJpeg(f).then(function(jpeg){
-      PST.img = jpeg; PST.imgUrl = null; g('ps_img').innerHTML = pstImgHTML(); pstWire();
-      return api('/social/media', { method: 'POST', body: { image: jpeg } });
-    }).then(function(r){
-      if (!r || !r.ok) throw new Error((r && r.data && r.data.detail) || 'The picture was not saved.');
-      PST.imgUrl = r.data.url; var b = g('ps_img'); if (b) { b.innerHTML = pstImgHTML(); pstWire(); }
-    }).catch(function(e){ PST.img = PST.imgUrl = null; var b = g('ps_img'); if (b) b.innerHTML = ''; say(e.message); });
+    var files = Array.prototype.slice.call(g('ps_file').files || []);
+    g('ps_file').value = '';
+    var room = PST.MAX - PST.imgs.length;
+    if (files.length > room) say(room > 0 ? 'A post can have ' + PST.MAX + ' pictures, so only the first ' + room + ' were added.' : 'A post can have ' + PST.MAX + ' pictures.');
+    files.slice(0, Math.max(room, 0)).forEach(function(f){
+      var m = { src: '', url: null };
+      jvToJpeg(f).then(function(jpeg){
+        m.src = jpeg; PST.imgs.push(m); redraw();
+        return api('/social/media', { method: 'POST', body: { image: jpeg } });
+      }).then(function(r){
+        if (!r || !r.ok) throw new Error((r && r.data && r.data.detail) || 'A picture was not saved.');
+        m.url = r.data.url; redraw();
+      }).catch(function(e){ var i = PST.imgs.indexOf(m); if (i !== -1) PST.imgs.splice(i, 1); redraw(); say(e.message); });
+    });
   };
   if (g('ps_save')) g('ps_save').onclick = function(){
     var cap = (g('ps_cap').value || '').trim(), plats = [];
@@ -4711,11 +4731,12 @@ function pstWire(){
     if (g('ps_ig').checked) plats.push('instagram');
     if (cap.length < 2) { say('Write what the post should say.'); return; }
     if (!plats.length) { say('Tick Facebook, Instagram or both.'); return; }
-    if (PST.img && !PST.imgUrl) { say('Wait a moment, the picture is still uploading.'); return; }
-    if (plats.indexOf('instagram') !== -1 && !PST.imgUrl) { say('Instagram needs a picture. Add one, or untick Instagram.'); return; }
+    if (PST.imgs.some(function(m){ return !m.url; })) { say('Wait a moment, the pictures are still uploading.'); return; }
+    var urls = PST.imgs.map(function(m){ return m.url; });
+    if (plats.indexOf('instagram') !== -1 && !urls.length) { say('Instagram needs a picture. Add one, or untick Instagram.'); return; }
     g('ps_save').disabled = true;
-    act('/social/posts', { method: 'POST', body: { caption: cap, platforms: plats, image_url: PST.imgUrl } }, 'Draft saved. Post it now or pick a time below.')
-      .then(function(r){ if (r.ok) { PST.img = PST.imgUrl = null; pstReload(); } else g('ps_save').disabled = false; });
+    act('/social/posts', { method: 'POST', body: { caption: cap, platforms: plats, image_urls: urls } }, 'Draft saved. Post it now or pick a time below.')
+      .then(function(r){ if (r.ok) { PST.imgs = []; pstReload(); } else g('ps_save').disabled = false; });
   };
   document.querySelectorAll('[data-pnow]').forEach(function(b){
     b.onclick = function(){
@@ -4749,7 +4770,11 @@ function pstWire(){
   });
   var st = document.createElement('style');
   st.textContent = '.pst-card{padding:12px 16px;border-top:1px solid var(--line)}.pst-card:first-child{border-top:0}' +
-    '.pst-img{max-width:220px;max-height:220px;border-radius:8px;margin:8px 0;display:block;object-fit:cover}';
+    '.pst-img{max-width:220px;max-height:220px;border-radius:8px;display:block;object-fit:cover}' +
+    '.pst-imgs{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.pst-imgs .pst-img{width:120px;height:120px}.pst-imgs .pst-img:only-child{width:auto;height:auto}' +
+    '.pst-thumb{position:relative;width:84px;height:84px}.pst-thumb img{width:84px;height:84px;object-fit:cover;border-radius:8px;display:block}' +
+    '.pst-up{position:absolute;inset:auto 0 0 0;font-size:10px;text-align:center;background:rgba(0,0,0,.6);color:#fff;border-radius:0 0 8px 8px;padding:2px}' +
+    '.pst-x{position:absolute;top:-6px;right:-6px;width:26px;height:26px;border-radius:50%;border:0;background:#000;color:#fff;font-size:16px;line-height:26px;padding:0;cursor:pointer}';
   document.head.appendChild(st);
 })();
 

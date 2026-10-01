@@ -881,6 +881,29 @@ def phase18(ctx):
           "HTTP %s %s" % (s, got))
 
 
+def phase19(ctx):
+    """Posts (1 Oct 2026): several pictures per post, and the accounts call says
+    whether Facebook is logged in even when no Page came through. Only a
+    draft is made (nothing is published) and it is deleted again here."""
+    s, r = call(ctx["owner"], "GET", "/social/accounts")
+    check("A24", "posts page can tell 'no Facebook Page' from 'not connected'",
+          s == 200 and isinstance(r, dict) and "facebook_login" in r, "HTTP %s %s" % (s, r))
+    pics = ["https://example.com/qa-%d.jpg" % i for i in (1, 2, 3)]
+    s, r = call(ctx["owner"], "POST", "/social/posts", {"caption": "QA several pictures", "platforms": ["facebook"],
+                                                        "image_urls": pics + [pics[0]]})
+    post = (r or {}).get("post") or {} if isinstance(r, dict) else {}
+    try:
+        check("A25", "a draft keeps several pictures in order (duplicates dropped)",
+              s == 200 and post.get("image_urls") == pics and post.get("image_url") == pics[0],
+              "HTTP %s %s" % (s, post.get("image_urls")))
+        s2, r2 = call(ctx["owner"], "POST", "/social/posts", {"caption": "QA too many",
+                                                              "image_urls": ["https://example.com/%d.jpg" % i for i in range(11)]})
+        check("A26", "more than 10 pictures is refused", s2 == 400, "HTTP %s %s" % (s2, r2))
+    finally:
+        if post.get("id"):
+            sql("DELETE FROM social_posts WHERE tenant_id='%s' AND id='%s'" % (ctx["qa"], post["id"]))
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)

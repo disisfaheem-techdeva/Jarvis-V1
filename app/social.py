@@ -10,6 +10,7 @@ integrations.credentials['pages'].
 """
 import base64
 import binascii
+import json
 import os
 import re
 import secrets
@@ -40,9 +41,10 @@ def is_our_media(url):
     pre = PUBLIC_BASE + "/media/"
     return url.startswith(pre) and bool(_TOKEN.match(url[len(pre):].replace(".jpg", "", 1)))
 PLATFORMS = ("facebook", "instagram")
-COLS = ("id, platforms, caption, image_url, status, results, source, created_by, "
+COLS = ("id, platforms, caption, image_url, image_urls, status, results, source, created_by, "
         "approved_by, created_at, updated_at, published_at, scheduled_at")
 SCHEDULE_MAX_DAYS = 90
+MAX_IMAGES = 10  # Facebook multi-photo and Instagram carousel both stop at 10
 
 
 def _ident(x_tenant_id, x_role, authorization, session, target=None):
@@ -85,19 +87,40 @@ def _clean_image(url):
     return url
 
 
-def create_draft(cur, tid, uid, caption, platforms=None, image_url=None, source="jarvis"):
+def _clean_images(image_urls=None, image_url=None):
+    """The post's pictures in order: image_urls (a list), else the single
+    image_url older callers send. Duplicates dropped, at most MAX_IMAGES."""
+    raw = image_urls if isinstance(image_urls, list) else ([image_url] if image_url else [])
+    out = []
+    for u in raw:
+        u = _clean_image(u if isinstance(u, str) else None)
+        if u and u not in out:
+            out.append(u)
+    if len(out) > MAX_IMAGES:
+        raise HTTPException(400, "A post can have up to %d pictures." % MAX_IMAGES)
+    return out
+
+
+def post_images(post):
+    return list(post.get("image_urls") or []) or ([post["image_url"]] if post.get("image_url") else [])
+
+
+def create_draft(cur, tid, uid, caption, platforms=None, image_url=None, source="jarvis",
+                 image_urls=None):
     caption = (caption or "").strip()[:2200]
     if len(caption) < 2:
         raise HTTPException(400, "The post needs some words.")
     plats = _clean_platforms(platforms)
-    img = _clean_image(image_url)
-    cur.execute("INSERT INTO social_posts (tenant_id, platforms, caption, image_url, "
-                "source, created_by) VALUES (%s,%s,%s,%s,%s,%s) RETURNING " + COLS,
-                (tid, plats, caption, img, source, str(uid) if uid else None))
+    imgs = _clean_images(image_urls, image_url)
+    cur.execute("INSERT INTO social_posts (tenant_id, platforms, caption, image_url, image_urls, "
+                "source, created_by) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING " + COLS,
+                (tid, plats, caption, imgs[0] if imgs else None, imgs, source,
+                 str(uid) if uid else None))
     row = dict(cur.fetchone())
     record(cur, action="social.draft", resource="social_posts",
            resource_id=str(row["id"]), actor=str(uid), actor_type="human",
-           status="ok", detail={"platforms": plats, "has_image": bool(img)}, error=None)
+           status="ok", detail={"platforms": plats, "has_image": bool(imgs),
+                                "images": len(imgs)}, error=None)
     return row
 
 
@@ -126,11 +149,23 @@ def _graph_post(path, data):
     return body, None
 
 
-def _publish_facebook(page, caption, image_url):
+def _publish_facebook(page, caption, images):
     tok = page["access_token"]
-    if image_url:
+    if len(images) > 1:
+        # Several pictures: upload each unpublished, then one feed post that
+        # attaches them all (Facebook's multi-photo post).
+        attached = {}
+        for i, url in enumerate(images):
+            ph, err = _graph_post("/%s/photos" % page["id"],
+                                  {"url": url, "published": "false", "access_token": tok})
+            if err:
+                return {"ok": False, "error": "picture %d: %s" % (i + 1, err), "page": page.get("name")}
+            attached["attached_media[%d]" % i] = json.dumps({"media_fbid": ph.get("id")})
+        body, err = _graph_post("/%s/feed" % page["id"],
+                                dict(attached, message=caption, access_token=tok))
+    elif images:
         body, err = _graph_post("/%s/photos" % page["id"],
-                                {"url": image_url, "caption": caption, "access_token": tok})
+                                {"url": images[0], "caption": caption, "access_token": tok})
     else:
         body, err = _graph_post("/%s/feed" % page["id"],
                                 {"message": caption, "access_token": tok})
@@ -139,16 +174,28 @@ def _publish_facebook(page, caption, image_url):
     return {"ok": True, "id": body.get("post_id") or body.get("id"), "page": page.get("name")}
 
 
-def _publish_instagram(page, caption, image_url):
+def _publish_instagram(page, caption, images):
     ig = page.get("ig_id")
     if not ig:
         return {"ok": False, "error": "No Instagram business account is linked to "
                 "the Facebook page %s." % page.get("name")}
-    if not image_url:
+    if not images:
         return {"ok": False, "error": "Instagram needs a picture."}
     tok = page["access_token"]
-    body, err = _graph_post("/%s/media" % ig,
-                            {"image_url": image_url, "caption": caption, "access_token": tok})
+    if len(images) > 1:
+        # Carousel: one item container per picture, then the carousel itself.
+        kids = []
+        for i, url in enumerate(images):
+            item, err = _graph_post("/%s/media" % ig, {"image_url": url, "is_carousel_item": "true",
+                                                       "access_token": tok})
+            if err:
+                return {"ok": False, "error": "picture %d: %s" % (i + 1, err)}
+            kids.append(str(item.get("id")))
+        body, err = _graph_post("/%s/media" % ig, {"media_type": "CAROUSEL", "children": ",".join(kids),
+                                                   "caption": caption, "access_token": tok})
+    else:
+        body, err = _graph_post("/%s/media" % ig,
+                                {"image_url": images[0], "caption": caption, "access_token": tok})
     if err:
         return {"ok": False, "error": err}
     body2, err = _graph_post("/%s/media_publish" % ig,
@@ -176,18 +223,19 @@ def publish_post(tid, role, post_id, actor, claim_from):
             raise HTTPException(409, "That post is not waiting for approval.")
         post = dict(post)
     page = pages[0]
+    images = post_images(post)
     results = {}
     if "facebook" in post["platforms"]:
-        results["facebook"] = _publish_facebook(page, post["caption"], post["image_url"])
+        results["facebook"] = _publish_facebook(page, post["caption"], images)
     if "instagram" in post["platforms"]:
-        results["instagram"] = _publish_instagram(page, post["caption"], post["image_url"])
+        results["instagram"] = _publish_instagram(page, post["caption"], images)
     oks = [r["ok"] for r in results.values()]
     status = "published" if all(oks) else ("partial" if any(oks) else "failed")
     with tenant_session(tid, role) as cur:
         cur.execute("UPDATE social_posts SET status = %s, results = %s::jsonb, "
                     "updated_at = now(), published_at = CASE WHEN %s THEN now() END "
                     "WHERE id = %s RETURNING " + COLS,
-                    (status, __import__("json").dumps(results), any(oks), post_id))
+                    (status, json.dumps(results), any(oks), post_id))
         row = dict(cur.fetchone())
         record(cur, action="social.publish", resource="social_posts", resource_id=post_id,
                actor=actor, actor_type="human" if actor != "scheduler" else "system",
@@ -234,7 +282,11 @@ def make_social_router():
         tid, role, uid = _ident(x_tenant_id, x_role, authorization, td_session, tenant)
         with tenant_session(tid, role) as cur:
             pages = _meta_pages(cur, tid)
-        return {"connected": bool(pages),
+            cur.execute("SELECT 1 FROM integrations WHERE provider = 'meta' AND status = 'connected' LIMIT 1")
+            logged_in = bool(cur.fetchone())
+        # facebook_login: Facebook is connected; connected: it also gave us a
+        # Page we may post to (posting needs both).
+        return {"connected": bool(pages), "facebook_login": logged_in,
                 "pages": [{"name": p.get("name"),
                            "instagram": p.get("ig_username") or (True if p.get("ig_id") else None)}
                           for p in pages]}
@@ -291,7 +343,8 @@ def make_social_router():
         _owner_only(role)
         with tenant_session(tid, role) as cur:
             row = create_draft(cur, tid, uid, body.get("caption"), body.get("platforms"),
-                               body.get("image_url"), source="manual")
+                               body.get("image_url"), source="manual",
+                               image_urls=body.get("image_urls"))
         return {"post": row}
 
     @router.patch("/posts/{post_id}")
@@ -307,8 +360,10 @@ def make_social_router():
             if len(cap) < 2:
                 raise HTTPException(400, "The post needs some words.")
             sets.append("caption = %s"); vals.append(cap)
-        if "image_url" in body:
-            sets.append("image_url = %s"); vals.append(_clean_image(body.get("image_url")))
+        if "image_urls" in body or "image_url" in body:
+            imgs = _clean_images(body.get("image_urls"), body.get("image_url"))
+            sets.append("image_url = %s"); vals.append(imgs[0] if imgs else None)
+            sets.append("image_urls = %s"); vals.append(imgs)
         if "platforms" in body:
             sets.append("platforms = %s"); vals.append(_clean_platforms(body.get("platforms")))
         if not sets:
