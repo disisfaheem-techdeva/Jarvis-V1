@@ -928,7 +928,8 @@ VIEWS.team = function(){
     '<input id="em-job" placeholder="Job, e.g. Sales, Designer" value="' + v('job') + '" ' + wkInput + ' style="flex:1;min-width:170px">' +
     '<input id="em-phone" placeholder="Phone / WhatsApp" value="' + v('phone') + '" ' + wkInput + ' style="width:170px">' +
     '<input id="em-email" placeholder="Email (optional)" value="' + v('email') + '" ' + wkInput + ' style="width:200px">' +
-    '<label class="k-note" style="display:flex;flex-direction:column;gap:2px">Joining date<input id="em-join" type="date" value="' + v('joining_date') + '" ' + wkInput + '></label></div>' +
+    '<label class="k-note" style="display:flex;flex-direction:column;gap:2px">Joining date<input id="em-join" type="date" value="' + v('joining_date') + '" ' + wkInput + '></label>' +
+    '<label class="k-note" style="display:flex;flex-direction:column;gap:2px">Monthly salary (PKR, only you see it)<input id="em-salary" inputmode="numeric" value="' + esc(ed && ed.salary != null ? Math.round(ed.salary) : '') + '" ' + wkInput + ' style="width:170px"></label></div>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center">' +
     '<input id="em-pin" inputmode="numeric" maxlength="6" placeholder="' + (ed && ed.has_pin ? 'New PIN (empty = keep)' : 'PIN 4-6 digits (optional)') + '" ' + wkInput + ' style="width:200px">' +
     '<select id="em-access" ' + wkInput + '><option value="staff"' + (ed && ed.access === 'full' ? '' : ' selected') + '>Staff: tasks and daily work, no money</option>' +
@@ -936,9 +937,10 @@ VIEWS.team = function(){
     '<button class="primary" id="em-save">' + (ed ? 'Save changes' : 'Add employee') + '</button>' + (ed ? ' <button id="em-cancel">Cancel</button>' : '') + '</div>' +
     '<div class="k-note" style="margin-top:6px">Give a PIN if they should log in and get tasks. Tell them the PIN yourself; easy PINs like 1234 are refused.</div></div>';
   const emps = t.employees || [];
-  out += '<div class="card">' + tbl('<th>Employee</th><th>Job</th><th>Phone</th><th>Joined</th><th>Login</th><th>Open tasks</th><th></th>',
+  out += '<div class="card">' + tbl('<th>Employee</th><th>Job</th><th>Phone</th><th>Joined</th><th>Salary</th><th>Login</th><th>Open tasks</th><th></th>',
     emps.map(e => '<tr' + (e.active ? '' : ' style="opacity:.55"') + '><td><b>' + esc(e.name) + '</b>' + (e.email ? '<div class="k-note">' + esc(e.email) + '</div>' : '') + '</td><td>' + esc(e.job || '-') +
       '</td><td>' + esc(e.phone || '-') + '</td><td>' + esc(e.joining_date ? String(e.joining_date).slice(0, 10) : '-') + '</td><td>' +
+      (e.salary != null ? money(e.salary) : '<span class="dim">-</span>') + '</td><td>' +
       (!e.active ? '<span class="dim">left</span>' : e.has_pin ? '<span class="good">PIN · ' + (e.access === 'full' ? 'full' : 'staff') + '</span>' : '<span class="dim">no login</span>') +
       '</td><td>' + (e.open_tasks ? '<a href="#/work" style="color:var(--gold)">' + e.open_tasks + '</a>' : '0') + '</td><td style="white-space:nowrap">' +
       (e.active ? '<button data-emedit="' + esc(e.id) + '">Edit</button> ' + (e.has_pin ? '<button data-emnopin="' + esc(e.id) + '">Remove PIN</button> ' : '') +
@@ -948,7 +950,7 @@ VIEWS.team = function(){
     others.map(u => '<div class="k-note" style="margin-top:6px">' + esc(u.name || u.email) + ' · ' + (u.role === 'techdeva_admin' ? 'founder' : u.role === 'owner' ? 'owner' : 'staff') + '</div>').join('') + '</div>';
   out += '</section>';
   wkAct('#em-save', async () => {
-    const body = {name: wkVal('em-name'), job: wkVal('em-job'), phone: wkVal('em-phone'), email: wkVal('em-email'), joining_date: wkVal('em-join'), access: wkVal('em-access')};
+    const body = {name: wkVal('em-name'), job: wkVal('em-job'), phone: wkVal('em-phone'), email: wkVal('em-email'), joining_date: wkVal('em-join'), access: wkVal('em-access'), salary: wkVal('em-salary')};
     if (!body.name) throw new Error('Write the employee\'s name.');
     if (wkVal('em-pin')) body.pin = wkVal('em-pin');
     if (ed) await api('/techdeva/work/employees/' + ed.id, {method:'PUT', body: JSON.stringify(body)});
@@ -1131,4 +1133,114 @@ VIEWS.trialdata = function(){
   }, 0);
   return out;
 };
+/* ======================================================== Part 22: Sales team
+   Each operator's work, from what they log on their Sales page in TechDeva's
+   dashboard: contacts, new leads, meetings and clients won (today, 7 and 30
+   days, this month) against the targets set here; open leads and overdue
+   follow-ups; their salary and cost per client landed (founder only). */
+NAV.forEach(g => { if (g[0] === 'TECHDEVA TEAM & SERVICES' && !g[1].some(x => x[0] === 'sales')) g[1].splice(1, 0, ['sales', 'Sales team']); });
+TITLES.sales = ['Sales team', 'How each operator is doing: contacts, leads, meetings and clients won against target.'];
+const SLF = { data: undefined, person: {}, open: null, targets: null };
+function slfLoad(){ SLF.data = null; api('/techdeva/sales').then(d => { SLF.data = d; }).catch(e => { SLF.data = {error: e.message}; }).then(() => { if (current() === 'sales') paint(); }); }
+function slfPerson(uid){ SLF.person[uid] = null; api('/techdeva/sales/people/' + uid).then(d => { SLF.person[uid] = d; }).catch(e => { SLF.person[uid] = {error: e.message}; }).then(() => { if (current() === 'sales') paint(); }); }
+const slfWhen = s => s ? new Date(s).toLocaleString([], {weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'}) : '-';
+function slfVs(got, target){
+  if (!target) return '<b>' + got + '</b>';
+  const cls = got >= target ? 'good' : got >= target / 2 ? 'warn' : 'bad';
+  return '<b class="' + cls + '">' + got + '</b><span class="dim"> / ' + target + '</span>';
+}
+function slfBars(days, vals, target){
+  const max = Math.max(target || 0, ...vals, 1);
+  return '<div style="display:flex;gap:2px;align-items:flex-end;height:28px" title="Contacts per day, last 14 days">' + vals.map((v, i) =>
+    '<span title="' + esc(days[i]) + ': ' + v + '" style="width:6px;height:' + Math.max(2, Math.round(v * 28 / max)) + 'px;border-radius:2px;background:' +
+    (target && v >= target ? 'var(--growth)' : v ? 'var(--gold)' : 'var(--line)') + '"></span>').join('') + '</div>';
+}
+VIEWS.sales = function(){
+  if (SLF.data === undefined) slfLoad();
+  const d = SLF.data;
+  if (!d) return '<div class="empty">Loading...</div>';
+  if (d.error) return '<div class="empty">' + esc(d.error) + '</div>';
+  if (!d.home) return wkNoHome();
+  const people = d.people.filter(p => p.access !== 'techdeva_admin');
+  const sum = (k, per) => people.reduce((a, p) => a + (((p.stats || {})[k] || {})[per] || 0), 0);
+  const pl = d.pipeline || {};
+  const open = ['new', 'contacted', 'meeting', 'proposal'].reduce((a, k) => a + (pl[k] || 0), 0);
+  const payroll = people.filter(p => p.active).reduce((a, p) => a + (p.salary || 0), 0);
+  const wonM = sum('won', 'month');
+  let out = '<section><div class="grid" style="margin-top:0;margin-bottom:16px">' +
+    kpi('Contacts today', sum('contacts', 'today'), sum('contacts', 'd7') + ' in the last 7 days') +
+    kpi('Open leads', open, (pl.proposal || 0) + ' with a proposal, ' + (pl.meeting || 0) + ' at meeting stage') +
+    kpi('Clients won this month', wonM, sum('won', 'd30') + ' in the last 30 days', wonM ? 'good' : '') +
+    kpi('Sales payroll', money(payroll), wonM ? money(payroll / wonM) + ' per client won this month' : 'no clients won yet this month') + '</div>';
+  out += '<div class="card" style="margin-bottom:16px;overflow-x:auto"><div class="k-label">Operators</div>' +
+    '<div class="k-note" style="margin:4px 0 10px">Counted from what each person logs on their Sales page (Contacts = WhatsApp, calls, visits and meetings held). Days are Pakistan days. Salary and cost per client are only on this page.</div>' +
+    tbl('<th>Person</th><th>Contacts today</th><th>Last 14 days</th><th>7 / 30 days</th><th>Leads (month)</th><th>Meetings (month)</th><th>Won (month)</th><th>Open · overdue</th><th>Salary</th><th>Cost / client</th><th></th>',
+      people.map(p => {
+        const s = p.stats || {}, g = (k, per) => ((s[k] || {})[per] || 0);
+        return '<tr' + (p.active ? '' : ' style="opacity:.55"') + '><td><b>' + esc(p.name) + '</b><div class="k-note">' + esc(p.job || (p.access === 'owner' ? 'full access' : 'staff')) +
+          (p.last_login_at ? ' · seen ' + when(p.last_login_at) : '') + '</div></td>' +
+          '<td>' + slfVs(g('contacts', 'today'), p.contacts_per_day) + '</td>' +
+          '<td>' + slfBars(d.days, p.daily || [], p.contacts_per_day) + '</td>' +
+          '<td>' + g('contacts', 'd7') + ' / ' + g('contacts', 'd30') + '</td>' +
+          '<td>' + slfVs(g('leads', 'month'), p.leads_per_month) + '</td>' +
+          '<td>' + slfVs(g('meetings', 'month'), p.meetings_per_month) + '</td>' +
+          '<td>' + slfVs(g('won', 'month'), p.clients_per_month) + '</td>' +
+          '<td>' + p.open_leads + (p.overdue ? ' · <span class="bad">' + p.overdue + ' overdue</span>' : '') + (p.upcoming_meetings ? '<div class="k-note">' + p.upcoming_meetings + ' meeting' + (p.upcoming_meetings === 1 ? '' : 's') + ' booked</div>' : '') + '</td>' +
+          '<td>' + (p.salary != null ? money(p.salary) : '<span class="dim">not set</span>') + '</td>' +
+          '<td>' + (p.cost_per_client != null ? money(p.cost_per_client) : '<span class="dim">-</span>') + '</td>' +
+          '<td style="white-space:nowrap"><button data-slfp="' + esc(p.user_id) + '">' + (SLF.open === p.user_id ? 'Hide' : 'Details') + '</button> ' +
+          '<button data-slft="' + esc(p.user_id) + '">Targets</button></td></tr>' +
+          (SLF.targets === p.user_id ? '<tr><td colspan="11"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">' +
+            [['contacts_per_day', 'Contacts a day'], ['leads_per_month', 'New leads a month'], ['meetings_per_month', 'Meetings a month'], ['clients_per_month', 'Clients won a month']].map(t =>
+              '<label class="k-note" style="display:flex;flex-direction:column;gap:2px">' + t[1] + '<input type="number" min="0" max="10000" id="slft-' + t[0] + '" value="' + (p[t[0]] || 0) + '" ' + wkInput + ' style="width:130px"></label>').join('') +
+            '<button class="primary" data-slftsave="' + esc(p.user_id) + '">Save targets</button><button data-slftx="1">Cancel</button></div></td></tr>' : '') +
+          (SLF.open === p.user_id ? '<tr><td colspan="11">' + slfDetail(p.user_id) + '</td></tr>' : '');
+      })) + '</div>';
+  out += '<div class="k-note">Salaries are set on the <a href="#/team" style="color:var(--gold)">Team</a> page (Edit an employee). Operators add leads, log contacts and book meetings on <b>Sales</b> in TechDeva\'s dashboard.</div></section>';
+  wkAct('[data-slfp]', async b => { const u = b.getAttribute('data-slfp'); SLF.open = SLF.open === u ? null : u; if (SLF.open) slfPerson(u); paint(); });
+  wkAct('[data-slft]', async b => { const u = b.getAttribute('data-slft'); SLF.targets = SLF.targets === u ? null : u; paint(); });
+  wkAct('[data-slftx]', async () => { SLF.targets = null; paint(); });
+  wkAct('[data-slftsave]', async b => {
+    const body = {};
+    ['contacts_per_day', 'leads_per_month', 'meetings_per_month', 'clients_per_month'].forEach(k => body[k] = wkVal('slft-' + k) || 0);
+    await api('/techdeva/sales/people/' + b.getAttribute('data-slftsave'), {method: 'PUT', body: JSON.stringify(body)});
+    SLF.targets = null; slfLoad();
+  });
+  wkAct('[data-slflink]', async b => {
+    const sel = document.getElementById('slfc-' + b.getAttribute('data-slflink'));
+    await api('/techdeva/sales/leads/' + b.getAttribute('data-slflink') + '/client', {method: 'PUT', body: JSON.stringify({client_tenant_id: sel ? sel.value : ''})});
+    slfPerson(SLF.open); slfLoad();
+  });
+  return out;
+};
+const SLF_ST = {new: 'New', contacted: 'Contacted', meeting: 'Meeting', proposal: 'Proposal', won: 'Won', lost: 'Lost'};
+function slfDetail(uid){
+  const x = SLF.person[uid];
+  if (x === undefined || x === null) return '<div class="empty">Loading...</div>';
+  if (x.error) return '<div class="empty">' + esc(x.error) + '</div>';
+  const clients = ((D.book || {}).clients || []);
+  let h = '<div class="k-label" style="margin-top:6px">Leads (' + x.leads.length + ')</div>' +
+    tbl('<th>Business</th><th>Status</th><th>Contact</th><th>Source</th><th>Last contact</th><th>Next follow-up</th><th>Became client</th>',
+      x.leads.map(l => {
+        const late = l.next_followup_at && new Date(l.next_followup_at) < new Date() && l.status !== 'won' && l.status !== 'lost';
+        return '<tr><td><b>' + esc(l.business_name) + '</b><div class="k-note">' + esc([l.business_type, l.city].filter(Boolean).join(' · ')) + '</div>' +
+          (l.notes ? '<div class="k-note">' + esc(l.notes) + '</div>' : '') + '</td><td>' + esc(SLF_ST[l.status] || l.status) + '</td><td>' +
+          esc([l.contact_name, l.phone].filter(Boolean).join(' · ') || '-') + '</td><td>' + esc(l.source) + '</td><td>' + (l.last_contact_at ? slfWhen(l.last_contact_at) : '<span class="dim">never</span>') +
+          '</td><td' + (late ? ' class="bad"' : '') + '>' + (l.status === 'won' || l.status === 'lost' ? '-' : slfWhen(l.next_followup_at)) + '</td><td>' +
+          (l.status === 'won' || l.client_name
+            ? '<select id="slfc-' + esc(l.id) + '" ' + wkInput + ' style="max-width:180px"><option value="">Not linked</option>' +
+              clients.map(c => '<option value="' + esc(c.id) + '"' + (String(c.id) === String(l.client_tenant_id) ? ' selected' : '') + '>' + esc(c.name || 'Unnamed') + '</option>').join('') +
+              '</select> <button data-slflink="' + esc(l.id) + '">Save</button>'
+            : '<span class="dim">-</span>') + '</td></tr>';
+      }));
+  h += '<div class="k-label" style="margin-top:14px">Meetings (' + x.meetings.length + ')</div>' +
+    tbl('<th>When</th><th>Business</th><th>Type</th><th>Where</th><th>Status</th>', x.meetings.map(m =>
+      '<tr><td>' + slfWhen(m.starts_at) + '</td><td>' + esc(m.business_name) + '</td><td>' + (m.mode === 'online' ? 'Online' : 'In person') + '</td><td>' +
+      (m.mode === 'online' ? (m.meet_link ? '<a target="_blank" rel="noopener" href="' + esc(m.meet_link) + '" style="color:var(--gold)">link</a>' : '-') : esc(m.place || '-')) +
+      '</td><td>' + esc(m.status.replace('_', '-')) + '</td></tr>'));
+  h += '<div class="k-label" style="margin-top:14px">Contact log (latest ' + x.contacts.length + ')</div>' +
+    tbl('<th>When</th><th>Business</th><th>How</th><th>Result</th><th>Note</th>', x.contacts.map(c =>
+      '<tr><td>' + slfWhen(c.at) + '</td><td>' + esc(c.business_name) + '</td><td>' + esc(c.channel) + '</td><td>' + esc(c.outcome || '-') + '</td><td>' + esc(c.note || '') + '</td></tr>'));
+  return h;
+}
 </script></body></html>

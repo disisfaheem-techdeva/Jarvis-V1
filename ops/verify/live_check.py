@@ -907,6 +907,27 @@ def phase19(ctx):
             sql("DELETE FROM social_posts WHERE tenant_id='%s' AND id='%s'" % (ctx["qa"], post["id"]))
 
 
+def phase20(ctx):
+    """Sales team (1 Oct 2026). Read-only on live: the founder page answers,
+    a client business gets nothing and cannot add sales leads, and the new
+    tables are tenant-fenced. Nothing is created."""
+    adm = sql("SELECT id FROM users WHERE role = 'techdeva_admin' LIMIT 1")
+    tok = token(None, "techdeva_admin", adm[0][0]) if adm else None
+    s, r = call(tok, "GET", "/techdeva/sales")
+    ok = s == 200 and isinstance(r, dict) and "people" in r
+    check("A28", "founder Sales team page answers", ok,
+          "HTTP %s home=%s people=%d" % (s, (r.get("home") or {}).get("name") if ok else None, len(r.get("people") or []) if ok else -1))
+    s, r = call(ctx["owner"], "GET", "/sales/me")
+    check("A29", "a client business does not get the Sales page", s == 200 and r.get("home") is False, "HTTP %s %s" % (s, r))
+    s, r = call(ctx["owner"], "POST", "/sales/leads", {"business_name": "QA should be refused"})
+    check("A30", "a client business cannot add TechDeva sales leads", s == 403, "HTTP %s %s" % (s, r))
+    s, r = call(ctx["operator"], "GET", "/techdeva/sales")
+    check("A31", "salaries stay founder-only (staff refused)", s in (401, 403), "HTTP %s" % s)
+    forced = sql("SELECT count(*) FROM pg_class WHERE relname IN ('sales_leads','sales_contacts','sales_meetings','sales_people') "
+                 "AND relrowsecurity AND relforcerowsecurity")
+    check("A32", "sales tables have forced row-level security", forced and int(forced[0][0]) == 4, "forced=%s" % (forced[0][0] if forced else None))
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)

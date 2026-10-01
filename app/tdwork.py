@@ -179,7 +179,7 @@ def make_tdwork_router():
                             WHERE u.tenant_id = %s ORDER BY u.role, 2""", (h["id"],))
             rows = [dict(r) for r in cur.fetchall()]
             cur.execute("""SELECT s.id, s.name, coalesce(s.role, '') AS job, coalesce(s.phone, '') AS phone,
-                                  coalesce(s.email, '') AS email, s.joining_date, s.active,
+                                  coalesce(s.email, '') AS email, s.joining_date, s.active, s.salary,
                                   u.id AS user_id, u.role::text AS access, (u.pin_hash IS NOT NULL) AS has_pin,
                                   (SELECT count(*) FROM td_tasks t WHERE t.assignee_user_id = u.id
                                     AND t.status <> 'done') AS open_tasks
@@ -199,6 +199,11 @@ def make_tdwork_router():
                 f[col] = _text(body.get(k), n, k.capitalize(), required=(k == "name")) or None
         if "joining_date" in body:
             f["joining_date"] = _date(body.get("joining_date"), "Joining date")
+        if "salary" in body:                     # founder routes only
+            try:
+                f["salary"] = _money(body.get("salary"))
+            except HTTPException:
+                raise HTTPException(400, "Salary must be a number, e.g. 60000.")
         return f
 
     def _give_pin(cur, home_id, staff_id, name, pin, access, uid):
@@ -276,7 +281,9 @@ def make_tdwork_router():
             if body.get("remove_pin") or f.get("active") is False:
                 cur.execute("UPDATE users SET pin_hash = NULL, pin_set_at = now() WHERE staff_id = %s AND tenant_id = %s",
                             (st["id"], h["id"]))
-            detail = {k: v for k, v in f.items()}
+            detail = {k: v for k, v in f.items() if k != "salary"}
+            if "salary" in f:
+                detail["salary_changed"] = True
             detail.update({"name": name, "pin_changed": bool(str(body.get("pin") or "").strip()),
                            "pin_removed": bool(body.get("remove_pin") or f.get("active") is False)})
             if body.get("access") in PIN_ACCESS:

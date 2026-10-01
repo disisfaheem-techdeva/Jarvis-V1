@@ -6368,6 +6368,229 @@ function advWire(){
   OWNER_ONLY_NAV.advisor = 1;
 })();
 
+/* ======================================================== Part 22: Sales (TechDeva's own team)
+   Only in TechDeva's own business. Each operator: add leads, log every
+   contact (WhatsApp, call, visit), set the next follow-up, book meetings
+   (in person or online) and see their numbers against the targets the
+   founder set. The owner (full access) sees the whole team. No salaries. */
+var SL = { tab: 'open', open: null, kind: null };
+var SL_STATUS = { 'new': 'New', contacted: 'Contacted', meeting: 'Meeting', proposal: 'Proposal sent', won: 'Won', lost: 'Lost' };
+var SL_SRC = { whatsapp: 'WhatsApp', call: 'Call', walk_in: 'Walk-in', referral: 'Referral', facebook: 'Facebook', instagram: 'Instagram', website: 'Website', other: 'Other' };
+var SL_CH = { whatsapp: 'WhatsApp', call: 'Call', visit: 'Visit', meeting: 'Meeting', email: 'Email', other: 'Other' };
+function slLoad(){ S.sales = undefined; LOADING.sales = false; need('sales', '/sales/me', true); }
+function slWhen(s){
+  if (!s) return '';
+  var d = new Date(s);
+  return isNaN(d) ? String(s) : d.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+function slIso(v){ if (!v) return null; var d = new Date(v); return isNaN(d) ? null : d.toISOString(); }
+function slLocal(d){
+  var p = function(n){ return (n < 10 ? '0' : '') + n; };
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+function slTomorrow(h){ var d = new Date(); d.setDate(d.getDate() + 1); d.setHours(h || 11, 0, 0, 0); return slLocal(d); }
+function slOpts(map, sel){ return Object.keys(map).map(function(k){ return '<option value="' + k + '"' + (k === sel ? ' selected' : '') + '>' + esc(map[k]) + '</option>'; }).join(''); }
+function slWa(phone){
+  var d = String(phone || '').replace(/\D/g, '');
+  if (!d) return '';
+  if (d.charAt(0) === '0') d = '92' + d.slice(1);
+  return 'https://wa.me/' + d;
+}
+function slTile(label, got, target, note){
+  var pct = target ? Math.min(100, Math.round(got * 100 / target)) : 0;
+  return '<div class="sl-tile"><div class="card-note">' + esc(label) + '</div>' +
+    '<div class="sl-num">' + got + (target ? '<span> / ' + target + '</span>' : '') + '</div>' +
+    (target ? '<div class="sl-bar"><i style="width:' + pct + '%"></i></div>' : '<div class="card-note">' + esc(note || 'No target set') + '</div>') + '</div>';
+}
+VIEWS.sales = function(){
+  var out = '<h1>Sales</h1><p class="sub">Your leads, follow-ups and meetings. Log every contact here: that is how your progress is counted.</p>';
+  if (!need('sales', '/sales/me')) return out + panel('Sales', loading('Loading your leads...'));
+  var d = S.sales;
+  if (!d) return out + panel('Sales', errState('Could not read your leads.'));
+  if (!d.home) return out + panel('Sales', '<div style="padding:14px 16px" class="sub">This page is for TechDeva\'s own team.</div>');
+  var own = d.role === 'owner', st = d.stats || {}, tg = d.targets || {};
+  var g = function(k, p){ return ((st[k] || {})[p]) || 0; };
+  out += '<div class="sl-tiles">' +
+    slTile(own ? 'Team contacts today' : 'Contacts today', g('contacts', 'today'), own ? 0 : tg.contacts_per_day, g('contacts', 'd7') + ' in the last 7 days') +
+    slTile(own ? 'Team leads this month' : 'New leads this month', g('leads', 'month'), own ? 0 : tg.leads_per_month, g('leads', 'today') + ' today') +
+    slTile('Meetings booked this month', g('meetings', 'month'), own ? 0 : tg.meetings_per_month, g('meetings', 'today') + ' today') +
+    slTile('Clients won this month', g('won', 'month'), own ? 0 : tg.clients_per_month, g('won', 'd30') + ' in 30 days') + '</div>';
+
+  // due now: follow-ups up to the end of today, and meetings coming up
+  var end = new Date(); end.setHours(23, 59, 59, 999);
+  var openLeads = d.leads.filter(function(l){ return l.status !== 'won' && l.status !== 'lost'; });
+  var due = openLeads.filter(function(l){ return l.next_followup_at && new Date(l.next_followup_at) <= end; });
+  var noDate = openLeads.filter(function(l){ return !l.next_followup_at; });
+  var dueHtml = due.map(function(l){
+    var late = new Date(l.next_followup_at) < new Date();
+    return '<div class="sl-row"><div style="flex:1;min-width:180px"><b>' + esc(l.business_name) + '</b>' +
+      '<div class="card-note"' + (late ? ' style="color:var(--danger)"' : '') + '>' + (late ? 'Overdue: ' : 'Today: ') + esc(slWhen(l.next_followup_at)) +
+      (own ? ' · ' + esc(l.owner_name || '') : '') + '</div></div>' +
+      (slWa(l.phone) ? '<a class="btn" target="_blank" rel="noopener" href="' + esc(slWa(l.phone)) + '">WhatsApp</a>' : '') +
+      '<button class="btn primary" data-slopen="' + esc(l.id) + '" data-kind="contact">Log contact</button></div>';
+  }).join('');
+  if (noDate.length) dueHtml += '<div class="sl-row card-note">' + noDate.length + ' open lead' + (noDate.length === 1 ? ' has' : 's have') + ' no follow-up date. Give each one a date so nobody is forgotten.</div>';
+  out += panel('Follow-ups due (' + due.length + ')', dueHtml || '<div class="sl-row card-note">Nothing due today.</div>');
+  out += panel('Meetings coming up (' + d.meetings.length + ')', d.meetings.length ? d.meetings.map(function(m){
+    return '<div class="sl-row"><div style="flex:1;min-width:180px"><b>' + esc(m.business_name) + '</b> <span class="tag">' + (m.mode === 'online' ? 'Online' : 'In person') + '</span>' +
+      '<div class="card-note">' + esc(slWhen(m.starts_at)) + (own ? ' · ' + esc(m.owner_name || '') : '') +
+      (m.mode === 'online' && m.meet_link ? ' · <a target="_blank" rel="noopener" href="' + esc(m.meet_link) + '">Join link</a>' : '') +
+      (m.place ? ' · ' + esc(m.place) : '') + '</div>' + (m.notes ? '<div class="card-note">' + esc(m.notes) + '</div>' : '') + '</div>' +
+      '<button class="btn primary" data-slmt="' + esc(m.id) + '" data-to="done">Held</button>' +
+      '<button class="btn" data-slmt="' + esc(m.id) + '" data-to="no_show">No-show</button>' +
+      '<button class="btn" data-slmt="' + esc(m.id) + '" data-to="cancelled">Cancel</button></div>';
+  }).join('') : '<div class="sl-row card-note">No meetings booked. Use "Book meeting" on a lead below.</div>');
+
+  // add a lead
+  out += panel('Add a lead', '<div style="padding:14px 16px"><div class="sl-form">' +
+    '<label>Business name *<input class="fld" id="sl_bn" maxlength="160" placeholder="e.g. Glow Salon"></label>' +
+    '<label>Contact person<input class="fld" id="sl_cn" maxlength="120"></label>' +
+    '<label>Phone / WhatsApp<input class="fld" id="sl_ph" inputmode="tel" maxlength="20" placeholder="0300 1234567"></label>' +
+    '<label>City<input class="fld" id="sl_city" maxlength="80" value="Lahore"></label>' +
+    '<label>Type of business<select class="fld" id="sl_bt">' + slOpts({ clinic: 'Clinic', salon: 'Salon', gym: 'Gym', academy: 'Academy', dental: 'Dental', restaurant: 'Restaurant', other: 'Other' }, 'clinic') + '</select></label>' +
+    '<label>Where it came from<select class="fld" id="sl_src">' + slOpts(SL_SRC, 'whatsapp') + '</select></label>' +
+    '<label>Interested in<select class="fld" id="sl_pi">' + slOpts({ '': 'Not sure yet', starter: 'Starter', growth: 'Growth', pro: 'Pro' }, '') + '</select></label>' +
+    '<label>First follow-up<input class="fld" type="datetime-local" id="sl_fu" value="' + slTomorrow(11) + '"></label>' +
+    (own ? '<label>Give to<select class="fld" id="sl_ow">' + d.team.map(function(t){ return '<option value="' + esc(t.id) + '"' + (t.id === d.me ? ' selected' : '') + '>' + esc(t.name) + '</option>'; }).join('') + '</select></label>' : '') +
+    '<label class="sl-wide">Notes<textarea class="fld" id="sl_nt" rows="2" maxlength="2000"></textarea></label></div>' +
+    '<div style="margin-top:10px"><button class="btn primary" id="sl_add" type="button">Add lead</button></div></div>');
+
+  // leads list
+  var tabs = { open: 'Open', won: 'Won', lost: 'Lost', all: 'All' };
+  var list = d.leads.filter(function(l){
+    return SL.tab === 'all' || (SL.tab === 'open' ? (l.status !== 'won' && l.status !== 'lost') : l.status === SL.tab);
+  });
+  out += actbar() + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">' + Object.keys(tabs).map(function(k){
+    var n = d.leads.filter(function(l){ return k === 'all' || (k === 'open' ? (l.status !== 'won' && l.status !== 'lost') : l.status === k); }).length;
+    return '<button class="btn' + (SL.tab === k ? ' primary' : '') + '" data-sltab="' + k + '">' + tabs[k] + ' (' + n + ')</button>';
+  }).join('') + '</div>';
+  out += panel((own ? 'Team leads' : 'My leads') + ' (' + list.length + ')', list.length ? list.map(function(l){
+    var late = l.next_followup_at && new Date(l.next_followup_at) < new Date() && l.status !== 'won' && l.status !== 'lost';
+    var h = '<div class="sl-lead"><div class="sl-row" style="border:0;padding:0">' +
+      '<div style="flex:1;min-width:200px"><b>' + esc(l.business_name) + '</b>' + (l.business_type ? ' <span class="card-note">' + esc(l.business_type) + '</span>' : '') +
+      '<div class="card-note">' + esc([l.contact_name, l.phone, l.city].filter(Boolean).join(' · ')) + '</div>' +
+      '<div class="card-note">' + esc(SL_SRC[l.source] || l.source) + (l.plan_interest ? ' · wants ' + esc(l.plan_interest) : '') +
+        (own ? ' · ' + esc(l.owner_name || 'nobody') : '') +
+        (l.last_contact_at ? ' · last contact ' + esc(slWhen(l.last_contact_at)) : ' · not contacted yet') +
+        (l.next_followup_at && l.status !== 'won' && l.status !== 'lost' ? ' · <span' + (late ? ' style="color:var(--danger)"' : '') + '>next ' + esc(slWhen(l.next_followup_at)) + '</span>' : '') + '</div>' +
+      (l.client_name ? '<div class="card-note">Became client: <b>' + esc(l.client_name) + '</b></div>' : '') +
+      (l.notes ? '<div class="card-note">' + esc(l.notes) + '</div>' : '') + '</div>' +
+      '<select class="fld" style="max-width:150px" data-slst="' + esc(l.id) + '" aria-label="Status">' + slOpts(SL_STATUS, l.status) + '</select>' +
+      (slWa(l.phone) ? '<a class="btn" target="_blank" rel="noopener" href="' + esc(slWa(l.phone)) + '">WhatsApp</a>' : '') +
+      '<button class="btn" data-slopen="' + esc(l.id) + '" data-kind="contact">Log contact</button>' +
+      '<button class="btn" data-slopen="' + esc(l.id) + '" data-kind="meeting">Book meeting</button></div>';
+    if (SL.open === l.id && SL.kind === 'contact') {
+      h += '<div class="sl-sub"><div class="sl-form">' +
+        '<label>How<select class="fld" id="slc_ch">' + slOpts(SL_CH, 'whatsapp') + '</select></label>' +
+        '<label>Result<select class="fld" id="slc_out">' + slOpts({ interested: 'Interested', 'call back': 'Call back later', 'no answer': 'No answer', 'sent details': 'Sent details / prices', 'not interested': 'Not interested' }, 'interested') + '</select></label>' +
+        '<label>Next follow-up<input class="fld" type="datetime-local" id="slc_next" value="' + slTomorrow(11) + '"></label>' +
+        '<label class="sl-wide">Note<input class="fld" id="slc_note" maxlength="1000" placeholder="What was said"></label></div>' +
+        '<div style="margin-top:8px;display:flex;gap:8px"><button class="btn primary" data-slsave="' + esc(l.id) + '" data-kind="contact">Save contact</button><button class="btn" data-slclose="1">Close</button></div></div>';
+    }
+    if (SL.open === l.id && SL.kind === 'meeting') {
+      h += '<div class="sl-sub"><div class="sl-form">' +
+        '<label>Date and time<input class="fld" type="datetime-local" id="slm_at" value="' + slTomorrow(15) + '"></label>' +
+        '<label>Meeting<select class="fld" id="slm_mode"><option value="in_person">In person</option><option value="online">Online</option></select></label>' +
+        '<label id="slm_pl_l">Place<input class="fld" id="slm_pl" maxlength="200" placeholder="Their clinic, our office..."></label>' +
+        '<label id="slm_ln_l" style="display:none">Meeting link<input class="fld" id="slm_ln" maxlength="300" placeholder="https://meet.google.com/..."></label>' +
+        '<label class="sl-wide">Notes<input class="fld" id="slm_nt" maxlength="1000" placeholder="What to show or bring"></label></div>' +
+        '<div style="margin-top:8px;display:flex;gap:8px"><button class="btn primary" data-slsave="' + esc(l.id) + '" data-kind="meeting">Book meeting</button><button class="btn" data-slclose="1">Close</button></div></div>';
+    }
+    return h + '</div>';
+  }).join('') : '<div class="sl-row card-note">No leads here yet.</div>');
+  if (d.contacts.length) out += panel('Recent contacts', d.contacts.slice(0, 15).map(function(c){
+    return '<div class="sl-row"><div style="flex:1"><b>' + esc(c.business_name) + '</b> · ' + esc(SL_CH[c.channel] || c.channel) + (c.outcome ? ' · ' + esc(c.outcome) : '') +
+      '<div class="card-note">' + esc(slWhen(c.at)) + (c.note ? ' · ' + esc(c.note) : '') + '</div></div></div>';
+  }).join(''));
+  setTimeout(slWire, 0);
+  return out;
+};
+function slWire(){
+  var g = function(id){ return document.getElementById(id); };
+  document.querySelectorAll('[data-sltab]').forEach(function(b){ b.onclick = function(){ SL.tab = b.getAttribute('data-sltab'); SL.open = null; renderShell(); }; });
+  document.querySelectorAll('[data-slopen]').forEach(function(b){
+    b.onclick = function(){
+      var id = b.getAttribute('data-slopen'), k = b.getAttribute('data-kind');
+      if (SL.open === id && SL.kind === k) { SL.open = null; } else { SL.open = id; SL.kind = k; if (SL.tab !== 'all') { var l = (S.sales.leads || []).filter(function(x){ return x.id === id; })[0]; if (l && (l.status === 'won' || l.status === 'lost') && SL.tab === 'open') SL.tab = 'all'; } }
+      renderShell();
+      setTimeout(function(){ var f = document.querySelector('.sl-sub'); if (f) f.scrollIntoView({ block: 'nearest' }); }, 0);
+    };
+  });
+  document.querySelectorAll('[data-slclose]').forEach(function(b){ b.onclick = function(){ SL.open = null; renderShell(); }; });
+  if (g('slm_mode')) g('slm_mode').onchange = function(){
+    var on = g('slm_mode').value === 'online';
+    g('slm_ln_l').style.display = on ? '' : 'none'; g('slm_pl_l').style.display = on ? 'none' : '';
+  };
+  if (g('sl_add')) g('sl_add').onclick = function(){
+    var bn = (g('sl_bn').value || '').trim();
+    if (!bn) { say('Write the business name.'); g('sl_bn').focus(); return; }
+    var body = { business_name: bn, contact_name: g('sl_cn').value, phone: g('sl_ph').value, city: g('sl_city').value,
+                 business_type: g('sl_bt').value, source: g('sl_src').value, plan_interest: g('sl_pi').value,
+                 next_followup_at: slIso(g('sl_fu').value), notes: g('sl_nt').value };
+    if (g('sl_ow')) body.owner_user_id = g('sl_ow').value;
+    g('sl_add').disabled = true;
+    act('/sales/leads', { method: 'POST', body: body }, 'Lead added.').then(function(r){ if (r.ok) { SL.tab = 'open'; slLoad(); } else g('sl_add').disabled = false; });
+  };
+  document.querySelectorAll('[data-slst]').forEach(function(sel){
+    sel.onchange = function(){
+      act('/sales/leads/' + sel.getAttribute('data-slst'), { method: 'PUT', body: { status: sel.value } },
+          sel.value === 'won' ? 'Marked as won. Well done!' : 'Status changed.').then(slLoad);
+    };
+  });
+  document.querySelectorAll('[data-slsave]').forEach(function(b){
+    b.onclick = function(){
+      var id = b.getAttribute('data-slsave'), k = b.getAttribute('data-kind'), req;
+      if (k === 'contact') {
+        req = act('/sales/leads/' + id + '/contacts', { method: 'POST', body: { channel: g('slc_ch').value, outcome: g('slc_out').value,
+          note: g('slc_note').value, next_followup_at: slIso(g('slc_next').value) } }, 'Contact saved.');
+      } else {
+        var at = slIso(g('slm_at').value), online = g('slm_mode').value === 'online';
+        if (!at) { say('Pick the meeting date and time.'); return; }
+        if (online && !/^https:\/\//.test(g('slm_ln').value.trim())) { say('Paste the meeting link (it starts with https://).'); g('slm_ln').focus(); return; }
+        req = act('/sales/meetings', { method: 'POST', body: { lead_id: id, starts_at: at, mode: g('slm_mode').value,
+          place: online ? '' : g('slm_pl').value, meet_link: online ? g('slm_ln').value.trim() : '', notes: g('slm_nt').value } }, 'Meeting booked for ' + slWhen(at) + '.');
+      }
+      b.disabled = true;
+      req.then(function(r){ if (r.ok) { SL.open = null; slLoad(); } else b.disabled = false; });
+    };
+  });
+  document.querySelectorAll('[data-slmt]').forEach(function(b){
+    b.onclick = function(){
+      b.disabled = true;
+      act('/sales/meetings/' + b.getAttribute('data-slmt'), { method: 'PUT', body: { status: b.getAttribute('data-to') } },
+          b.getAttribute('data-to') === 'done' ? 'Meeting held: counted as a contact.' : 'Saved.').then(slLoad);
+    };
+  });
+}
+/* The menu item appears only once the API says this is TechDeva's own business. */
+(function(){
+  var st = document.createElement('style');
+  st.textContent = '.sl-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:0 0 14px}' +
+    '.sl-tile{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--panel,transparent)}' +
+    '.sl-num{font-size:24px;font-weight:700;margin:2px 0 6px;font-variant-numeric:tabular-nums}.sl-num span{font-size:14px;font-weight:500;opacity:.7}' +
+    '.sl-bar{height:6px;border-radius:99px;background:var(--line);overflow:hidden}.sl-bar i{display:block;height:100%;background:var(--accent)}' +
+    '.sl-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-top:1px solid var(--line)}' +
+    '.sl-lead{padding:12px 16px;border-top:1px solid var(--line)}.sl-sub{margin-top:10px;padding:12px;border:1px dashed var(--line);border-radius:10px}' +
+    '.sl-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.sl-form label{display:flex;flex-direction:column;gap:4px;font-size:13px}' +
+    '.sl-form .sl-wide{grid-column:1/-1}';
+  document.head.appendChild(st);
+  function add(){
+    if (!S.me || S.sales_probe !== undefined) return;
+    S.sales_probe = null;
+    api('/sales/me').then(function(r){
+      S.sales_probe = !!(r.ok && r.data && r.data.home);
+      if (!S.sales_probe) return;
+      S.sales = r.data;
+      NAV.forEach(function(g){
+        if (g.label === 'CRM' && !g.items.some(function(it){ return it.id === 'sales'; }))
+          g.items.unshift({ id: 'sales', icon: '📈', name: 'Sales', sub: false });
+      });
+      renderShell();
+    });
+  }
+  var t = setInterval(function(){ if (S.me) { clearInterval(t); add(); } }, 500);
+})();
+
 window.addEventListener('hashchange', function(){
   // Every section reads fresh data when it is opened, so something added in
   // one section (a staff member, a product, a booking) shows up in the others.
