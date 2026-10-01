@@ -36,7 +36,7 @@
 <div class="card" id="card"><div class="tag">Loading…</div></div>
 <script>
 (function(){
-  var card = document.getElementById('card'), code = '';
+  var card = document.getElementById('card'), code = '', DEV = null;   // DEV: this screen's own business, if it is a reception screen
   try { code = localStorage.getItem('td_pin_code') || ''; } catch (e) {}
   function esc(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   function j(method, path, body){
@@ -55,7 +55,7 @@
     card.innerHTML = '<div class="logo">🔒</div><h1>Staff login</h1><div class="tag">Enter your business code. The owner can see it on the Team page.</div>' +
       '<label for="code">BUSINESS CODE</label><input id="code" class="code" maxlength="8" autocomplete="off" value="' + esc(code) + '">' +
       '<button id="next">Next</button><div class="msg" id="msg">' + esc(msg || '') + '</div>' +
-      '<div class="links"><a href="/dashboard?email=1">Owner? Sign in with email</a></div>';
+      '<div class="links">' + (DEV ? '<a href="#" id="back">Back to ' + esc(DEV.business) + '</a> · ' : '') + '<a href="/dashboard?email=1">Owner? Sign in with email</a></div>';
     var go = function(){
       var c = document.getElementById('code').value.trim().toUpperCase();
       if (c.length < 4) { document.getElementById('msg').textContent = 'Enter the business code.'; return; }
@@ -66,6 +66,8 @@
       });
     };
     document.getElementById('next').onclick = go;
+    var back = document.getElementById('back');
+    if (back) back.onclick = function(e){ e.preventDefault(); try { localStorage.removeItem('td_pin_pref'); } catch (x) {} pad(DEV, true); };
     document.getElementById('code').onkeydown = function(e){ if (e.key === 'Enter') go(); };
     document.getElementById('code').focus();
   }
@@ -78,7 +80,7 @@
       '<input id="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="• • • •">' +
       '<button id="go">Login</button><div class="msg" id="msg"></div>' +
       '<div class="foot">Authorized staff only • PIN required</div>' +
-      '<div class="links">' + (device ? '' : '<a href="#" id="chg">Different business</a> · ') + '<a href="/dashboard?email=1">Owner email login</a></div>';
+      '<div class="links"><a href="#" id="chg">Different business</a> · <a href="/dashboard?email=1">Owner email login</a></div>';
     var inp = document.getElementById('pin'), btn = document.getElementById('go'), msg = document.getElementById('msg');
     inp.oninput = function(){ inp.value = inp.value.replace(/\D/g, '').slice(0, 6); msg.textContent = ''; };
     function submit(){
@@ -94,11 +96,14 @@
     btn.onclick = submit;
     inp.onkeydown = function(e){ if (e.key === 'Enter') submit(); };
     var chg = document.getElementById('chg');
-    if (chg) chg.onclick = function(e){ e.preventDefault(); askCode(''); };
+    if (chg) chg.onclick = function(e){ e.preventDefault(); try { localStorage.setItem('td_pin_pref', 'code'); } catch (x) {} askCode(''); };
     inp.focus();
   }
   j('GET', '/auth/pin-info').then(function(r){
-    if (r.ok && r.data.device) { pad(r.data, true); return; }
+    var pref = ''; try { pref = localStorage.getItem('td_pin_pref') || ''; } catch (e) {}
+    if (r.ok && r.data.device) DEV = r.data;
+    // someone chose "Different business" on this screen: keep their business
+    if (r.ok && r.data.device && !(pref === 'code' && code)) { pad(r.data, true); return; }
     if (code) {
       j('GET', '/auth/pin-info?code=' + encodeURIComponent(code)).then(function(r2){
         if (r2.ok && r2.data.business) pad(r2.data, false); else askCode('');

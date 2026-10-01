@@ -152,9 +152,11 @@ def make_pins_router():
 
     # ------------------------------------------------------------ PIN pad
     def _pad_business(code, td_device, request=None):
-        # this screen's business: the device's, else the address's
-        # (drirfan.techdeva.net), else the typed business code
-        tid = _device_tenant(td_device) or (host_tenant(request) if request is not None else None)
+        # this screen's business: a business code typed on it wins (so a
+        # computer once used as one business's reception screen can still log
+        # in to another business); else the device's, else the address's
+        # (drirfan.techdeva.net). A code still needs that business's PIN.
+        tid = None if code else (_device_tenant(td_device) or (host_tenant(request) if request is not None else None))
         with tenant_session(None, "techdeva_admin") as cur:
             b = _business(cur, tenant_id=tid) if tid else (_business(cur, code=code) if code else None)
             if not b:
@@ -208,8 +210,9 @@ def make_pins_router():
             raise HTTPException(400, "Enter your 4 to 6 digit PIN.")
         ip = _ip(request)
         with tenant_session(None, "techdeva_admin") as cur:
-            tid = _device_tenant(td_device) or host_tenant(request)
-            b = _business(cur, tenant_id=tid) if tid else _business(cur, code=body.get("code"))
+            code = str(body.get("code") or "").strip()
+            tid = None if code else (_device_tenant(td_device) or host_tenant(request))
+            b = _business(cur, tenant_id=tid) if tid else _business(cur, code=code or None)
             if not b:
                 raise HTTPException(400, "Enter your business code first (ask the owner).")
             tid = str(b["id"])
