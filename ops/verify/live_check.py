@@ -949,6 +949,17 @@ def phase21(ctx):
           len(out) == 2 and out[1] in ("0", "1"), "businesses visible=%s" % (out[1] if len(out) == 2 else out))
 
 
+def phase22(ctx):
+    """Automatic addresses and WhatsApp agents (2 Oct 2026). Read-only."""
+    left = sql("SELECT count(*) FROM tenants WHERE subdomain IS NULL AND NOT coalesce(is_test, false)")
+    check("A36", "every client business has its own address", left and int(left[0][0]) == 0,
+          "without an address: %s" % (left[0][0] if left else "?"))
+    base = [LOCAL_PY] if LOCAL_PY else ["docker", "compose", "exec", "-T", "api", "python"]
+    out = sh(base + ["-c", "from app import provisioning as p; print(p.AUTO, p.AUTO_DAILY)"]).split()
+    check("A37", "WhatsApp agents are approved automatically (with a daily cap)", out[:1] == ["True"],
+          "auto=%s daily cap=%s" % tuple((out + ["?", "?"])[:2]))
+
+
 def main():
     phases = sys.argv[1:] or ["phase1"]
     qa = sql("SELECT id FROM tenants WHERE name = '%s'" % QA_NAME)

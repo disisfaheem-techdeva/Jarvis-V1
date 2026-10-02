@@ -689,6 +689,8 @@ class Persistence:
                            VALUES (%s,%s,'trial', now() + make_interval(days => %s), %s) RETURNING id""",
                         (s["business_name"], s["industry"], TRIAL_DAYS, _looks_like_test(s.get("contact_email"))))
             tid = str(cur.fetchone()["id"])
+            from .subdomains import assign as _assign_address
+            _assign_address(cur, tid, s["business_name"])   # <name>.techdeva.net, no manual step
             brand = {"website": s["website_url"], "social": s["social_links"]}
             cur.execute("""INSERT INTO tenant_config (tenant_id, brand, geo, automation)
                            VALUES (%s,%s,%s,'assisted')""",

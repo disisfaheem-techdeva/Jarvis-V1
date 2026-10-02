@@ -9,10 +9,17 @@ The API never starts containers itself: it has no Docker access, and giving it
 some would hand the whole server to anyone who breaks into the API. The host
 script does the building and holds the Docker rights.
 
-Approval is a person's decision on purpose: each agent is two containers on the
-same machine as the clinic, so a free-trial signup must not be able to start
-them unattended.
+Since 2 Oct 2026 (Faheem) a request is approved automatically: the owner asks,
+the server builds, the owner scans the QR -- no click in the founder console.
+What still protects the clinic, which shares this machine:
+  - the plan's number limit (a trial has one WhatsApp number);
+  - AUTO_AGENT_DAILY (default 5) automatic builds per day across all clients;
+    beyond that a request waits for the founder as before;
+  - provision-queue.sh builds only with enough free memory and under MAX_AGENTS,
+    otherwise the request simply waits (the owner sees "being set up").
+AUTO_AGENTS=false in the environment brings back manual approval.
 """
+import os
 import re
 
 from fastapi import APIRouter, Body, Cookie, Header, HTTPException
@@ -65,6 +72,35 @@ def _phone(raw):
     return d
 
 
+AUTO = os.environ.get("AUTO_AGENTS", "true").lower() != "false"
+AUTO_DAILY = int(os.environ.get("AUTO_AGENT_DAILY", "5") or 5)
+
+
+def new_agent_key(business, tenant_id):
+    """A free agent key: a business's 2nd..5th number gets base-2, base-3 ..."""
+    base = agent_key_for(business, tenant_id)[:27]
+    with tenant_session(None, "techdeva_admin") as cur:
+        cur.execute("""SELECT agent_key FROM whatsapp_connections WHERE agent_key LIKE %s
+                       UNION SELECT agent_key FROM agent_requests WHERE agent_key LIKE %s""",
+                    (base + "%", base + "%"))
+        taken = {x["agent_key"] for x in cur.fetchall()}
+    key, n = base, 1
+    while key in taken:
+        n += 1
+        key = "%s-%d" % (base, n)
+    return key
+
+
+def _auto_room():
+    """May one more agent be approved without the founder today?"""
+    if not AUTO:
+        return False
+    with tenant_session(None, "techdeva_admin") as cur:
+        cur.execute("SELECT count(*) AS n FROM agent_requests WHERE decided_by = 'auto' "
+                    "AND updated_at > now() - interval '1 day'")
+        return cur.fetchone()["n"] < AUTO_DAILY
+
+
 def make_provisioning_router():
     router = APIRouter()
 
@@ -115,12 +151,18 @@ def make_provisioning_router():
             cur.execute("SELECT 1 FROM agent_requests WHERE status IN ('requested','approved','building')")
             if cur.fetchone():
                 raise HTTPException(409, "Your request is already with TechDeva.")
-            cur.execute("INSERT INTO agent_requests (tenant_id, owner_phone, home_name, business_name, assistant, requested_by) "
-                        "VALUES (current_tenant(), %s, %s, %s, %s, %s) RETURNING " + COLS,
-                        (phone, home, business, assistant, str(uid) if uid else None))
+        auto = _auto_room()
+        key = new_agent_key(business, tid) if auto else None
+        with tenant_session(tid, role) as cur:
+            cur.execute("INSERT INTO agent_requests (tenant_id, owner_phone, home_name, business_name, assistant, "
+                        "requested_by, status, agent_key, decided_by) "
+                        "VALUES (current_tenant(), %s, %s, %s, %s, %s, %s, %s, %s) RETURNING " + COLS,
+                        (phone, home, business, assistant, str(uid) if uid else None,
+                         "approved" if auto else "requested", key, "auto" if auto else None))
             row = dict(cur.fetchone())
             record(cur, action="whatsapp.agent_requested", resource="agent_requests",
-                   resource_id=str(row["id"]), actor=str(uid), status="ok", detail={"assistant": assistant})
+                   resource_id=str(row["id"]), actor=str(uid), status="ok",
+                   detail={"assistant": assistant, "auto_approved": auto, "agent_key": key})
         return {"request": row}
 
     # -------------------------------------------------------------- founder
@@ -170,19 +212,7 @@ def make_provisioning_router():
             r = cur.fetchone()
         if not r:
             raise HTTPException(404, "No such request.")
-        key = r["agent_key"]
-        if not key:
-            # a business's 2nd..5th number gets its own agent: base, base-2, base-3 ...
-            base = agent_key_for(r["business_name"], r["tenant_id"])[:27]
-            with tenant_session(None, "techdeva_admin") as cur:
-                cur.execute("""SELECT agent_key FROM whatsapp_connections WHERE agent_key LIKE %s
-                               UNION SELECT agent_key FROM agent_requests WHERE agent_key LIKE %s""",
-                            (base + "%", base + "%"))
-                taken = {x["agent_key"] for x in cur.fetchall()}
-            key, n = base, 1
-            while key in taken:
-                n += 1
-                key = "%s-%d" % (base, n)
+        key = r["agent_key"] or new_agent_key(r["business_name"], r["tenant_id"])
         return {"request": _move(rid, str(uid), ("requested", "failed"), "approved",
                                  agent_key=key, decided_by=str(uid), error=None)}
 
