@@ -702,12 +702,18 @@ class Persistence:
                                ON CONFLICT (email) DO NOTHING""",
                             (tid, owner_name or s["business_name"],
                              s["contact_email"].strip().lower(), password_hash))
-        # kick off the pipeline: analyze the client's whole presence
-        self.emit(tid, "client.onboarded",
-                  {"signup_id": str(signup_id),
-                   "website_url": s["website_url"],
-                   "social_links": s["social_links"],
-                   "competitors": s["competitors"]}, "signup")
+        # kick off the pipeline: analyze the client's whole presence. The
+        # business and its login are already saved; a queue hiccup must not
+        # turn that into an error page (the client would retry and be told
+        # the email is taken). It is logged, and the analysis can be re-run.
+        try:
+            self.emit(tid, "client.onboarded",
+                      {"signup_id": str(signup_id),
+                       "website_url": s["website_url"],
+                       "social_links": s["social_links"],
+                       "competitors": s["competitors"]}, "signup")
+        except Exception as e:   # noqa: BLE001
+            print("[signup] tenant %s created, analysis not queued: %s" % (tid, str(e)[:200]), flush=True)
         return tid
 
     def save_analysis_report(self, tenant_id, signup_id, status, report, gaps):

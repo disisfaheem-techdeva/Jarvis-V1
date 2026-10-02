@@ -919,6 +919,8 @@ def list_integrations(x_tenant_id: str | None = Header(None),
 # exactly as strict as it was.
 # ---------------------------------------------------------------------------
 import psycopg
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 
@@ -932,6 +934,40 @@ def _db_message(exc: Exception) -> str:
     if hint:
         parts.append(hint)
     return " ".join(p for p in parts if p)[:400]
+
+
+# Field names as a person would say them, for the sentences below.
+_FIELD_WORDS = {"business_name": "Business name", "contact_email": "Email", "contact_phone": "Phone",
+                "contact_name": "Your name", "website_url": "Website", "password": "Password",
+                "industry": "Type of business", "email": "Email", "phone": "Phone", "name": "Name"}
+
+
+@app.exception_handler(RequestValidationError)
+def validation_error_handler(request: Request, exc: RequestValidationError):
+    """A rejected form field. FastAPI's default answer is a list of objects;
+    pages printing it showed "[object Object]" (a new client could not sign
+    up). Every page reads `detail` as one plain sentence; the list stays in
+    `errors` for anything that wants it."""
+    lines = []
+    for e in exc.errors():
+        loc = [str(x) for x in (e.get("loc") or []) if x not in ("body", "query", "path", "header")]
+        field = _FIELD_WORDS.get(loc[-1], loc[-1].replace("_", " ").capitalize()) if loc else ""
+        msg = str(e.get("msg") or "is not valid").replace("Value error, ", "")
+        if e.get("type") == "missing":
+            msg = "is required"
+        elif e.get("type", "").endswith("_parsing") or e.get("type", "").endswith("_type"):
+            msg = "is not in the right format"
+        # the validators already name their field ("password must be ..."): say it once
+        low = msg.lower()
+        if field and (low.startswith(loc[-1].replace("_", " ")) or low.startswith(loc[-1])):
+            msg = msg.split(" ", 1)[1] if " " in msg else msg
+        line = (field + " " + msg).strip() if field else msg
+        line = line[:1].upper() + line[1:]
+        if line not in lines:
+            lines.append(line)
+    text = ". ".join(l.rstrip(".") for l in lines[:4]) + "." if lines else "Please check the form and try again."
+    return JSONResponse(status_code=422, content={"detail": text,
+                                                  "errors": jsonable_encoder(exc.errors(), exclude={"ctx", "input", "url"})})
 
 
 @app.exception_handler(psycopg.errors.DataError)
