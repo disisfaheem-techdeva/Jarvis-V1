@@ -6420,7 +6420,12 @@ function advWire(){
   if (g('ap_acctsave')) g('ap_acctsave').onclick = function(){
     g('ap_acctsave').disabled = true;
     act('/ads/accounts', { method: 'PUT', body: { provider: 'meta', account_id: g('ap_acct').value } }, 'Ad account saved.')
-      .then(function(r){ if (r.ok) { APG.acc = undefined; pilotLoad(); } else g('ap_acctsave').disabled = false; });
+      .then(function(r){
+        if (!r.ok) { g('ap_acctsave').disabled = false; return; }
+        // the ad results above belong to the old account: fetch them again
+        APG.acc = undefined; Object.keys(S).forEach(function(k){ if (/^ads_perf_/.test(k)) S[k] = undefined; });
+        need('ads_status', '/ads/status', true); pilotLoad();
+      });
   };
   if (g('ap_new')) g('ap_new').onclick = function(){
     var prov = g('ap_newprov').value, page = g('ap_newpage') ? g('ap_newpage').value : '';
