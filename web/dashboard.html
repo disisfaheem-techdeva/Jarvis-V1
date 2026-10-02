@@ -500,9 +500,22 @@ function waWire(){
   };
 }
 
+/* One slow answer used to end pairing with "stopped responding" and no
+   reason. Now three misses in a row (about 9 s) are needed, and the
+   server's own reason is shown with a way to try again. */
+var WA_FAILS = 0;
+function waFail(r){
+  if (++WA_FAILS < 3) return;
+  WA_FAILS = 0; waStop();
+  var why = (r && r.data && r.data.detail) || 'The pairing service stopped responding.';
+  if (waRender('<div style="padding:16px">' + errState(why) +
+      '<div class="card-note" style="margin:8px 0">If this keeps happening, tell TechDeva: it is on our side, not your phone.</div>' +
+      '<button id="wa-on" class="btn primary">Try again</button></div>')) waWire();
+}
 function waPoll(){
   api('/whatsapp/qr').then(function(r){
-    if (!r.ok) { waStop(); waRender(errState('The pairing service stopped responding.')); return; }
+    if (!r.ok) { waFail(r); return; }
+    WA_FAILS = 0;
     var d = r.data || {};
     if (d.state === 'connected') { waStop(); waMount(); return; }
     if (d.state === 'expired' || d.state === 'idle') {
@@ -5156,7 +5169,8 @@ function waWire(){
 }
 function waPoll(){
   api('/whatsapp/qr' + waQ()).then(function(r){
-    if (!r.ok) { waStop(); waRender(errState('The pairing service stopped responding.')); return; }
+    if (!r.ok) { waFail(r); return; }
+    WA_FAILS = 0;
     var d = r.data || {};
     if (d.state === 'connected') { waStop(); waMount(); return; }
     if (d.state === 'expired' || d.state === 'idle') {
