@@ -2590,6 +2590,7 @@ VIEWS.team = function(){
 };
 
 /* -------------------------------------------------------------------- HR */
+var HRF = {};   // the HR record being edited: { id, v: field values }
 VIEWS.hr = function(){
   var out = '<h1>HR</h1><p class="sub">Employee records: salary, joining date, emergency contact and address. Only the owner can see this.</p>';
   if (!need('hr', '/team/hr')) return out + panel('HR', loading('Loading employee records...'));
@@ -2603,30 +2604,47 @@ VIEWS.hr = function(){
     inp('hr_emerg', 'Emergency contact', 'tel', 160) + '</div>' +
     row() + inp('hr_addr', 'Address', 'text', 260) + inp('hr_notes', 'Notes', 'text', 200) +
     '<button class="btn primary" id="hr_save">Save</button></div>' + actbar());
-  out += panel('Employees', '<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Role</th><th>Salary</th><th>Joined</th><th>Emergency</th><th>Address</th></tr></thead><tbody>' +
+  out += panel('Employees', '<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Role</th><th>Salary</th><th>Joined</th><th>Emergency</th><th>Address</th><th></th></tr></thead><tbody>' +
     list.map(function(s){
       return '<tr><td>' + esc(s.name) + (s.active === false ? ' <span class="tag">Inactive</span>' : '') + '</td><td>' + esc(s.role || '') +
         '</td><td>' + (s.salary != null ? money(s.salary) : '—') + '</td><td>' + esc(s.joining_date ? String(s.joining_date).slice(0, 10) : '—') +
-        '</td><td>' + esc(s.emergency_contact || '—') + '</td><td>' + esc(s.address || '—') + '</td></tr>';
+        '</td><td>' + esc(s.emergency_contact || '—') + '</td><td>' + esc(s.address || '—') + '</td>' +
+        '<td><button class="btn" data-hredit="' + esc(s.id) + '">Edit</button></td></tr>';
     }).join('') + '</tbody></table></div>');
   setTimeout(function(){
+    var F = ['hr_salary', 'hr_join', 'hr_emerg', 'hr_addr', 'hr_notes'];
     var who = document.getElementById('hr_who');
-    if (who) who.onchange = function(){
+    function fill(id){
       var s = null;
-      for (var i = 0; i < list.length; i++) if (String(list[i].id) === who.value) s = list[i];
+      for (var i = 0; i < list.length; i++) if (String(list[i].id) === String(id)) s = list[i];
       if (!s) return;
-      document.getElementById('hr_salary').value = s.salary != null ? s.salary : '';
-      document.getElementById('hr_join').value = s.joining_date ? String(s.joining_date).slice(0, 10) : '';
-      document.getElementById('hr_emerg').value = s.emergency_contact || '';
-      document.getElementById('hr_addr').value = s.address || '';
-      document.getElementById('hr_notes').value = s.hr_notes || '';
-    };
+      HRF = { id: String(s.id), v: {
+        hr_salary: s.salary != null ? s.salary : '', hr_join: s.joining_date ? String(s.joining_date).slice(0, 10) : '',
+        hr_emerg: s.emergency_contact || '', hr_addr: s.address || '', hr_notes: s.hr_notes || '' } };
+      paint();
+    }
+    // the dashboard redraws itself when data arrives: put back what is being typed
+    function paint(){
+      if (!HRF.id || !who) return;
+      who.value = HRF.id;
+      F.forEach(function(k){ var e = document.getElementById(k); if (e) e.value = HRF.v[k] != null ? HRF.v[k] : ''; });
+    }
+    paint();
+    F.forEach(function(k){ var e = document.getElementById(k); if (e) e.oninput = e.onchange = function(){ if (HRF.id) HRF.v[k] = e.value; }; });
+    if (who) who.onchange = function(){ if (who.value) fill(who.value); else HRF = {}; };
+    document.querySelectorAll('[data-hredit]').forEach(function(b){
+      b.onclick = function(){
+        fill(b.getAttribute('data-hredit'));
+        var f = document.getElementById('hr_salary');
+        if (f) { f.scrollIntoView({ block: 'center', behavior: 'smooth' }); f.focus(); }
+      };
+    });
     var sv = document.getElementById('hr_save');
     if (sv) sv.onclick = function(){
       if (!val('hr_who')) { say('Choose an employee first.'); return; }
       act('/team/hr/' + val('hr_who'), {method:'PATCH', body:{salary: val('hr_salary'), joining_date: val('hr_join'),
         emergency_contact: val('hr_emerg'), address: val('hr_addr'), hr_notes: val('hr_notes')}}, 'Record saved.')
-      .then(function(r){ if (r.ok) need('hr', '/team/hr', true); });
+      .then(function(r){ if (r.ok) { HRF = {}; need('hr', '/team/hr', true); } });
     };
   }, 0);
   return out;
@@ -3194,7 +3212,8 @@ VIEWS.customers = function(){
 function custDetailHTML(id){
   var key = 'hist_' + id;
   if (!need(key, '/customers/' + id + '/history')) return panel('Customer', loading('Reading their history...'));
-  if (S[key] === null) return panel('Customer', errState('This customer could not be opened. They may have been deleted.'));
+  if (S[key] === null) return panel('Customer', errState('This customer could not be opened. They may have been deleted.') +
+    '<div style="padding:0 16px 14px"><button class="btn" onclick="custClose()">Close</button></div>');
   var h = S[key], c = h.customer, t = h.totals;
   var head = '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
     '<button class="btn primary" id="c_book">+ Book appointment</button>' +
@@ -3260,12 +3279,26 @@ function custWaHTML(c){
       '<div class="card-note">' + esc(ch.last || '') + '</div><a class="btn" href="#/inbox?sid=' + encodeURIComponent(ch.session_id) + '" style="margin-top:6px;display:inline-block">Open conversation</a></div>';
   }).join('');
 }
+/* Close always redraws: when the details were opened without ?c= in the
+   address (e.g. right after adding a customer) setting the same hash fires
+   no hashchange, so nothing happened and Close looked broken. */
+function custClose(){
+  CUS.open = null; CUS.edit = false; CUS.delArm = false; CUS.shown = null;
+  if (location.hash !== '#/customers') history.replaceState(null, '', '#/customers');
+  renderShell();
+}
 function custWire(){
   var id = CUS.open; if (!id) return;
   var h = S['hist_' + id]; if (!h) return;
   var g = function(x){ return document.getElementById(x); };
   var msg = function(m, bad){ var e = g('cmsg'); if (e) { e.textContent = m; e.style.color = bad ? 'var(--danger)' : 'var(--growth)'; } };
-  if (g('c_close')) g('c_close').onclick = function(){ CUS.open = null; CUS.edit = false; location.hash = '#/customers'; };
+  if (g('c_close')) g('c_close').onclick = custClose;
+  // on a phone the details sit below the whole list: bring them up once per opening
+  if (CUS.shown !== id && g('c_close')) {
+    CUS.shown = id;
+    var pnl = g('c_close').closest('.panel') || g('c_close');
+    if (pnl.getBoundingClientRect().top > innerHeight * 0.6) pnl.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
   if (g('c_edit')) g('c_edit').onclick = function(){ CUS.edit = !CUS.edit; renderShell(); };
   if (g('ce_cancel')) g('ce_cancel').onclick = function(){ CUS.edit = false; renderShell(); };
   if (g('c_book')) g('c_book').onclick = function(){

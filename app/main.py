@@ -828,12 +828,18 @@ def list_incidents(x_tenant_id: str | None = Header(None),
     wonder why nothing has happened today.
     """
     tid, role = scope(x_tenant_id, x_role, authorization, td_session)
+    # The server monitor's own findings ("container down: ...", backups,
+    # certificates) are TechDeva's to act on, not a client's: shown to a
+    # business they only alarm (a 10-second restart during a deploy stayed on
+    # every dashboard for hours, 2 Oct 2026). The founder console still shows
+    # them; clients keep the incidents about their own service (AI fallback).
+    hide = "" if role == "techdeva_admin" else " AND NOT (tenant_id IS NULL AND kind = 'platform.monitor')"
     with tenant_session(tid, role) as cur:
         cur.execute("""SELECT kind, severity, title, detail, status, seen_count,
                               opened_at, last_seen_at,
                               (tenant_id IS NULL) AS platform_wide
                          FROM incidents
-                        WHERE status = 'open'
+                        WHERE status = 'open'""" + hide + """
                         ORDER BY CASE severity WHEN 'critical' THEN 0
                                                WHEN 'warn' THEN 1 ELSE 2 END,
                                  last_seen_at DESC
