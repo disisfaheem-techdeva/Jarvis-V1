@@ -45,12 +45,14 @@ done
 
 rule=""
 for h in "${hosts[@]}"; do rule+="${rule:+ || }Host(\`$h\`)"; done
-current=$(docker inspect "$NAME" --format '{{index .Config.Labels "traefik.http.routers.techdeva-auto.rule"}}' 2>/dev/null || true)
+# bump VER when the labels below change, so the running container is replaced
+VER=2
+current=$(docker inspect "$NAME" --format '{{index .Config.Labels "techdeva.routes.version"}} {{index .Config.Labels "traefik.http.routers.techdeva-auto.rule"}}' 2>/dev/null || true)
 if [ -z "$rule" ]; then
   [ -n "$current" ] && [ $DRY = 0 ] && { docker rm -f "$NAME" >/dev/null; echo "$(now) no client addresses to route; removed $NAME"; }
   exit 0
 fi
-[ "$rule" = "$current" ] && exit 0
+[ "$VER $rule" = "$current" ] && exit 0
 
 # the api's own settings: network Traefik reaches it on, entry points, image
 img=$(docker inspect "$API" --format '{{.Config.Image}}')
@@ -61,7 +63,12 @@ plain=$(lab traefik.http.routers.techdeva-tenants-http.entrypoints)
 resolver=$(lab traefik.http.routers.techdeva-tenants.tls.certresolver); resolver=${resolver:-letsencrypt}
 
 if [ $DRY = 1 ]; then echo "$(now) would route: ${hosts[*]} (network $net, entry $secure${plain:+/$plain})"; exit 0; fi
-args=(--label traefik.enable=true --label "traefik.docker.network=$net"
+# Traefik drops a container that has no port and no service of its own
+# ("port is missing"), so the routers above never load and the address gets
+# Traefik's self-signed default certificate. A placeholder service with a port
+# keeps the container valid; the routers still send traffic to the api.
+args=(--label traefik.enable=true --label "traefik.docker.network=$net" --label "techdeva.routes.version=$VER"
+      --label "traefik.http.services.techdeva-auto-placeholder.loadbalancer.server.port=8000"
       --label "traefik.http.routers.techdeva-auto.rule=$rule"
       --label "traefik.http.routers.techdeva-auto.entrypoints=$secure"
       --label "traefik.http.routers.techdeva-auto.tls.certresolver=$resolver"
