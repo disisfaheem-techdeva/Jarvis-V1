@@ -45,7 +45,7 @@ Re-run any time: `python3 ops/verify/live_check.py phase1 phase2 phase3 phase4 p
 | #20–21 | Don't break / regression / protect data | **PASS** | full live regression 65 checks; QA counts back to 0; unit tests pass |
 | T1 | Tool lockdown | **PASS** | probe agent: 10 toolsets disabled; `hermes tools` shows them ✗ |
 | T2 | Gemini chain, no OpenRouter | **PASS after fix c7e0922** | probe found a fresh config with `model.base_url=openrouter.ai`; now stripped and verified; Groq/AWS/OpenRouter/OpenAI keys blanked |
-| T3 | Status-message leak, survives re-create | **PASS** | patched at image build (`techdeva/hermes-agent:<base>-td1`); line 395 `== "whatsapp": return None` in the running probe; `tool_progress: off` |
+| T3 | Status-message leak, survives re-create | **PASS** | patched at image build (`techdeva/hermes-agent:<base>-td-<files fingerprint>`); line 395 `== "whatsapp": return None` in the running probe; `tool_progress: off` |
 | T4 | Home channel per tenant | **PASS** | `WHATSAPP_HOME_CHANNEL=<owner>@s.whatsapp.net` + `_NAME` |
 | T5 | SOUL voice rules | **PASS** | block present (female Zara, "aap", 2–4 lines, one follow-up question) |
 | T6 | Pairing pickup | **PASS** | pairctl shares the agent network (`container:<agent id>`); pairing marker → pairwatch restarted the agent once; second run did nothing |

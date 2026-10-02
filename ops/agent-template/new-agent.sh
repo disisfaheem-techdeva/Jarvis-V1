@@ -55,11 +55,17 @@ GEMINI_API_KEY="$(envval GEMINI_API_KEY)"; INTERNAL="$(envval HERMES_INTERNAL_KE
 [ -n "$GEMINI_API_KEY" ] || die "GEMINI_API_KEY is not set in the platform .env"
 [ -n "$INTERNAL" ] || die "HERMES_INTERNAL_KEY is not set in the platform .env"
 
-# ---- image: upstream + T3 patch, built once per upstream version
+# ---- image: upstream + T3 patch, built once per upstream version AND per
+# version of our own files. The tag used to be "<base>-td1" only, so an image
+# built before apply_config.py learned to strip model.base_url kept the old
+# script for ever: new agents still pointed at openrouter.ai and failed T1/T2
+# (Networkometis Pakistan, 2 Oct 2026). A fingerprint of the files copied in
+# means any change to them builds a fresh image; running agents keep theirs.
 BASE_IMG=nousresearch/hermes-agent:latest
 BASE_ID=$(docker image inspect -f '{{.Id}}' "$BASE_IMG" 2>/dev/null | cut -c8-19) || true
 [ -n "$BASE_ID" ] || { docker pull "$BASE_IMG" >/dev/null; BASE_ID=$(docker image inspect -f '{{.Id}}' "$BASE_IMG" | cut -c8-19); }
-IMG="techdeva/hermes-agent:$BASE_ID-td1"
+TPL_ID=$(cd "$HERE" && cat patch_gateway.py apply_config.py apply_soul.py $(find soul -type f | sort) | sha256sum | cut -c1-8)
+IMG="techdeva/hermes-agent:$BASE_ID-td-$TPL_ID"
 if [ $REBUILD = 1 ] || ! docker image inspect "$IMG" >/dev/null 2>&1; then
   BASE_USER=$(docker image inspect -f '{{.Config.User}}' "$BASE_IMG")
   BUILD=$(mktemp -d); cp "$HERE/patch_gateway.py" "$HERE/apply_config.py" "$HERE/apply_soul.py" "$BUILD/"; cp -r "$HERE/soul" "$BUILD/"
