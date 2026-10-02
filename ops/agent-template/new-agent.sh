@@ -64,7 +64,7 @@ GEMINI_API_KEY="$(envval GEMINI_API_KEY)"; INTERNAL="$(envval HERMES_INTERNAL_KE
 BASE_IMG=nousresearch/hermes-agent:latest
 BASE_ID=$(docker image inspect -f '{{.Id}}' "$BASE_IMG" 2>/dev/null | cut -c8-19) || true
 [ -n "$BASE_ID" ] || { docker pull "$BASE_IMG" >/dev/null; BASE_ID=$(docker image inspect -f '{{.Id}}' "$BASE_IMG" | cut -c8-19); }
-TPL_ID=$(cd "$HERE" && cat patch_gateway.py apply_config.py apply_soul.py $(find soul -type f | sort) | sha256sum | cut -c1-8)
+TPL_ID=$( (cd "$HERE" && cat patch_gateway.py apply_config.py apply_soul.py $(find soul -type f | sort); echo "bridge-deps-v1") | sha256sum | cut -c1-8)
 IMG="techdeva/hermes-agent:$BASE_ID-td-$TPL_ID"
 if [ $REBUILD = 1 ] || ! docker image inspect "$IMG" >/dev/null 2>&1; then
   BASE_USER=$(docker image inspect -f '{{.Config.User}}' "$BASE_IMG")
@@ -75,6 +75,10 @@ if [ $REBUILD = 1 ] || ! docker image inspect "$IMG" >/dev/null 2>&1; then
     echo "COPY patch_gateway.py apply_config.py apply_soul.py /opt/techdeva/"
     echo "COPY soul /opt/techdeva/soul"
     echo "RUN python3 /opt/techdeva/patch_gateway.py /opt/hermes/gateway/run.py && grep -q '== \"whatsapp\"' /opt/hermes/gateway/run.py"
+    # The WhatsApp bridge ships without its packages (node_modules was empty in
+    # the upstream image, 2 Oct 2026): install them here so the pairing helper
+    # and the gateway can both run it.
+    echo "RUN cd /opt/hermes/scripts/whatsapp-bridge && npm ci --omit=dev --no-audit --no-fund && test -n \"\$(ls node_modules)\""
     [ -n "$BASE_USER" ] && echo "USER $BASE_USER"
     echo "LABEL techdeva.template=agent-td1"
   } > "$BUILD/Dockerfile"
@@ -101,7 +105,7 @@ echo "wrote $DIR (compose + agent.env + pairctl.env, secrets mode 600)"
 # ---- volume + SOUL (T5)
 docker volume create --label techdeva.agent="$KEY" "$VOL" >/dev/null
 docker run --rm --user 0 -v "$VOL:/opt/data" --entrypoint sh "$IMG" -c \
-  "python3 /opt/techdeva/apply_soul.py /opt/data/SOUL.md --new --assistant \"\$0\" --business \"\$1\" && chown -R $AGENT_UID:$AGENT_GID /opt/data" \
+  "python3 /opt/techdeva/apply_soul.py /opt/data/SOUL.md --new --assistant \"\$0\" --business \"\$1\" && mkdir -p /opt/data/scripts && cp -a /opt/hermes/scripts/whatsapp-bridge /opt/data/scripts/ && chown -R $AGENT_UID:$AGENT_GID /opt/data" \
   "$ASSISTANT" "$BUSINESS"
 
 # ---- first boot creates config.yaml; then enforce T1/T2/T3 on it and start for real
@@ -125,6 +129,8 @@ docker exec "$AGENT" python3 -c "import yaml;c=yaml.safe_load(open('/opt/data/co
 [ -z "$(docker exec "$AGENT" sh -c 'echo $OPENROUTER_API_KEY$GROQ_API_KEY$AWS_ACCESS_KEY_ID$OPENAI_API_KEY')" ] && ok "T2 no OpenRouter/Groq/AWS/OpenAI key in the agent" || bad "T2 another provider key is present"
 docker exec "$AGENT" grep -q "TECHDEVA-VOICE-START" /opt/data/SOUL.md && ok "T5 voice rules in SOUL.md" || bad "T5 voice rules"
 docker exec "$PAIR" node -e "require('http').get({host:'127.0.0.1',port:3010,path:'/health',headers:{'x-internal-key':process.env.HERMES_INTERNAL_KEY}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{console.log('  pairctl:',b);process.exit(/can_send/.test(b)?0:1)})}).on('error',e=>{console.log(e.message);process.exit(1)})" && ok "T6 pairctl up, shares the agent network (can_send)" || bad "T6 pairctl"
+docker exec "$PAIR" sh -c 'test -f /opt/data/scripts/whatsapp-bridge/bridge.js && test -n "$(ls /opt/data/scripts/whatsapp-bridge/node_modules 2>/dev/null)"' \
+  && ok "T7 WhatsApp bridge and its packages are where pairing looks for them" || bad "T7 WhatsApp bridge missing (the QR could never start)"
 [ $fail = 0 ] || die "verification failed; the agent is up but NOT assigned to the tenant. Remove with remove-agent.sh --key $KEY --yes"
 
 # ---- tell the platform which agent this tenant uses (TechDeva action)

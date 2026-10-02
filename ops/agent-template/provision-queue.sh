@@ -76,7 +76,10 @@ if rows:
     print("\t".join(clean(r[k]) for k in ("id","agent_key","tenant_id","owner_phone","home_name","business_name","assistant")))
 ')
 [ -n "$job" ] || exit 0
-IFS=$'\t' read -r RID KEY TENANT PHONE HOME BUSINESS ASSISTANT <<< "$job"
+# HOME_NAME, never HOME: overwriting $HOME made docker write its settings into
+# a folder named after the client inside the repo ("Networkometis Pakistan/"),
+# which then blocked deploy.sh (2 Oct 2026).
+IFS=$'\t' read -r RID KEY TENANT PHONE HOME_NAME BUSINESS ASSISTANT <<< "$job"
 
 free=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
 agents=$(docker ps -a --filter label=techdeva.pairwatch=true --format '{{.Names}}' | wc -l)
@@ -89,7 +92,7 @@ echo "$(now) building $KEY for tenant $TENANT"
 report "$RID" building
 LOG=$(mktemp)
 if bash "$HERE/new-agent.sh" --key "$KEY" --tenant "$TENANT" --owner-phone "$PHONE" \
-     --home-name "$HOME" --business "$BUSINESS" --assistant "$ASSISTANT" > "$LOG" 2>&1; then
+     --home-name "$HOME_NAME" --business "$BUSINESS" --assistant "$ASSISTANT" > "$LOG" 2>&1; then
   cat "$LOG"
   report "$RID" ready
   echo "$(now) $KEY ready"
