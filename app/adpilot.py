@@ -34,6 +34,7 @@ from .audit import record
 from .auth import AuthError, SESSION_COOKIE, resolve_scope
 from .db import tenant_session
 from .plans import plan_for
+from .social import _meta_pages
 
 PLANS = ("pro",)
 PROVIDERS = ("meta", "google")
@@ -50,7 +51,7 @@ CITIES = {   # centre points for "within N km of the business"
 SETTINGS_COLS = ("auto_pause, max_cost_per_result, min_spend, meta_daily_cap, google_daily_cap, country, city, "
                  "radius_km, website_url, last_check_at, last_auto_launch_at, updated_at")
 DRAFT_COLS = ("id, provider, service, copy, image_token, daily_budget, status, external, error, created_by, "
-              "created_at, launched_at")
+              "created_at, launched_at, page_id")
 
 
 def _who(x_tenant_id, x_role, authorization, session):
@@ -65,6 +66,26 @@ def _who(x_tenant_id, x_role, authorization, session):
     if plan_for(tid)["key"] not in PLANS and role != "techdeva_admin":
         raise HTTPException(402, "The ad autopilot is part of the Pro plan.")
     return tid, role, uid
+
+
+def _page_list(cur, tid):
+    """The Facebook Pages this login manages, id and name only."""
+    return [{"id": str(p["id"]), "name": p.get("name") or str(p["id"])} for p in _meta_pages(cur, tid)]
+
+
+def _default_page(cur, pages):
+    """The Page a new campaign starts on: the only one, else the Page the owner
+    last chose for a campaign, else for a post. Never a guess."""
+    ids = {p["id"] for p in pages}
+    if len(ids) == 1:
+        return next(iter(ids))
+    for q in ("SELECT page_id FROM ad_drafts WHERE page_id IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+              "SELECT page_id FROM social_posts WHERE page_id IS NOT NULL ORDER BY updated_at DESC LIMIT 1"):
+        cur.execute(q)
+        r = cur.fetchone()
+        if r and r["page_id"] in ids:
+            return r["page_id"]
+    return None
 
 
 def _num(v, what, lo=0.0, hi=10_000_000.0, allow_none=False):
@@ -271,10 +292,19 @@ def _targeting(s):
 
 def launch_meta(tid, role, d, s):
     tok, act, creds = ads.connection(tid, role, "meta")
-    pages = creds.get("pages") or []
+    pages = [str(p.get("id")) for p in (creds.get("pages") or []) if p.get("id")]
     if not pages:
         raise AdsError("No Facebook page came through. Press Reconnect Facebook and tick your page.")
-    page = pages[0]["id"]
+    # the Page the owner chose for this campaign; the first Page on the login
+    # could be another business's Page
+    if d.get("page_id"):
+        if str(d["page_id"]) not in pages:
+            raise AdsError("That Facebook Page is no longer connected. Press Edit and choose another Page.")
+        page = str(d["page_id"])
+    elif len(pages) == 1:
+        page = pages[0]
+    else:
+        raise AdsError("Choose which Facebook Page this campaign runs from: press Edit and pick the Page.")
     if not d.get("image_token"):
         raise AdsError("Add a photo first: upload one on the Posts page, then write the campaign again.")
     with tenant_session(tid, role) as cur:
@@ -436,7 +466,7 @@ def set_status(tid, role, uid, provider, campaign_id, name, active, by, reason="
     return ok, err
 
 
-def draft(tid, role, uid, provider, service=None, by="owner", budget=None):
+def draft(tid, role, uid, provider, service=None, by="owner", budget=None, page_id=None):
     if provider not in PROVIDERS:
         raise HTTPException(400, "Platform must be meta or google.")
     with tenant_session(tid, role) as cur:
@@ -450,16 +480,25 @@ def draft(tid, role, uid, provider, service=None, by="owner", budget=None):
         if not svc:
             raise HTTPException(400, "Add your services first (Services page), so the planner knows what to advertise.")
         photos = _latest_photos(cur)
+        page = None
+        if provider == "meta":
+            pages = _page_list(cur, tid)
+            if page_id:
+                if str(page_id) not in {p["id"] for p in pages}:
+                    raise HTTPException(400, "That Facebook Page is not connected. Choose one of your Pages.")
+                page = str(page_id)
+            else:
+                page = _default_page(cur, pages)
     copy, worded = write_copy(biz, svc, s.get("city") or "", services)
     cap = float(s[provider + "_daily_cap"] or 0)
     daily = budget or cap or MIN_DAILY[provider] * 2
     if daily < MIN_DAILY[provider]:
         raise HTTPException(400, "The daily budget must be at least %d." % MIN_DAILY[provider])
     with tenant_session(tid, role) as cur:
-        cur.execute("INSERT INTO ad_drafts (tenant_id, provider, service, copy, image_token, daily_budget, created_by) "
-                    "VALUES (current_tenant(), %s, %s, %s, %s, %s, %s) RETURNING " + DRAFT_COLS,
+        cur.execute("INSERT INTO ad_drafts (tenant_id, provider, service, copy, image_token, daily_budget, created_by, "
+                    "page_id) VALUES (current_tenant(), %s, %s, %s, %s, %s, %s, %s) RETURNING " + DRAFT_COLS,
                     (provider, svc["name"], json.dumps(dict(copy, worded_by=worded)),
-                     photos[0] if (photos and provider == "meta") else None, daily, by))
+                     photos[0] if (photos and provider == "meta") else None, daily, by, page))
         row = dict(cur.fetchone())
         record(cur, action="adpilot.draft", resource="ad_drafts", resource_id=str(row["id"]), actor=str(uid or by),
                actor_type="human" if by == "owner" else "agent", status="ok",
@@ -581,7 +620,13 @@ def make_adpilot_router():
                             "FROM integrations WHERE provider = %s", (p,))
                 r = cur.fetchone()
                 connected[p] = bool(r and r["ok"])
-        return {"settings": s, "drafts": drafts, "actions": log, "cities": sorted(CITIES), "services": services,
+            cur.execute("SELECT external_account FROM integrations WHERE provider = 'meta' AND status = 'connected'")
+            r = cur.fetchone()
+            meta_account = (r and r["external_account"]) or None
+            pages = _page_list(cur, tid)
+            default_page = _default_page(cur, pages)
+        return {"meta_pages": pages, "meta_account": meta_account, "default_page": default_page,
+                "settings": s, "drafts": drafts, "actions": log, "cities": sorted(CITIES), "services": services,
                 "connected": connected,
                 "countries": list(COUNTRIES), "photos": ["/media/%s.jpg" % t for t in photos],
                 "min_daily": MIN_DAILY}
@@ -631,7 +676,8 @@ def make_adpilot_router():
         the owner to check and press Launch (the owner is right here). Only the
         planner's own weekly round launches by itself, within the cap."""
         tid, role, uid = _who(x_tenant_id, x_role, authorization, td_session)
-        d = draft(tid, role, uid, str(body.get("provider") or ""), (body.get("service") or None), "owner")
+        d = draft(tid, role, uid, str(body.get("provider") or ""), (body.get("service") or None), "owner",
+                  page_id=(str(body.get("page_id") or "").strip() or None))
         return {"draft": _draft_out(d)}
 
     @router.put("/adpilot/drafts/{draft_id}")
@@ -671,8 +717,13 @@ def make_adpilot_router():
                 if not cur.fetchone():
                     raise HTTPException(400, "Choose one of your own photos.")
                 img = tok
-            cur.execute("UPDATE ad_drafts SET copy = %s, daily_budget = %s, image_token = %s WHERE id = %s",
-                        (json.dumps(copy), budget, img, d["id"]))
+            page = d["page_id"]
+            if "page_id" in body and d["provider"] == "meta":
+                page = str(body["page_id"] or "").strip() or None
+                if page and page not in {p["id"] for p in _page_list(cur, tid)}:
+                    raise HTTPException(400, "That Facebook Page is not connected. Choose one of your Pages.")
+            cur.execute("UPDATE ad_drafts SET copy = %s, daily_budget = %s, image_token = %s, page_id = %s "
+                        "WHERE id = %s", (json.dumps(copy), budget, img, page, d["id"]))
             record(cur, action="adpilot.draft_edit", resource="ad_drafts", resource_id=draft_id,
                    actor=str(uid or role), actor_type="human", status="ok",
                    detail={"fields": sorted(body)}, error=None)

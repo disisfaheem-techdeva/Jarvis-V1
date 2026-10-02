@@ -6143,7 +6143,12 @@ VIEWS.marketing = function(){
   h = h.replace(/<a class="btn primary" href="\/connect\/meta">Connect Facebook &amp; Instagram<\/a>/,
     '<a class="btn primary" href="#/integrations">Connect on Integrations</a>');
   var at = h.indexOf('<div class="panel"><div class="panel-head">');   // first real panel, after the summary tiles
-  return at > -1 ? h.slice(0, at) + adsPerfHTML() + h.slice(at) : h + adsPerfHTML();
+  h = at > -1 ? h.slice(0, at) + adsPerfHTML() + h.slice(at) : h + adsPerfHTML();
+  // set up a campaign here too (Page + ad account pickers), same as Growth Advisor
+  var ap = apPanels();
+  if (ap) { setTimeout(advWire, 0); return h + actbar() + ap; }
+  if (S.adpilot === null) h += panel('Set up a campaign', '<div style="padding:14px 16px" class="sub">Writing and launching campaigns from here is part of the Pro plan. <a href="#/billing">See plans</a></div>');
+  return h;
 };
 
 /* ======================================================== Part 19: Client work
@@ -6218,6 +6223,19 @@ VIEWS.clientwork = function(){
    hashtags, keywords) and launch them — by the owner, or by the planner only
    within the owner's daily cap. Owner-only (it talks about money). */
 var ADV = { done: {}, edit: null };
+// Facebook Page + ad account choice for campaigns (like the Posts page picker)
+var APG = { page: null, acc: undefined };
+function apPageName(p, id){
+  var l = p.meta_pages || [];
+  for (var i = 0; i < l.length; i++) if (String(l[i].id) === String(id)) return l[i].name;
+  return '';
+}
+function apPageSelect(p, id, sel){
+  var l = p.meta_pages || [];
+  if (!l.length) return '<span class="card-note">No Facebook Page connected. <a href="#/integrations">Reconnect Facebook</a> and tick your Page.</span>';
+  return '<select class="fld" id="' + id + '">' + (l.length > 1 && !sel ? '<option value="">Choose your Facebook Page</option>' : '') +
+    l.map(function(x){ return '<option value="' + esc(x.id) + '"' + (String(x.id) === String(sel) ? ' selected' : '') + '>' + esc(x.name) + '</option>'; }).join('') + '</select>';
+}
 function advLoad(force){
   if (force) {
     var b = document.getElementById('adv_refresh'); if (b) b.disabled = true;
@@ -6253,6 +6271,7 @@ function apDraft(d, p){
   if (editing) {
     if (d.provider === 'meta') {
       h += '<div class="fld-grid" style="display:grid;gap:8px;max-width:640px">' +
+        '<label class="card-note">Facebook Page this campaign runs from ' + apPageSelect(p, 'apd_page', d.page_id) + '</label>' +
         '<label class="card-note">Headline (max 40)<input class="fld" id="apd_head" maxlength="40" value="' + esc(m.headline || '') + '"></label>' +
         '<label class="card-note">Text (max 300)<textarea class="fld" id="apd_text" rows="3" maxlength="300">' + esc(m.primary_text || '') + '</textarea></label>' +
         '<label class="card-note">Description (max 30)<input class="fld" id="apd_desc" maxlength="30" value="' + esc(m.description || '') + '"></label>' +
@@ -6271,7 +6290,10 @@ function apDraft(d, p){
   } else if (d.provider === 'meta') {
     h += '<div style="display:flex;gap:12px;flex-wrap:wrap">' + (d.image_url ? '<img src="' + esc(d.image_url) + '" style="width:110px;height:110px;object-fit:cover;border-radius:8px">' : '<div class="card-note">No photo yet: upload one on the Posts page.</div>') +
       '<div style="flex:1;min-width:220px"><div style="font-weight:700">' + esc(m.headline || '') + '</div><div style="margin:4px 0;white-space:pre-wrap">' + esc(m.primary_text || '') + '</div>' +
-      '<div class="card-note">' + esc((m.hashtags || []).map(function(x){ return '#' + x; }).join(' ')) + '</div><div class="card-note">' + esc(m.description || '') + ' · button: WhatsApp</div></div></div>';
+      '<div class="card-note">' + esc((m.hashtags || []).map(function(x){ return '#' + x; }).join(' ')) + '</div><div class="card-note">' + esc(m.description || '') + ' · button: WhatsApp</div>' +
+      (apPageName(p, d.page_id) ? '<div class="card-note">Facebook Page: <b>' + esc(apPageName(p, d.page_id)) + '</b></div>'
+        : (open && (p.meta_pages || []).length > 1 ? '<div class="card-note" style="color:var(--danger)">No Facebook Page chosen yet: press Edit and pick the Page.</div>' : '')) +
+      '</div></div>';
   } else {
     h += '<div style="font-weight:700">' + esc((g.headlines || []).slice(0, 3).join(' | ')) + '</div>' +
       '<div class="card-note" style="margin:4px 0">' + esc((g.descriptions || []).join(' ')) + '</div>' +
@@ -6310,6 +6332,23 @@ function apPanels(){
     '<select class="fld" id="ap_newsvc"><option value="">Your best seller</option>' + (p.services || []).map(function(x){ return '<option>' + esc(x) + '</option>'; }).join('') + '</select>' +
     '<button class="btn primary" id="ap_new"' + (con.meta || con.google ? '' : ' disabled') + '>✨ Write a campaign</button>' +
     (con.meta || con.google ? '' : '<a class="btn" href="#/integrations">Connect ad accounts first</a>') + '</div>';
+  if (con.meta) {
+    var acc = APG.acc;
+    neu += '<div style="padding:0 16px 14px;display:grid;gap:8px;max-width:720px">' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="card-note" style="min-width:150px">Facebook Page</span>' +
+      apPageSelect(p, 'ap_newpage', APG.page || p.default_page) + '<span class="card-note">Facebook & Instagram campaigns run from this Page.</span></div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="card-note" style="min-width:150px">Ad account</span>';
+    if (acc && acc.accounts && acc.accounts.length) {
+      neu += '<select class="fld" id="ap_acct">' + acc.accounts.map(function(a){ return '<option value="' + esc(a.id) + '"' + (String(a.id) === String(p.meta_account) ? ' selected' : '') + '>' +
+        esc(a.name) + ' (' + esc(a.id) + ')' + (a.currency ? ' · ' + esc(a.currency) : '') + '</option>'; }).join('') + '</select>' +
+        '<button class="btn primary" id="ap_acctsave">Use this account</button>';
+    } else {
+      neu += '<b>' + esc(p.meta_account || 'none chosen') + '</b><button class="btn" id="ap_acctload">' + (acc === 'loading' ? 'Asking Facebook…' : 'Change ad account') + '</button>' +
+        (acc && acc.error ? '<span class="card-note" style="color:var(--danger)">' + esc(acc.error) + '</span>' : '') +
+        (acc && acc.accounts && !acc.accounts.length ? '<span class="card-note">This login has no ad accounts.</span>' : '');
+    }
+    neu += '</div><div class="card-note">The spend is charged to this ad account. Each campaign below shows its Page; press Edit to change it.</div></div>';
+  }
   var drafts = p.drafts || [];
   out += panel('Campaigns the planner wrote', neu + (drafts.length ? drafts.map(function(d){ return apDraft(d, p); }).join('') :
     '<div style="padding:0 16px 14px" class="card-note">None yet. The planner writes the headline, text, hashtags and keywords and picks one of your photos; you check it and press Launch.</div>'));
@@ -6371,9 +6410,23 @@ function advWire(){
     g('ap_save').disabled = true;
     act('/adpilot/settings', { method: 'PUT', body: body }, 'Rules saved.').then(function(r){ if (r.ok) pilotLoad(); else g('ap_save').disabled = false; });
   };
+  if (g('ap_newpage')) g('ap_newpage').onchange = function(){ APG.page = g('ap_newpage').value || null; };
+  if (g('ap_acctload')) g('ap_acctload').onclick = function(){
+    APG.acc = 'loading'; renderShell();
+    api('/ads/accounts?provider=meta').then(function(r){
+      APG.acc = r.ok ? r.data : { error: (r.data && r.data.detail) || ('Could not list the ad accounts (' + r.status + ').') }; renderShell();
+    });
+  };
+  if (g('ap_acctsave')) g('ap_acctsave').onclick = function(){
+    g('ap_acctsave').disabled = true;
+    act('/ads/accounts', { method: 'PUT', body: { provider: 'meta', account_id: g('ap_acct').value } }, 'Ad account saved.')
+      .then(function(r){ if (r.ok) { APG.acc = undefined; pilotLoad(); } else g('ap_acctsave').disabled = false; });
+  };
   if (g('ap_new')) g('ap_new').onclick = function(){
+    var prov = g('ap_newprov').value, page = g('ap_newpage') ? g('ap_newpage').value : '';
+    if (prov === 'meta' && g('ap_newpage') && !page) { say('Choose the Facebook Page first.'); g('ap_newpage').focus(); return; }
     g('ap_new').disabled = true; g('ap_new').textContent = 'Writing...';
-    act('/adpilot/drafts', { method: 'POST', body: { provider: g('ap_newprov').value, service: g('ap_newsvc').value || null } }, 'Written. Check it and press Launch.')
+    act('/adpilot/drafts', { method: 'POST', body: { provider: prov, service: g('ap_newsvc').value || null, page_id: prov === 'meta' ? (page || null) : null } }, 'Written. Check it and press Launch.')
       .then(function(r){ if (r.ok) pilotLoad(); else { g('ap_new').disabled = false; g('ap_new').textContent = '✨ Write a campaign'; } });
   };
   document.querySelectorAll('[data-aplaunch]').forEach(function(b){ b.onclick = function(){
@@ -6394,6 +6447,7 @@ function advWire(){
       body.headline = g('apd_head').value; body.primary_text = g('apd_text').value; body.description = g('apd_desc').value;
       body.hashtags = g('apd_tags').value.split(/\s+/).filter(Boolean);
       var img = document.querySelector('input[name=apd_img]:checked'); if (img) body.image_url = img.value;
+      if (g('apd_page')) { if (!g('apd_page').value) { say('Choose the Facebook Page.'); return; } body.page_id = g('apd_page').value; }
     } else { body.headlines = lines('apd_heads'); body.descriptions = lines('apd_descs'); body.keywords = lines('apd_keys'); }
     b.disabled = true;
     act('/adpilot/drafts/' + b.getAttribute('data-apsave'), { method: 'PUT', body: body }, 'Saved.').then(function(r){ if (r.ok) { ADV.edit = null; pilotLoad(); } else b.disabled = false; });
