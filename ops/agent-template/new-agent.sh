@@ -64,21 +64,24 @@ GEMINI_API_KEY="$(envval GEMINI_API_KEY)"; INTERNAL="$(envval HERMES_INTERNAL_KE
 BASE_IMG=nousresearch/hermes-agent:latest
 BASE_ID=$(docker image inspect -f '{{.Id}}' "$BASE_IMG" 2>/dev/null | cut -c8-19) || true
 [ -n "$BASE_ID" ] || { docker pull "$BASE_IMG" >/dev/null; BASE_ID=$(docker image inspect -f '{{.Id}}' "$BASE_IMG" | cut -c8-19); }
-TPL_ID=$( (cd "$HERE" && cat patch_gateway.py apply_config.py apply_soul.py $(find soul -type f | sort); echo "bridge-deps-v1") | sha256sum | cut -c1-8)
+TPL_ID=$( (cd "$HERE" && cat patch_gateway.py patch_bridge.py apply_config.py apply_soul.py $(find soul -type f | sort); echo "bridge-deps-v1") | sha256sum | cut -c1-8)
 IMG="techdeva/hermes-agent:$BASE_ID-td-$TPL_ID"
 if [ $REBUILD = 1 ] || ! docker image inspect "$IMG" >/dev/null 2>&1; then
   BASE_USER=$(docker image inspect -f '{{.Config.User}}' "$BASE_IMG")
-  BUILD=$(mktemp -d); cp "$HERE/patch_gateway.py" "$HERE/apply_config.py" "$HERE/apply_soul.py" "$BUILD/"; cp -r "$HERE/soul" "$BUILD/"
+  BUILD=$(mktemp -d); cp "$HERE/patch_gateway.py" "$HERE/patch_bridge.py" "$HERE/apply_config.py" "$HERE/apply_soul.py" "$BUILD/"; cp -r "$HERE/soul" "$BUILD/"
   {
     echo "FROM $BASE_IMG"
     echo "USER root"
-    echo "COPY patch_gateway.py apply_config.py apply_soul.py /opt/techdeva/"
+    echo "COPY patch_gateway.py patch_bridge.py apply_config.py apply_soul.py /opt/techdeva/"
     echo "COPY soul /opt/techdeva/soul"
     echo "RUN python3 /opt/techdeva/patch_gateway.py /opt/hermes/gateway/run.py && grep -q '== \"whatsapp\"' /opt/hermes/gateway/run.py"
     # The WhatsApp bridge ships without its packages (node_modules was empty in
     # the upstream image, 2 Oct 2026): install them here so the pairing helper
     # and the gateway can both run it.
     echo "RUN cd /opt/hermes/scripts/whatsapp-bridge && npm ci --omit=dev --no-audit --no-fund && test -n \"\$(ls node_modules)\""
+    # The stock bridge only draws the QR in the terminal; give it the clinic's
+    # GET /session so the dashboard can show the code (patch_bridge.py).
+    echo "RUN python3 /opt/techdeva/patch_bridge.py /opt/hermes/scripts/whatsapp-bridge/bridge.js && node --check /opt/hermes/scripts/whatsapp-bridge/bridge.js"
     [ -n "$BASE_USER" ] && echo "USER $BASE_USER"
     echo "LABEL techdeva.template=agent-td1"
   } > "$BUILD/Dockerfile"
@@ -131,6 +134,8 @@ docker exec "$AGENT" grep -q "TECHDEVA-VOICE-START" /opt/data/SOUL.md && ok "T5 
 docker exec "$PAIR" node -e "require('http').get({host:'127.0.0.1',port:3010,path:'/health',headers:{'x-internal-key':process.env.HERMES_INTERNAL_KEY}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{console.log('  pairctl:',b);process.exit(/can_send/.test(b)?0:1)})}).on('error',e=>{console.log(e.message);process.exit(1)})" && ok "T6 pairctl up, shares the agent network (can_send)" || bad "T6 pairctl"
 docker exec "$PAIR" sh -c 'test -f /opt/data/scripts/whatsapp-bridge/bridge.js && test -n "$(ls /opt/data/scripts/whatsapp-bridge/node_modules 2>/dev/null)"' \
   && ok "T7 WhatsApp bridge and its packages are where pairing looks for them" || bad "T7 WhatsApp bridge missing (the QR could never start)"
+docker exec "$PAIR" grep -q "'/session'" /opt/data/scripts/whatsapp-bridge/bridge.js \
+  && ok "T8 bridge hands the QR code to the dashboard (/session)" || bad "T8 bridge has no /session (the dashboard would wait for a code forever)"
 [ $fail = 0 ] || die "verification failed; the agent is up but NOT assigned to the tenant. Remove with remove-agent.sh --key $KEY --yes"
 
 # ---- tell the platform which agent this tenant uses (TechDeva action)
