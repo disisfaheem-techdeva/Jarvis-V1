@@ -46,7 +46,13 @@ def _generate(prompt, ratio):
     key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not key:
         raise HTTPException(503, "The AI picture maker is not set up on this server.")
-    last, refused = "no model tried", False
+    tried, refused = [], False
+
+    def why(r):
+        try:
+            return str(((r.json() or {}).get("error") or {}).get("message") or "")[:140]
+        except ValueError:
+            return ""
     started = time.time()
     for m in MODELS:
         if time.time() - started > TIMEOUT:
@@ -58,18 +64,18 @@ def _generate(prompt, ratio):
                                   json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": cfg},
                                   timeout=(5, TIMEOUT))
             except requests.RequestException as e:
-                last = "%s: %s" % (m, type(e).__name__)
+                tried.append("%s: %s" % (m, type(e).__name__))
                 break
             if r.status_code == 400:
-                last = "%s_400" % m
+                tried.append("%s 400 %s" % (m, why(r)))
                 continue
             if r.status_code >= 400:
-                last = "%s_%s" % (m, r.status_code)
+                tried.append("%s %s %s" % (m, r.status_code, why(r)))
                 break
             try:
                 cand = (r.json().get("candidates") or [{}])[0]
             except ValueError:
-                last = "%s: unreadable answer" % m
+                tried.append("%s: unreadable answer" % m)
                 break
             for p in (cand.get("content") or {}).get("parts") or []:
                 d = p.get("inlineData") or p.get("inline_data") or {}
@@ -77,12 +83,16 @@ def _generate(prompt, ratio):
                 if mime.startswith("image/") and d.get("data"):
                     return mime, d["data"], m
             refused = refused or cand.get("finishReason") in ("SAFETY", "IMAGE_SAFETY", "PROHIBITED_CONTENT", "OTHER")
-            last = "%s: no picture (%s)" % (m, cand.get("finishReason") or "empty")
+            tried.append("%s: no picture (%s)" % (m, cand.get("finishReason") or "empty"))
             break
     if refused:
         raise HTTPException(422, "The AI would not make that picture. Describe it differently (for example the "
                                  "treatment room, the product, or a happy client) and try again.")
-    raise HTTPException(503, "The AI picture maker is busy right now (%s). Try again in a minute." % last)
+    print("[aidesign] no picture: %s" % " | ".join(tried), flush=True)
+    if tried and all(" 429 " in t for t in tried):
+        raise HTTPException(503, "The AI picture maker has used up its allowance on the Gemini key for now. "
+                                 "Try again later; TechDeva has been told.")
+    raise HTTPException(503, "The AI picture maker is not available right now. Try again in a minute.")
 
 
 def make_aidesign_router():
