@@ -4715,7 +4715,7 @@ VIEWS.posts = function(){
           '<button class="btn" id="ps_pick" type="button">📎 Add pictures</button>' +
           '<input type="file" id="ps_file" accept="image/*" multiple style="display:none">' +
         '</div>' +
-        '<div class="card-note" style="margin-top:8px">Add up to 10 pictures: several pictures go out as one Facebook album post and one Instagram carousel. Instagram needs at least one picture. Each picture is sent as JPEG, up to 4 MB.</div>' +
+        '<div class="card-note" style="margin-top:8px">Add up to 10 pictures: several pictures go out as one Facebook album post and one Instagram carousel. Each picture is sent as JPEG, up to 4 MB. Or add one video instead (MP4 or MOV, up to 100 MB, 3 seconds to 15 minutes): it goes out as a Facebook video and an Instagram Reel. Instagram needs a picture or a video.</div>' +
         '<div style="margin-top:12px"><button class="btn primary" id="ps_save" type="button">Save as draft</button></div>' +
       '</div>');
   }
@@ -6700,6 +6700,332 @@ function slWire(){
     });
   }
   var t = setInterval(function(){ if (S.me) { clearInterval(t); add(); } }, 500);
+})();
+
+/* ======================================================== Part 23: Picture designer (Posts)
+   Edit a picture before it is posted: Instagram sizes, a headline and a line
+   of text on a band in the business's own colour, its logo, and ready-made
+   layouts (Offer, New service, Before / After). Everything happens in the
+   browser on the picture already in the tray (a data: URL, so nothing is
+   fetched cross-origin); the result is uploaded like any other picture.
+   The editor sits on top of the page, so a redraw underneath never closes it. */
+var ED = null;
+var ED_SIZES = {
+  square:    { w: 1080, h: 1080, label: 'Square 1:1 (feed)' },
+  portrait:  { w: 1080, h: 1350, label: 'Portrait 4:5 (feed, most space)' },
+  story:     { w: 1080, h: 1920, label: 'Story / Reel cover 9:16' },
+  landscape: { w: 1200, h: 628,  label: 'Landscape 1.91:1 (Facebook link)' }
+};
+var ED_LOGO = null;
+function edBrandColor(){
+  var c = (typeof PREFS !== 'undefined' && PREFS.accent) || (typeof BRAND !== 'undefined' && BRAND.accent) || '#8B5CF6';
+  return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#8B5CF6';
+}
+function edLoadImg(src){
+  return new Promise(function(ok, bad){ var i = new Image(); i.onload = function(){ ok(i); }; i.onerror = function(){ bad(new Error('That picture could not be opened.')); }; i.src = src; });
+}
+function edLogo(){
+  if (ED_LOGO || typeof BRAND === 'undefined' || !BRAND.has_logo) return Promise.resolve(ED_LOGO);
+  return edLoadImg(brandLogoURL()).then(function(i){ ED_LOGO = i; return i; }, function(){ return null; });
+}
+// index = a picture in the tray, or -1 for a new design on the brand colour
+function edOpen(index){
+  var m = index >= 0 ? PST.imgs[index] : null;
+  if (m && !m.src) return;
+  ED = { i: index, img: null, img2: null, size: 'square', zoom: 1, ox: 0, oy: 0, head: '', sub: '', pos: 'bottom',
+         band: true, bg: edBrandColor(), fg: '#ffffff', logo: false, tpl: '' };
+  var ready = m ? edLoadImg(m.src).then(function(i){ ED.img = i; }) : Promise.resolve();
+  if (!m) { ED.size = 'square'; ED.pos = 'center'; ED.band = false; }
+  ready.then(edLogo).then(function(){ if (ED) { edRender(); edDraw(); } })
+       .catch(function(e){ ED = null; say(e.message); });
+}
+function edClose(){ ED = null; var o = document.getElementById('pst-ed'); if (o) o.remove(); }
+function edWrap(x, text, maxW){
+  var words = String(text || '').split(/\s+/).filter(Boolean), lines = [], line = '';
+  words.forEach(function(w){
+    var t = line ? line + ' ' + w : w;
+    if (x.measureText(t).width > maxW && line) { lines.push(line); line = w; } else line = t;
+  });
+  if (line) lines.push(line);
+  return lines.slice(0, 4);
+}
+function edCover(x, img, dx, dy, dw, dh, zoom, ox, oy){
+  var k = Math.max(dw / img.width, dh / img.height) * (zoom || 1);
+  var w = img.width * k, h = img.height * k;
+  var sx = dx + (dw - w) / 2 + (w - dw) / 2 * (ox || 0), sy = dy + (dh - h) / 2 + (h - dh) / 2 * (oy || 0);
+  x.save(); x.beginPath(); x.rect(dx, dy, dw, dh); x.clip(); x.drawImage(img, sx, sy, w, h); x.restore();
+}
+function edDraw(){
+  var cv = document.getElementById('ed_cv'); if (!cv || !ED) return;
+  var sz = ED_SIZES[ED.size], W = sz.w, H = sz.h, x = cv.getContext('2d');
+  cv.width = W; cv.height = H;
+  x.fillStyle = ED.bg; x.fillRect(0, 0, W, H);
+  if (ED.tpl === 'ba' && ED.img && ED.img2) {
+    edCover(x, ED.img, 0, 0, W / 2 - 3, H, ED.zoom, ED.ox, ED.oy);
+    edCover(x, ED.img2, W / 2 + 3, 0, W / 2 - 3, H, ED.zoom, ED.ox, ED.oy);
+    x.font = 'bold ' + Math.round(W * 0.04) + 'px Arial, sans-serif'; x.textBaseline = 'middle';
+    [['BEFORE', W / 4], ['AFTER', 3 * W / 4]].forEach(function(l){
+      var tw = x.measureText(l[0]).width + W * 0.05;
+      x.fillStyle = 'rgba(0,0,0,.6)'; x.fillRect(l[1] - tw / 2, H * 0.03, tw, W * 0.07);
+      x.fillStyle = '#fff'; x.textAlign = 'center'; x.fillText(l[0], l[1], H * 0.03 + W * 0.035);
+    });
+  } else if (ED.img) {
+    edCover(x, ED.img, 0, 0, W, H, ED.zoom, ED.ox, ED.oy);
+  }
+  if (ED.head || ED.sub) {
+    var pad = W * 0.06, maxW = W - pad * 2, hs = Math.round(W * (ED.size === 'landscape' ? 0.06 : 0.08)), ss = Math.round(hs * 0.52);
+    x.font = 'bold ' + hs + 'px Arial, sans-serif'; var hl = edWrap(x, ED.head.toUpperCase(), maxW);
+    x.font = ss + 'px Arial, sans-serif'; var sl = edWrap(x, ED.sub, maxW);
+    var blockH = hl.length * hs * 1.12 + (sl.length ? sl.length * ss * 1.3 + (hl.length ? hs * 0.3 : 0) : 0);
+    var top = ED.pos === 'top' ? pad : ED.pos === 'center' ? (H - blockH) / 2 : H - pad - blockH;
+    if (ED.band) {
+      x.globalAlpha = 0.88; x.fillStyle = ED.bg;
+      x.fillRect(0, top - pad * 0.6, W, blockH + pad * 1.2); x.globalAlpha = 1;
+    }
+    x.fillStyle = ED.fg; x.textAlign = 'center'; x.textBaseline = 'top';
+    if (!ED.band && ED.img) { x.shadowColor = 'rgba(0,0,0,.55)'; x.shadowBlur = W * 0.012; }
+    var y = top;
+    x.font = 'bold ' + hs + 'px Arial, sans-serif';
+    hl.forEach(function(l){ x.fillText(l, W / 2, y); y += hs * 1.12; });
+    if (hl.length && sl.length) y += hs * 0.3;
+    x.font = ss + 'px Arial, sans-serif';
+    sl.forEach(function(l){ x.fillText(l, W / 2, y); y += ss * 1.3; });
+    x.shadowBlur = 0; x.shadowColor = 'transparent';
+  }
+  if (ED.logo && ED_LOGO) {
+    var lw = W * 0.18, lh = lw * ED_LOGO.height / ED_LOGO.width;
+    if (lh > H * 0.14) { lh = H * 0.14; lw = lh * ED_LOGO.width / ED_LOGO.height; }
+    var lx = W - lw - W * 0.04, ly = ED.pos === 'top' && (ED.head || ED.sub) ? H - lh - W * 0.04 : W * 0.04;
+    x.fillStyle = 'rgba(255,255,255,.85)'; x.fillRect(lx - W * 0.012, ly - W * 0.012, lw + W * 0.024, lh + W * 0.024);
+    x.drawImage(ED_LOGO, lx, ly, lw, lh);
+  }
+}
+function edRender(){
+  var o = document.getElementById('pst-ed');
+  if (!o) { o = document.createElement('div'); o.id = 'pst-ed'; document.body.appendChild(o); }
+  var sel = function(v, cur){ return v === cur ? ' selected' : ''; };
+  var nextPic = ED.i >= 0 && PST.imgs[ED.i + 1] && PST.imgs[ED.i + 1].src;
+  o.innerHTML = '<div class="ed-box" role="dialog" aria-label="Design the picture">' +
+    '<div class="ed-head"><b>Design the picture</b><button type="button" class="btn" id="ed_x">Close</button></div>' +
+    '<div class="ed-body"><div class="ed-prev"><canvas id="ed_cv"></canvas></div><div class="ed-ctl">' +
+      '<div class="card-note">Ready-made layouts</div><div class="ed-row">' +
+        '<button type="button" class="btn" data-edtpl="offer">Offer</button>' +
+        '<button type="button" class="btn" data-edtpl="new">New service</button>' +
+        (ED.img ? '<button type="button" class="btn" data-edtpl="ba"' + (nextPic ? '' : ' disabled title="Add the after picture right after this one first"') + '>Before / After</button>' : '') +
+        '<button type="button" class="btn" data-edtpl="plain">Plain</button></div>' +
+      '<label class="card-note">Size<select class="fld" id="ed_size">' + Object.keys(ED_SIZES).map(function(k){ return '<option value="' + k + '"' + sel(k, ED.size) + '>' + ED_SIZES[k].label + '</option>'; }).join('') + '</select></label>' +
+      (ED.img ? '<label class="card-note">Zoom<input type="range" id="ed_zoom" min="1" max="3" step="0.05" value="' + ED.zoom + '"></label>' +
+        '<label class="card-note">Move left / right<input type="range" id="ed_ox" min="-1" max="1" step="0.02" value="' + ED.ox + '"></label>' +
+        '<label class="card-note">Move up / down<input type="range" id="ed_oy" min="-1" max="1" step="0.02" value="' + ED.oy + '"></label>' : '') +
+      '<label class="card-note">Headline<input class="fld" id="ed_head" maxlength="60" value="' + esc(ED.head) + '" placeholder="e.g. 20% OFF HYDRAFACIAL"></label>' +
+      '<label class="card-note">Text<input class="fld" id="ed_sub" maxlength="120" value="' + esc(ED.sub) + '" placeholder="e.g. This week only. Book on WhatsApp."></label>' +
+      '<div class="ed-row"><label class="card-note">Text at<select class="fld" id="ed_pos"><option value="top"' + sel('top', ED.pos) + '>Top</option><option value="center"' + sel('center', ED.pos) + '>Middle</option><option value="bottom"' + sel('bottom', ED.pos) + '>Bottom</option></select></label>' +
+        '<label class="card-note">Colour<input type="color" id="ed_bg" value="' + esc(ED.bg) + '"></label>' +
+        '<label class="card-note">Text colour<input type="color" id="ed_fg" value="' + esc(ED.fg) + '"></label></div>' +
+      '<label class="ed-chk"><input type="checkbox" id="ed_band"' + (ED.band ? ' checked' : '') + '> Colour band behind the text</label>' +
+      (ED_LOGO ? '<label class="ed-chk"><input type="checkbox" id="ed_logo"' + (ED.logo ? ' checked' : '') + '> Add my logo</label>'
+               : '<div class="card-note">Upload your logo under Business Settings to add it here.</div>') +
+      '<div class="ed-row" style="margin-top:8px"><button type="button" class="btn primary" id="ed_save">' + (ED.i >= 0 ? 'Use this picture' : 'Add to the post') + '</button>' +
+        '<button type="button" class="btn" id="ed_cancel">Cancel</button></div>' +
+    '</div></div></div>';
+  edWire();
+}
+function edWire(){
+  var g = function(id){ return document.getElementById(id); };
+  var bind = function(id, key, num){ var e = g(id); if (!e) return; e.oninput = e.onchange = function(){ ED[key] = e.type === 'checkbox' ? e.checked : (num ? Number(e.value) : e.value); edDraw(); }; };
+  bind('ed_zoom', 'zoom', true); bind('ed_ox', 'ox', true); bind('ed_oy', 'oy', true);
+  bind('ed_head', 'head'); bind('ed_sub', 'sub'); bind('ed_pos', 'pos'); bind('ed_bg', 'bg'); bind('ed_fg', 'fg');
+  bind('ed_band', 'band'); bind('ed_logo', 'logo'); bind('ed_size', 'size');
+  g('ed_x').onclick = g('ed_cancel').onclick = edClose;
+  document.querySelectorAll('[data-edtpl]').forEach(function(b){ b.onclick = function(){
+    var t = b.getAttribute('data-edtpl');
+    ED.tpl = t === 'ba' ? 'ba' : '';
+    if (t === 'offer') { ED.head = ED.head || '20% OFF'; ED.sub = ED.sub || 'This week only. Book on WhatsApp.'; ED.pos = 'bottom'; ED.band = true; ED.logo = !!ED_LOGO; }
+    if (t === 'new') { ED.head = ED.head || 'NOW AVAILABLE'; ED.sub = ED.sub || 'Ask us on WhatsApp for details.'; ED.pos = 'top'; ED.band = true; ED.logo = !!ED_LOGO; }
+    if (t === 'plain') { ED.head = ''; ED.sub = ''; ED.band = false; }
+    var go = Promise.resolve();
+    if (t === 'ba') {
+      var m2 = PST.imgs[ED.i + 1];
+      go = edLoadImg(m2.src).then(function(i){ ED.img2 = i; ED.head = ''; ED.sub = ''; ED.logo = !!ED_LOGO; if (ED.size === 'story') ED.size = 'square'; });
+    }
+    go.then(function(){ edRender(); edDraw(); }, function(e){ say(e.message); });
+  }; });
+  g('ed_save').onclick = function(){
+    var cv = g('ed_cv'), jpeg = cv.toDataURL('image/jpeg', 0.9);
+    var m = { src: jpeg, url: null };
+    if (ED.i >= 0) {
+      PST.imgs[ED.i] = m;
+      if (ED.tpl === 'ba' && PST.imgs[ED.i + 1]) PST.imgs.splice(ED.i + 1, 1);   // both halves are in this one picture now
+    } else {
+      if (PST.imgs.length >= PST.MAX) { say('A post can have ' + PST.MAX + ' pictures.'); return; }
+      PST.imgs.push(m);
+    }
+    edClose();
+    var redraw = function(){ var b = document.getElementById('ps_img'); if (b) { b.innerHTML = pstImgHTML(); pstWire(); } };
+    redraw();
+    api('/social/media', { method: 'POST', body: { image: jpeg } }).then(function(r){
+      if (!r || !r.ok) throw new Error((r && r.data && r.data.detail) || 'The picture was not saved.');
+      m.url = r.data.url; redraw();
+    }).catch(function(e){ var i = PST.imgs.indexOf(m); if (i !== -1) PST.imgs.splice(i, 1); redraw(); say(e.message); });
+  };
+  edDraw();
+}
+(function(){
+  var css = document.createElement('style');
+  css.textContent = '#pst-ed{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:16px}' +
+    '.ed-box{background:var(--panel,#111);border:1px solid var(--line);border-radius:12px;width:min(980px,100%);max-height:100%;overflow:auto}' +
+    '.ed-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}' +
+    '.ed-body{display:flex;gap:16px;padding:16px;flex-wrap:wrap}.ed-prev{flex:1 1 360px;display:flex;align-items:flex-start;justify-content:center}' +
+    '.ed-prev canvas{max-width:100%;max-height:70vh;border-radius:8px;background:#000}' +
+    '.ed-ctl{flex:1 1 280px;display:grid;gap:8px;align-content:start}.ed-ctl label.card-note{display:grid;gap:4px}' +
+    '.ed-row{display:flex;gap:8px;flex-wrap:wrap;align-items:end}.ed-chk{display:flex;gap:8px;align-items:center}' +
+    '.ed-ctl input[type=range]{width:100%}.ed-ctl input[type=color]{width:56px;height:34px;padding:0;border:0;background:none}' +
+    '.pst-ed-btn{position:absolute;left:-6px;bottom:-6px;height:26px;border-radius:13px;border:0;background:#000;color:#fff;font-size:12px;padding:0 8px;cursor:pointer}';
+  document.head.appendChild(css);
+})();
+// the tray gets an Edit button on each picture, and the composer a "Design a picture" button
+var _pstImgHTMLBefore23 = pstImgHTML;
+pstImgHTML = function(){
+  var h = _pstImgHTMLBefore23();
+  PST.imgs.forEach(function(m, i){
+    if (m.src) h = h.replace(
+      '<button type="button" class="pst-x" data-psrm="' + i + '"',
+      '<button type="button" class="pst-ed-btn" data-psed="' + i + '" aria-label="Design picture ' + (i + 1) + '">✏️ Edit</button>' +
+      '<button type="button" class="pst-x" data-psrm="' + i + '"');
+  });
+  return h;
+};
+var _pstWireBefore23 = pstWire;
+pstWire = function(){
+  _pstWireBefore23();
+  document.querySelectorAll('[data-psed]').forEach(function(b){ b.onclick = function(){ edOpen(+b.getAttribute('data-psed')); }; });
+  var pick = document.getElementById('ps_pick');
+  if (pick && !document.getElementById('ps_design')) {
+    var d = document.createElement('button');
+    d.type = 'button'; d.className = 'btn'; d.id = 'ps_design'; d.textContent = '🎨 Design a picture';
+    pick.parentNode.insertBefore(d, pick.nextSibling);
+  }
+  var dz = document.getElementById('ps_design');
+  if (dz) dz.onclick = function(){ edOpen(-1); };
+};
+
+/* ======================================================== Part 24: Video posts (Facebook video + Instagram Reel)
+   A post carries pictures or one video. The video uploads with a progress
+   bar, shows a preview, and can be trimmed (the server cuts without
+   re-encoding, so the cut lands on the nearest key frame). Post now hands a
+   video to the worker, because Meta takes minutes to process one. */
+PST.vid = null;   // null | { up: percent } while uploading | { token, url, duration, width, height }
+var VID_MAX = 100 * 1024 * 1024;
+// a message that survives the page being redrawn after a save
+function sayLater(m){ var n = 0; (function t(){ var e = document.getElementById('actmsg'); if (e && S.social_posts) { e.textContent = m; e.style.color = 'var(--growth)'; } else if (n++ < 25) setTimeout(t, 200); })(); }
+function vidSrc(token){ return '/media/v/' + token + '.mp4'; }
+function vidLen(s){ s = Math.round(Number(s) || 0); return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2); }
+function vidShape(v){
+  if (!v.width || !v.height) return '';
+  var r = v.width / v.height;
+  return r < 0.7 ? 'tall 9:16, the best shape for a Reel' : r < 1.05 ? 'square: fine for the feed, Reels show it with bars' : 'wide: fine on Facebook, Reels crop or bar it';
+}
+function vidHTML(){
+  var v = PST.vid; if (!v) return '';
+  if (v.up !== undefined) return '<div class="card-note">Uploading the video… ' + v.up + '%</div><div class="vid-bar"><span style="width:' + v.up + '%"></span></div>';
+  return '<div class="vid-box"><video id="ps_vid" src="' + esc(vidSrc(v.token)) + '" controls preload="metadata" playsinline></video>' +
+    '<div class="vid-ctl"><div class="card-note">' + esc(vidLen(v.duration)) + ' · ' + esc(v.width + '×' + v.height) + (vidShape(v) ? ' · ' + esc(vidShape(v)) : '') + '</div>' +
+      '<div class="card-note" style="margin-top:6px">Trim: play to a point and press a button, or type seconds. The cut lands on the nearest key frame (phones put one every second or two).</div>' +
+      '<div class="ed-row"><label class="card-note">Start (s)<input class="fld" type="number" min="0" step="0.5" id="ps_vs" value="0" style="max-width:110px"></label>' +
+        '<button type="button" class="btn" id="ps_vsh">Start here</button>' +
+        '<label class="card-note">End (s)<input class="fld" type="number" min="0" step="0.5" id="ps_ve" value="' + esc(v.duration) + '" style="max-width:110px"></label>' +
+        '<button type="button" class="btn" id="ps_veh">End here</button></div>' +
+      '<div class="ed-row" style="margin-top:6px"><button type="button" class="btn" id="ps_vcut">✂️ Cut</button>' +
+        '<button type="button" class="btn" id="ps_vrm">Remove video</button></div></div></div>';
+}
+function vidUpload(file){
+  var type = file.type || (/\.mov$/i.test(file.name) ? 'video/quicktime' : 'video/mp4');
+  if (!/^video\/(mp4|quicktime)$/.test(type)) { say('Choose an MP4 or MOV video.'); return; }
+  if (file.size > VID_MAX) { say('That video is larger than 100 MB. Trim or compress it on your phone first.'); return; }
+  PST.vid = { up: 0 }; vidRedraw();
+  var x = new XMLHttpRequest();
+  x.open('POST', '/social/video'); x.withCredentials = true; x.setRequestHeader('Content-Type', type);
+  x.upload.onprogress = function(e){ if (e.lengthComputable && PST.vid && PST.vid.up !== undefined) { PST.vid.up = Math.round(100 * e.loaded / e.total); vidRedraw(); } };
+  x.onload = function(){
+    var d = null; try { d = JSON.parse(x.responseText); } catch (e) {}
+    if (x.status >= 200 && x.status < 300 && d && d.token) { PST.vid = d; say('Video ready (' + vidLen(d.duration) + '). Write the text and save.'); }
+    else { PST.vid = null; say((d && d.detail) || 'The video was not saved (' + x.status + ').'); }
+    vidRedraw();
+  };
+  x.onerror = function(){ PST.vid = null; vidRedraw(); say('The upload stopped. Check the connection and try again.'); };
+  x.send(file);
+}
+function vidRedraw(){ var b = document.getElementById('ps_img'); if (b) { b.innerHTML = pstImgHTML(); pstWire(); } }
+var _pstImgHTMLBefore24 = pstImgHTML;
+pstImgHTML = function(){ return PST.vid ? vidHTML() : _pstImgHTMLBefore24(); };
+var _pstWireBefore24 = pstWire;
+pstWire = function(){
+  _pstWireBefore24();
+  var g = function(id){ return document.getElementById(id); };
+  var pick = g('ps_pick');
+  if (pick && !g('ps_vpick')) {
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'btn'; b.id = 'ps_vpick'; b.textContent = '🎬 Add video';
+    var f = document.createElement('input'); f.type = 'file'; f.id = 'ps_vfile'; f.accept = 'video/mp4,video/quicktime,.mp4,.mov'; f.style.display = 'none';
+    var after = g('ps_design') || pick;
+    after.parentNode.insertBefore(b, after.nextSibling); after.parentNode.insertBefore(f, b.nextSibling);
+  }
+  // pictures or one video, never both
+  var hasV = !!PST.vid, hasP = PST.imgs.length > 0;
+  if (pick) pick.disabled = hasV;
+  if (g('ps_design')) g('ps_design').disabled = hasV;
+  if (g('ps_vpick')) { g('ps_vpick').disabled = hasP || hasV; g('ps_vpick').title = hasP ? 'Remove the pictures to add a video instead' : ''; }
+  if (g('ps_vpick')) g('ps_vpick').onclick = function(){ g('ps_vfile').click(); };
+  if (g('ps_vfile')) g('ps_vfile').onchange = function(){ var f = g('ps_vfile').files[0]; g('ps_vfile').value = ''; if (f) vidUpload(f); };
+  var v = g('ps_vid');
+  if (g('ps_vsh')) g('ps_vsh').onclick = function(){ g('ps_vs').value = (v.currentTime || 0).toFixed(1); };
+  if (g('ps_veh')) g('ps_veh').onclick = function(){ g('ps_ve').value = (v.currentTime || 0).toFixed(1); };
+  if (g('ps_vrm')) g('ps_vrm').onclick = function(){ PST.vid = null; vidRedraw(); };
+  if (g('ps_vcut')) g('ps_vcut').onclick = function(){
+    var bt = g('ps_vcut'); bt.disabled = true; bt.textContent = 'Cutting…';
+    act('/social/video/' + PST.vid.token + '/trim', { method: 'POST', body: { start: Number(g('ps_vs').value) || 0, end: Number(g('ps_ve').value) || 0 } }, 'Cut.')
+      .then(function(r){ if (r.ok) { PST.vid = r.data; say('Cut: now ' + vidLen(r.data.duration) + ' long.'); vidRedraw(); } else { bt.disabled = false; bt.textContent = '✂️ Cut'; } });
+  };
+  var save = g('ps_save');
+  if (save && PST.vid) save.onclick = function(){
+    var cap = (g('ps_cap').value || '').trim(), plats = [];
+    if (g('ps_fb').checked) plats.push('facebook');
+    if (g('ps_ig').checked) plats.push('instagram');
+    if (cap.length < 2) { say('Write what the post should say.'); return; }
+    if (!plats.length) { say('Tick Facebook, Instagram or both.'); return; }
+    if (!PST.vid.token) { say('Wait a moment, the video is still uploading.'); return; }
+    save.disabled = true;
+    act('/social/posts', { method: 'POST', body: { caption: cap, platforms: plats, video_url: PST.vid.url } }, 'Draft saved with the video. Post it now or pick a time below.')
+      .then(function(r){ if (r.ok) { PST.vid = null; pstReload(); sayLater('Draft saved with the video. Post it now or pick a time below.'); } else save.disabled = false; });
+  };
+  // Post now on a video post: the worker sends it; say so instead of "Posted."
+  document.querySelectorAll('[data-pnow]').forEach(function(b){
+    var orig = b.onclick;
+    b.onclick = function(){
+      var id = b.getAttribute('data-pnow'), p = ((S.social_posts && S.social_posts.posts) || []).filter(function(x){ return String(x.id) === id; })[0];
+      if (!p || !p.video_token) return orig.call(b);
+      if (g('ps_page') && !PST.page) { say('Choose which Facebook Page to post to (top of this page).'); return; }
+      if (!b.getAttribute('data-armed')) { b.setAttribute('data-armed', '1'); b.textContent = 'Tap again to post publicly'; return; }
+      b.disabled = true; b.textContent = 'Sending…';
+      act('/social/posts/' + id + '/publish', { method: 'POST', body: { page_id: PST.page } },
+          'Video on its way.').then(function(r){ pstReload(); if (r.ok) sayLater('Video on its way: it goes out within a minute or two. Instagram needs a few more minutes to process a Reel.'); });
+    };
+  });
+};
+var _pstCardBefore24 = pstCard;
+pstCard = function(p, own, connected, pgList){
+  var h = _pstCardBefore24(p, own, connected, pgList);
+  if (!p.video_token) return h;
+  var at = h.indexOf('</div>');   // after the line with platforms and status
+  var vid = '<video class="pst-vid" src="' + esc(vidSrc(p.video_token)) + '" controls preload="metadata" playsinline></video>' +
+    (p.platforms.indexOf('instagram') !== -1 ? '<div class="card-note">On Instagram this goes out as a Reel.</div>' : '');
+  return at > -1 ? h.slice(0, at + 6) + vid + h.slice(at + 6) : h + vid;
+};
+(function(){
+  var css = document.createElement('style');
+  css.textContent = '.vid-box{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}.vid-box video{width:min(320px,100%);max-height:420px;border-radius:8px;background:#000}' +
+    '.vid-ctl{flex:1 1 260px}.vid-bar{height:8px;border-radius:4px;background:var(--line);overflow:hidden;max-width:420px}.vid-bar span{display:block;height:100%;background:var(--accent)}' +
+    '.pst-vid{width:min(280px,100%);max-height:360px;border-radius:8px;background:#000;display:block;margin:8px 0}';
+  document.head.appendChild(css);
 })();
 
 window.addEventListener('hashchange', function(){

@@ -43,7 +43,7 @@ def is_our_media(url):
 PLATFORMS = ("facebook", "instagram")
 LOCAL_OFFSET = "+05:00"   # Asia/Karachi (no daylight saving), as Jarvis's clock in console.py
 COLS = ("id, platforms, caption, image_url, image_urls, page_id, status, results, source, created_by, "
-        "approved_by, created_at, updated_at, published_at, scheduled_at")
+        "approved_by, created_at, updated_at, published_at, scheduled_at, video_token")
 SCHEDULE_MAX_DAYS = 90
 MAX_IMAGES = 10  # Facebook multi-photo and Instagram carousel both stop at 10
 
@@ -107,21 +107,26 @@ def post_images(post):
 
 
 def create_draft(cur, tid, uid, caption, platforms=None, image_url=None, source="jarvis",
-                 image_urls=None):
+                 image_urls=None, video_token=None):
     caption = (caption or "").strip()[:2200]
     if len(caption) < 2:
         raise HTTPException(400, "The post needs some words.")
     plats = _clean_platforms(platforms)
     imgs = _clean_images(image_urls, image_url)
+    if video_token:
+        from .videos import owns_video
+        if not owns_video(cur, video_token):
+            raise HTTPException(400, "That video is not there any more. Add it again.")
+        imgs = []          # a post is pictures or one video, not both
     cur.execute("INSERT INTO social_posts (tenant_id, platforms, caption, image_url, image_urls, "
-                "source, created_by) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING " + COLS,
+                "source, created_by, video_token) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING " + COLS,
                 (tid, plats, caption, imgs[0] if imgs else None, imgs, source,
-                 str(uid) if uid else None))
+                 str(uid) if uid else None, video_token))
     row = dict(cur.fetchone())
     record(cur, action="social.draft", resource="social_posts",
            resource_id=str(row["id"]), actor=str(uid), actor_type="human",
            status="ok", detail={"platforms": plats, "has_image": bool(imgs),
-                                "images": len(imgs)}, error=None)
+                                "images": len(imgs), "video": bool(video_token)}, error=None)
     return row
 
 
@@ -270,6 +275,34 @@ def _publish_instagram(page, caption, images):
     return {"ok": True, "id": body2.get("id"), "account": page.get("ig_username")}
 
 
+def _publish_facebook_video(page, caption, url):
+    body, err = _graph_post("/%s/videos" % page["id"], {"file_url": url, "description": caption,
+                                                       "access_token": page["access_token"]})
+    if err:
+        return {"ok": False, "error": err, "page": page.get("name")}
+    return {"ok": True, "id": body.get("id"), "page": page.get("name"), "video": True}
+
+
+def _publish_reel(page, caption, url):
+    ig = page.get("ig_id")
+    if not ig:
+        return {"ok": False, "error": "No Instagram business account is linked to "
+                "the Facebook page %s." % page.get("name")}
+    tok = page["access_token"]
+    body, err = _graph_post("/%s/media" % ig, {"media_type": "REELS", "video_url": url, "caption": caption,
+                                               "share_to_feed": "true", "access_token": tok})
+    if err:
+        return {"ok": False, "error": err}
+    # Instagram downloads and processes the whole video before it can go out
+    err = _ig_ready(body.get("id"), tok, wait=600)
+    if err:
+        return {"ok": False, "error": err.replace("pictures", "video").replace("a picture", "the video")}
+    body2, err = _graph_post("/%s/media_publish" % ig, {"creation_id": body.get("id"), "access_token": tok})
+    if err:
+        return {"ok": False, "error": err}
+    return {"ok": True, "id": body2.get("id"), "account": page.get("ig_username"), "reel": True}
+
+
 def publish_post(tid, role, post_id, actor, claim_from, page_id=None):
     """Claim the post first so a double click (or the worker and a person at
     once) can never post twice, then talk to Meta outside any transaction."""
@@ -290,10 +323,18 @@ def publish_post(tid, role, post_id, actor, claim_from, page_id=None):
         post = dict(post)
     images = post_images(post)
     results = {}
-    if "facebook" in post["platforms"]:
-        results["facebook"] = _publish_facebook(page, post["caption"], images)
-    if "instagram" in post["platforms"]:
-        results["instagram"] = _publish_instagram(page, post["caption"], images)
+    if post.get("video_token"):
+        from .videos import video_url
+        url = video_url(post["video_token"])
+        if "facebook" in post["platforms"]:
+            results["facebook"] = _publish_facebook_video(page, post["caption"], url)
+        if "instagram" in post["platforms"]:
+            results["instagram"] = _publish_reel(page, post["caption"], url)
+    else:
+        if "facebook" in post["platforms"]:
+            results["facebook"] = _publish_facebook(page, post["caption"], images)
+        if "instagram" in post["platforms"]:
+            results["instagram"] = _publish_instagram(page, post["caption"], images)
     oks = [r["ok"] for r in results.values()]
     status = "published" if all(oks) else ("partial" if any(oks) else "failed")
     with tenant_session(tid, role) as cur:
@@ -333,6 +374,11 @@ def publish_due(limit=10):
                        actor="scheduler", actor_type="system", status="error",
                        detail={}, error=str(e.detail)[:300])
         done += 1
+    try:
+        from .videos import cleanup
+        cleanup()
+    except Exception as e:  # noqa: BLE001 -- housekeeping never stops posting
+        print("[social] video cleanup skipped: %s" % e, flush=True)
     return done
 
 
@@ -412,9 +458,15 @@ def make_social_router():
                                 body.get("tenant_id"))
         _owner_only(role)
         with tenant_session(tid, role) as cur:
+            vt = None
+            if body.get("video_url"):
+                from .videos import token_from_url
+                vt = token_from_url(body.get("video_url"))
+                if not vt:
+                    raise HTTPException(400, "That video link is not one of yours. Add the video again.")
             row = create_draft(cur, tid, uid, body.get("caption"), body.get("platforms"),
                                body.get("image_url"), source="manual",
-                               image_urls=body.get("image_urls"))
+                               image_urls=body.get("image_urls"), video_token=vt)
         return {"post": row}
 
     @router.patch("/posts/{post_id}")
@@ -477,6 +529,26 @@ def make_social_router():
         tid, role, uid = _ident(x_tenant_id, x_role, authorization, td_session, tenant)
         _owner_only(role)
         _client_decides(x_tenant_id, x_role, authorization, td_session)
+        with tenant_session(tid, role) as cur:
+            cur.execute("SELECT video_token FROM social_posts WHERE id = %s", (post_id,))
+            row = cur.fetchone()
+            if row and row["video_token"]:
+                # Meta takes minutes to process a video: the worker posts it in
+                # the background (within a minute) instead of holding this page.
+                pages = _meta_pages(cur, tid)
+                if not pages:
+                    raise HTTPException(409, "Connect Facebook first (Integrations, Connect Facebook), then approve again.")
+                page = _chosen_page(cur, pages, (body or {}).get("page_id"), post_id)
+                cur.execute("UPDATE social_posts SET status = 'scheduled', scheduled_at = now(), page_id = %s, "
+                            "approved_by = %s, updated_at = now() WHERE id = %s AND status IN ('draft','failed') "
+                            "RETURNING " + COLS, (str(page["id"]), str(uid), post_id))
+                post = cur.fetchone()
+                if not post:
+                    raise HTTPException(409, "That post is not waiting for approval.")
+                record(cur, action="social.schedule", resource="social_posts", resource_id=post_id,
+                       actor=str(uid), actor_type="human", status="ok",
+                       detail={"at": "now", "video": True, "page": page.get("name")}, error=None)
+                return {"post": dict(post), "status": "queued", "results": {}}
         return publish_post(tid, role, post_id, str(uid), ("draft", "failed"),
                             page_id=(body or {}).get("page_id"))
 

@@ -102,12 +102,16 @@ services:
     volumes:
       # the signup page + client dashboard (the API image is built from ./app)
       - ./web:/srv/web:ro
+      # post videos (app/videos.py); shared with the worker, which publishes them
+      - mediadata:/srv/media
     depends_on: [db, redis]
 
   worker:
     restart: unless-stopped
     build: ./app
     command: ["python","-m","app.worker"]
+    volumes:
+      - mediadata:/srv/media
     environment:
       # password via PGPASSWORD, never in the DSN: a URL mangles + / = 
       DATABASE_URL: postgresql://techdeva_app@db:5432/techdeva
@@ -158,3 +162,4 @@ services:
 volumes:
   dbdata:
   redisdata:
+  mediadata:
