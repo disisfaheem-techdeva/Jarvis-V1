@@ -105,6 +105,8 @@ from .sales import make_sales_router
 app.include_router(make_sales_router())
 from .growth import make_growth_router
 app.include_router(make_growth_router())
+from .trialcap import make_trialcap_router
+app.include_router(make_trialcap_router())
 trial.install(app)
 
 # The two client-facing pages. The API image is built from ./app, so web/ is

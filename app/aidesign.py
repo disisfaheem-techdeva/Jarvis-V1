@@ -120,6 +120,17 @@ def make_aidesign_router():
         if used >= PER_DAY:
             raise HTTPException(429, "That is today's %d AI pictures. More tomorrow; you can still design with "
                                      "your own photos." % PER_DAY)
+        from .trialcap import TRIAL_AI_PICTURES, is_trial
+        with tenant_session(None, "techdeva_admin") as cur:
+            trial = is_trial(cur, tid)
+            if trial:
+                cur.execute("SELECT count(*) AS n FROM executions WHERE tenant_id::text = %s "
+                            "AND action = 'social.ai_picture' AND status = 'ok'", (str(tid),))
+                trial_used = int(cur.fetchone()["n"])
+        if trial and trial_used >= TRIAL_AI_PICTURES:
+            raise HTTPException(429, "Your free trial includes %d AI pictures and they are used. Choose a plan on "
+                                     "Plan & billing for %d a day; you can still design with your own photos."
+                                % (TRIAL_AI_PICTURES, PER_DAY))
         mime, data, model = _generate(_prompt(t.get("name") or "our business", t.get("industry"), idea,
                                               str(body.get("text_at") or "bottom"), colour),
                                       RATIOS.get(size, "1:1"))
@@ -129,6 +140,9 @@ def make_aidesign_router():
             record(cur, action="social.ai_picture", resource="social_media", resource_id=None, actor=str(uid),
                    actor_type="human", status="ok", detail={"idea": idea[:200], "size": size, "model": model},
                    error=None)
-        return {"image": "data:%s;base64,%s" % (mime, data), "left_today": max(PER_DAY - used - 1, 0)}
+        left = max(PER_DAY - used - 1, 0)
+        if trial:
+            left = min(left, max(TRIAL_AI_PICTURES - trial_used - 1, 0))
+        return {"image": "data:%s;base64,%s" % (mime, data), "left_today": left, "trial": trial}
 
     return router

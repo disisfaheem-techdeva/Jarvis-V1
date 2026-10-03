@@ -66,6 +66,37 @@ for r in rows:
   echo "$(now) deleted business agents [$KEYS]: removed=$ok"
 done
 
+# Free-trial limit (app/trialcap.py): a business on trial gets 50 customer
+# messages; then its agent is paused (stopped) until it pays, and started again
+# once it has. Every 5 minutes. Only template agents the platform names, never
+# irfan / clinic / salon / workspace*; only agents this guard paused are started.
+if [ $(( 10#$(date +%M) % 5 )) -eq 0 ]; then
+  PAUSED_DIR=/var/lib/techdeva/trial-paused; mkdir -p "$PAUSED_DIR"
+  curl -fsS "$API/techdeva/trial-guard" "${auth[@]}" 2>/dev/null | python3 -c '
+import json, re, sys
+try:
+    rows = json.load(sys.stdin).get("agents") or []
+except ValueError:
+    rows = []
+for r in rows:
+    k = r.get("key") or ""
+    if re.match(r"^[a-z0-9][a-z0-9-]{2,60}$", k) and not re.search(r"irfan|clinic|salon|workspace", k) and r.get("run") is not None:
+        print("%s\t%s\t%s" % (k, "run" if r["run"] else "pause", r.get("why", "")))
+' | while IFS=$'\t' read -r K WANT WHY; do
+    running=$(docker inspect -f '{{.State.Running}}' "hermes-agent-$K" 2>/dev/null || echo missing)
+    [ "$running" = missing ] && continue
+    if [ "$WANT" = pause ] && [ "$running" = true ]; then
+      [ $DRY = 1 ] && { echo "$(now) would pause $K ($WHY)"; continue; }
+      docker stop "hermes-agent-$K" >/dev/null && touch "$PAUSED_DIR/$K" && echo "$(now) paused $K: $WHY"
+    elif [ "$WANT" = run ] && [ -f "$PAUSED_DIR/$K" ]; then
+      [ $DRY = 1 ] && { echo "$(now) would start $K again ($WHY)"; continue; }
+      # pairctl lives in the agent's network: restart it after the agent
+      docker start "hermes-agent-$K" >/dev/null && sleep 3 && docker restart "pairctl-$K" >/dev/null \
+        && rm -f "$PAUSED_DIR/$K" && echo "$(now) started $K again: $WHY"
+    fi
+  done
+fi
+
 list=$(curl -fsS "$API/techdeva/agent-requests?status=approved" "${auth[@]}") || { echo "$(now) cannot read the queue"; exit 1; }
 job=$(printf '%s' "$list" | python3 -c '
 import json, re, sys

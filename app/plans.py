@@ -156,6 +156,10 @@ def make_plans_router():
         out = summary(tid, fresh)
         with tenant_session(None, "techdeva_admin") as cur:
             out["plans"] = all_plans(cur)
+        from .trialcap import trial_messages, TRIAL_AI_PICTURES
+        out["trial"] = trial_messages(tid, fresh)
+        if out["trial"] is not None:
+            out["trial"]["ai_pictures"] = TRIAL_AI_PICTURES
         return out
 
     @router.get("/plans")
