@@ -118,7 +118,7 @@ nav a.on{background:#1E1736}
     <nav id="nav"></nav>
     <div class="sidefoot">
       <div id="who"></div>
-      <div style="margin-top:8px"><a href="#" id="out">Sign out</a></div>
+      <div style="margin-top:8px"><a href="#" id="chgpw">Change my password</a> · <a href="#" id="out">Sign out</a></div>
     </div>
   </aside>
   <main>
@@ -1348,4 +1348,32 @@ function grwOnePager(c){
     'Leads last month: ' + last.leads + ' · completed visits: ' + last.visits + '. Source: the business\'s own payment records in TechDeva.</p></body></html>');
   w.document.close();
 }
+/* ======================================================== Part 27: Change my password */
+function pwOpen(){
+  document.getElementById('pw-box')?.remove();
+  const o = document.createElement('div'); o.id = 'pw-box';
+  o.style.cssText = 'position:fixed;inset:0;z-index:320;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:16px';
+  o.innerHTML = '<form id="pw_f" class="card" style="width:min(380px,100%);display:grid;gap:10px">' +
+    '<b>Change my password</b>' +
+    '<label class="k-note">Current password<br><input type="password" id="pw_cur" autocomplete="current-password" required style="width:100%"></label>' +
+    '<label class="k-note">New password (at least 10 characters)<br><input type="password" id="pw_new" autocomplete="new-password" minlength="10" required style="width:100%"></label>' +
+    '<label class="k-note">New password again<br><input type="password" id="pw_new2" autocomplete="new-password" minlength="10" required style="width:100%"></label>' +
+    '<div id="pw_msg" class="k-note" style="min-height:18px"></div>' +
+    '<div style="display:flex;gap:8px"><button class="primary" type="submit" id="pw_go">Change password</button><button type="button" id="pw_x">Cancel</button></div></form>';
+  document.body.appendChild(o);
+  const g = id => document.getElementById(id), msg = (t, ok) => { g('pw_msg').textContent = t; g('pw_msg').className = ok ? 'k-note good' : 'k-note bad'; };
+  g('pw_x').onclick = () => o.remove();
+  g('pw_cur').focus();
+  g('pw_f').onsubmit = async e => {
+    e.preventDefault();
+    if (g('pw_new').value.length < 10) return msg('The new password must be at least 10 characters.');
+    if (g('pw_new').value !== g('pw_new2').value) return msg('The two new passwords are not the same.');
+    g('pw_go').disabled = true;
+    try {
+      await api('/auth/change-password', {method: 'POST', body: JSON.stringify({current_password: g('pw_cur').value, new_password: g('pw_new').value})});
+      msg('Password changed. Use the new one next time you sign in.', true); setTimeout(() => o.remove(), 1800);
+    } catch (ex) { g('pw_go').disabled = false; msg(ex.message); }
+  };
+}
+document.getElementById('chgpw').onclick = e => { e.preventDefault(); pwOpen(); };
 </script></body></html>

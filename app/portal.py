@@ -64,6 +64,11 @@ class SetPasswordIn(BaseModel):
     password: str
 
 
+class ChangePasswordIn(BaseModel):
+    current_password: str
+    new_password: str
+
+
 class RejectIn(BaseModel):
     reason: str
 
@@ -246,6 +251,42 @@ def make_portal_router(P) -> APIRouter:
             record(cur, action="auth.password_set", resource="users",
                    resource_id=str(user.get("id")), actor=str(user.get("id")),
                    status="ok", detail={}, tenant_id=user.get("tenant_id"))
+        return {"ok": True}
+
+    # --------------------------------------------------- change own password
+    @router.post("/auth/change-password")
+    def change_password(body: ChangePasswordIn, x_tenant_id: str | None = Header(None),
+                        x_role: str | None = Header(None), authorization: str | None = Header(None),
+                        td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """A signed-in person changes their own password (founder, owner or staff
+        with an email login). The current password is required, so a session
+        left open on a shared computer cannot be used to take the account."""
+        _tid, _role, uid = identity(x_tenant_id, x_role, authorization, td_session)
+        if not uid:
+            raise HTTPException(401, "Sign in again first.")
+        key = "chg:%s" % uid
+        if _throttled(key):
+            raise HTTPException(429, "Too many wrong tries. Wait a few minutes and try again.")
+        new = body.new_password or ""
+        if len(new) < 10:
+            raise HTTPException(400, "The new password must be at least 10 characters.")
+        if new == body.current_password:
+            raise HTTPException(400, "The new password must be different from the current one.")
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("SELECT id, tenant_id, email, password_hash FROM users WHERE id::text = %s", (str(uid),))
+            user = cur.fetchone()
+        if not user or not user["email"]:
+            raise HTTPException(400, "This login has no password (it signs in with a PIN).")
+        if not verify_password(body.current_password or "", user["password_hash"]):
+            _record_fail(key)
+            raise HTTPException(400, "The current password is not right.")
+        _LOGIN_FAILS.pop(key, None)
+        if not P.set_user_password(user["email"], hash_password(new)):
+            raise HTTPException(500, "The password was not changed. Try again.")
+        with tenant_session(None, "techdeva_admin") as cur:
+            record(cur, action="auth.password_change", resource="users", resource_id=str(user["id"]),
+                   actor=str(user["id"]), actor_type="human", status="ok", detail={},
+                   tenant_id=user["tenant_id"])
         return {"ok": True}
 
     # ------------------------------------------------------------------ growth
