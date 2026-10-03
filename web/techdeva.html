@@ -1250,4 +1250,102 @@ function slfDetail(uid){
       '<tr><td>' + slfWhen(c.at) + '</td><td>' + esc(c.business_name) + '</td><td>' + esc(c.channel) + '</td><td>' + esc(c.outcome || '-') + '</td><td>' + esc(c.note || '') + '</td></tr>'));
   return h;
 }
+/* ======================================================== Part 26: Growth proof
+   Has each client grown since TechDeva started? Their own recorded payments,
+   month by month, against the sales level before TechDeva (the baseline),
+   and the agreed profit share. The one-pager is the sales tool: before and
+   after, by default without the client's name and without rupee amounts. */
+NAV.forEach(g => { if (g[0] === 'MONEY' && !g[1].some(x => x[0] === 'growth')) g[1].splice(0, 0, ['growth', 'Growth proof']); });
+TITLES.growth = ['Growth proof', 'How much more each client takes in since TechDeva started: the number to sell on and to bill on.'];
+const GRW = { data: undefined, edit: null };
+function grwLoad(){ GRW.data = null; api('/techdeva/growth').then(d => { GRW.data = d; }).catch(e => { GRW.data = {error: e.message}; }).then(() => { if (current() === 'growth') paint(); }); }
+const grwMonth = s => new Date(s + 'T00:00:00').toLocaleDateString([], {month: 'short', year: 'numeric'});
+const grwPct = p => p == null ? '' : (p > 0 ? '+' : '') + p + '%';
+function grwBars(c){
+  const ms = c.months || [], top = Math.max(1, c.baseline || 0, ...ms.map(m => m.revenue));
+  return '<div style="display:flex;gap:6px;align-items:flex-end;height:120px;margin:10px 0 4px;position:relative">' +
+    (c.baseline != null ? '<div title="baseline" style="position:absolute;left:0;right:0;bottom:' + (100 * c.baseline / top) + '%;border-top:2px dashed #A78BFA"></div>' : '') +
+    ms.map(m => '<div title="' + esc(grwMonth(m.month) + ': ' + money(m.revenue)) + '" style="flex:1;min-width:10px;height:' + Math.max(2, 100 * m.revenue / top) + '%;background:' +
+      (m.partial ? '#4c3d80' : (c.baseline != null && m.revenue >= c.baseline ? '#8B5CF6' : '#5b5b6b')) + ';border-radius:4px 4px 0 0"></div>').join('') + '</div>' +
+    '<div style="display:flex;gap:6px">' + ms.map(m => '<div class="k-note" style="flex:1;min-width:10px;text-align:center;font-size:10px">' + esc(grwMonth(m.month).split(' ')[0]) + '</div>').join('') + '</div>';
+}
+VIEWS.growth = function(){
+  if (GRW.data === undefined) grwLoad();
+  const d = GRW.data;
+  if (!d) return '<div class="empty">Loading...</div>';
+  if (d.error) return '<div class="empty">' + esc(d.error) + '</div>';
+  const cs = d.clients || [];
+  const withBase = cs.filter(c => c.baseline != null && c.last_full);
+  const growing = withBase.filter(c => c.last_full.growth > 0).length;
+  const shareLast = cs.reduce((a, c) => a + ((c.last_full && c.last_full.share) || 0), 0);
+  let out = '<section><div class="grid" style="margin-top:0;margin-bottom:16px">' +
+    kpi('Clients with a baseline', withBase.length + ' of ' + cs.length, cs.length - withBase.length ? (cs.length - withBase.length) + ' still need one (press Terms)' : 'all set', withBase.length === cs.length ? 'good' : '') +
+    kpi('Growing last month', growing + ' of ' + withBase.length, 'sales above their baseline', growing ? 'good' : '') +
+    kpi('Your share, last month', money(shareLast), 'growth x the share % you agreed (only where set)') + '</div>';
+  out += '<div class="card" style="overflow-x:auto"><div class="k-note" style="margin-bottom:10px">Sales are each client\'s recorded payments (Pakistan months). The baseline is what you entered from their old register, or else the average of the months before the start that already have payments. A month only counts once it is over; this month is shown as "so far".</div>' +
+    tbl('<th>Business</th><th>Started</th><th>Baseline / month</th><th>Last full month</th><th>Growth</th><th>This month so far</th><th>Share</th><th>Since start</th><th></th>',
+      cs.map(c => {
+        const l = c.last_full, t = c.this_month, s = c.since_start;
+        const row = '<tr><td><b>' + esc(c.name) + '</b></td><td>' + esc(grwMonth(c.started_on)) + (c.start_entered ? '' : '<div class="k-note">signup date</div>') + '</td>' +
+          '<td>' + (c.baseline != null ? money(c.baseline) + '<div class="k-note">' + esc(c.baseline_source) + '</div>' : '<span class="warn">not set</span><div class="k-note">enter it from their old register</div>') + '</td>' +
+          '<td>' + (l ? money(l.revenue) + '<div class="k-note">' + esc(grwMonth(l.month)) + ' · ' + l.leads + ' leads · ' + l.visits + ' visits</div>' : '<span class="dim">no full month yet</span>') + '</td>' +
+          '<td>' + (l && l.growth != null ? '<b class="' + (l.growth > 0 ? 'good' : 'bad') + '">' + money(l.growth) + '</b><div class="k-note">' + esc(grwPct(l.growth_pct)) + '</div>' : '<span class="dim">-</span>') + '</td>' +
+          '<td>' + (t ? money(t.revenue) : '-') + '</td>' +
+          '<td>' + (c.share_pct != null ? c.share_pct + '%' + (l && l.share != null ? '<div class="k-note">' + money(l.share) + ' last month</div>' : '') : '<span class="dim">not agreed</span>') + '</td>' +
+          '<td>' + (s ? money(s.growth) + '<div class="k-note">over ' + s.months + ' month' + (s.months === 1 ? '' : 's') + (s.share != null ? ' · share ' + money(s.share) : '') + '</div>' : '<span class="dim">-</span>') + '</td>' +
+          '<td style="white-space:nowrap"><button data-grwe="' + esc(c.tenant_id) + '">' + (GRW.edit === c.tenant_id ? 'Close' : 'Terms') + '</button> ' +
+          '<button data-grwp="' + esc(c.tenant_id) + '"' + (c.baseline != null && l ? '' : ' disabled title="Needs a baseline and one full month"') + '>One-pager</button></td></tr>';
+        if (GRW.edit !== c.tenant_id) return row;
+        return row + '<tr><td colspan="9"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">' +
+          '<label class="k-note">TechDeva started<br><input type="date" id="grw_start" value="' + esc(c.start_entered ? c.started_on : '') + '"></label>' +
+          '<label class="k-note">Sales per month before TechDeva (PKR)<br><input type="number" min="0" id="grw_base" value="' + esc(c.baseline_monthly == null ? '' : c.baseline_monthly) + '" placeholder="from their register"></label>' +
+          '<label class="k-note">Where that number comes from<br><input id="grw_note" maxlength="200" value="' + esc(c.baseline_note || '') + '" placeholder="e.g. average Apr-Jun 2026, cash register"></label>' +
+          '<label class="k-note">Profit share agreed (%)<br><input type="number" min="0" max="50" step="0.5" id="grw_share" value="' + esc(c.share_pct == null ? '' : c.share_pct) + '" placeholder="leave empty if none"></label>' +
+          '<button class="primary" data-grws="' + esc(c.tenant_id) + '">Save</button></div>' +
+          '<div class="k-note" style="margin-top:6px">Leave "sales per month before" empty to use the months before the start that already have payments. ' + grwBars(c) + '</div></td></tr>';
+      })) + '</div></section>';
+  setTimeout(() => {
+    document.querySelectorAll('[data-grwe]').forEach(b => b.onclick = () => { GRW.edit = GRW.edit === b.dataset.grwe ? null : b.dataset.grwe; paint(); });
+    wkAct('[data-grws]', async b => {
+      const v = id => document.getElementById(id).value;
+      await api('/techdeva/growth/' + b.dataset.grws, {method: 'PUT', body: JSON.stringify({
+        started_on: v('grw_start') || null, baseline_monthly: v('grw_base'), baseline_note: v('grw_note'), share_pct: v('grw_share')})});
+      GRW.edit = null; grwLoad();
+    });
+    document.querySelectorAll('[data-grwp]').forEach(b => b.onclick = () => grwOnePager(cs.find(c => c.tenant_id === b.dataset.grwp)));
+  }, 0);
+  return out;
+};
+// The before / after page to show a prospect. By default it hides the client's
+// name and the rupee amounts (their figures are theirs); untick to show them,
+// with the client's permission.
+function grwOnePager(c){
+  if (!c) return;
+  const named = confirm('Show the business name "' + c.name + '" on the page?\n\nOK = show it (only with their permission)\nCancel = "A client of TechDeva"');
+  const amounts = confirm('Show rupee amounts?\n\nOK = show sales in PKR (only with their permission)\nCancel = show growth in % only');
+  const full = c.months.filter(m => !m.partial), last = c.last_full, best = full.reduce((a, m) => m.revenue > a.revenue ? m : a, full[0]);
+  const avg = full.reduce((a, m) => a + m.revenue, 0) / full.length;
+  const pct = v => c.baseline > 0 ? Math.round(100 * (v - c.baseline) / c.baseline) : null;
+  const fig = v => amounts ? money(v) : (pct(v) == null ? '' : (pct(v) >= 0 ? '+' : '') + pct(v) + '% vs before');
+  const top = Math.max(c.baseline, ...full.map(m => m.revenue), 1);
+  const w = window.open('', '_blank');
+  if (!w) { alert('Allow pop-ups for this page to open the one-pager.'); return; }
+  w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Growth with TechDeva</title><style>' +
+    'body{font-family:Arial,sans-serif;color:#111;max-width:760px;margin:30px auto;padding:0 20px}h1{color:#6d28d9;margin:0 0 4px}.sub{color:#555;margin:0 0 24px}' +
+    '.k{display:flex;gap:14px;margin:18px 0}.k div{flex:1;border:1px solid #ddd;border-radius:10px;padding:14px}.k b{display:block;font-size:26px;color:#6d28d9}' +
+    '.bars{display:flex;gap:8px;align-items:flex-end;height:200px;border-bottom:1px solid #ccc;position:relative;margin-top:24px}.bars i{flex:1;background:#8B5CF6;border-radius:6px 6px 0 0}' +
+    '.base{position:absolute;left:0;right:0;border-top:2px dashed #999}.lab{display:flex;gap:8px}.lab span{flex:1;text-align:center;font-size:12px;color:#555}' +
+    '.note{color:#666;font-size:12px;margin-top:24px}@media print{button{display:none}}</style></head><body>' +
+    '<button onclick="print()" style="float:right">Print / save as PDF</button>' +
+    '<h1>' + esc(named ? c.name : 'A client of TechDeva') + '</h1><p class="sub">Sales before and since TechDeva started (' + esc(grwMonth(c.started_on)) + ')</p>' +
+    '<div class="k"><div>Before TechDeva<b>' + (amounts ? money(c.baseline) : '100%') + '</b>per month</div>' +
+    '<div>Last month (' + esc(grwMonth(last.month)) + ')<b>' + esc(fig(last.revenue)) + '</b>' + (amounts && pct(last.revenue) != null ? (pct(last.revenue) >= 0 ? '+' : '') + pct(last.revenue) + '%' : '') + '</div>' +
+    '<div>Average since start<b>' + esc(fig(avg)) + '</b>over ' + full.length + ' month' + (full.length === 1 ? '' : 's') + '</div>' +
+    '<div>Best month<b>' + esc(fig(best.revenue)) + '</b>' + esc(grwMonth(best.month)) + '</div></div>' +
+    '<div class="bars"><div class="base" style="bottom:' + (100 * c.baseline / top) + '%"></div>' + full.map(m => '<i style="height:' + Math.max(2, 100 * m.revenue / top) + '%"></i>').join('') + '</div>' +
+    '<div class="lab">' + full.map(m => '<span>' + esc(grwMonth(m.month)) + '</span>').join('') + '</div>' +
+    '<p class="note">Dashed line: sales per month before TechDeva (' + esc(c.baseline_source || '') + '). Bars: recorded sales each full month since. ' +
+    'Leads last month: ' + last.leads + ' · completed visits: ' + last.visits + '. Source: the business\'s own payment records in TechDeva.</p></body></html>');
+  w.document.close();
+}
 </script></body></html>
