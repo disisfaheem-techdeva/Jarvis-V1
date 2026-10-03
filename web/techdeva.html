@@ -118,7 +118,7 @@ nav a.on{background:#1E1736}
     <nav id="nav"></nav>
     <div class="sidefoot">
       <div id="who"></div>
-      <div style="margin-top:8px"><a href="#" id="chgpw">Change my password</a> · <a href="#" id="out">Sign out</a></div>
+      <div style="margin-top:8px"><a href="#" id="chgpw">My account</a> · <a href="#" id="out">Sign out</a></div>
     </div>
   </aside>
   <main>
@@ -1354,7 +1354,8 @@ function pwOpen(){
   const o = document.createElement('div'); o.id = 'pw-box';
   o.style.cssText = 'position:fixed;inset:0;z-index:320;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:16px';
   o.innerHTML = '<form id="pw_f" class="card" style="width:min(380px,100%);display:grid;gap:10px">' +
-    '<b>Change my password</b>' +
+    '<b>My account</b><div id="acct_box" class="k-note">Loading…</div>' +
+    '<b style="margin-top:6px">Change my password</b>' +
     '<label class="k-note">Current password<br><input type="password" id="pw_cur" autocomplete="current-password" required style="width:100%"></label>' +
     '<label class="k-note">New password (at least 10 characters)<br><input type="password" id="pw_new" autocomplete="new-password" minlength="10" required style="width:100%"></label>' +
     '<label class="k-note">New password again<br><input type="password" id="pw_new2" autocomplete="new-password" minlength="10" required style="width:100%"></label>' +
@@ -1363,7 +1364,18 @@ function pwOpen(){
   document.body.appendChild(o);
   const g = id => document.getElementById(id), msg = (t, ok) => { g('pw_msg').textContent = t; g('pw_msg').className = ok ? 'k-note good' : 'k-note bad'; };
   g('pw_x').onclick = () => o.remove();
-  g('pw_cur').focus();
+  api('/auth/account').then(a => {
+    g('acct_box').innerHTML = '<label class="k-note">Your name<br><input id="ac_name" maxlength="80" value="' + esc(a.name) + '" style="width:100%"></label>' +
+      '<div class="k-note">Signs in as ' + esc(a.email) + '</div>' +
+      '<div style="display:flex;gap:8px;align-items:center;margin-top:6px"><button type="button" id="ac_save">Save name</button><span id="ac_msg" class="k-note"></span></div>';
+    g('ac_save').onclick = async () => {
+      try {
+        const r = await api('/auth/account', {method: 'PUT', body: JSON.stringify({name: g('ac_name').value})});
+        g('ac_msg').textContent = r.changed.length ? 'Saved.' : 'Nothing changed.'; g('ac_msg').className = 'k-note good';
+        const w = document.getElementById('who'); if (w && r.name) w.textContent = r.name;
+      } catch (ex) { g('ac_msg').textContent = ex.message; g('ac_msg').className = 'k-note bad'; }
+    };
+  }).catch(ex => { g('acct_box').textContent = ex.message; });
   g('pw_f').onsubmit = async e => {
     e.preventDefault();
     if (g('pw_new').value.length < 10) return msg('The new password must be at least 10 characters.');

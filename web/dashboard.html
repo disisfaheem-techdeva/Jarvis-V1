@@ -4574,7 +4574,7 @@ function renderShell(){
           '<button class="burger" id="burger" aria-label="Menu">&#9776;</button>' +
           topbarLogoHTML() + '<div class="biz"><div class="biz-name">' + esc(id.name) + '</div>' +
           '<div class="biz-sub">' + esc(id.sub) + '</div></div>' +
-          '<button class="btn" id="chgpw" title="Change my password" aria-label="Change my password">🔑</button>' +
+          '<button class="btn" id="chgpw" title="My account: name and password" aria-label="My account">👤</button>' +
           '<button class="btn" id="logout">Sign out</button>' +
         '</header>' +
         '<main class="content"><div id="incbar"></div>' + body + '</main>' +
@@ -7094,13 +7094,41 @@ pstWire = function(){
    For anyone signed in with an email and password. The current password is
    asked for, so an open session on a shared computer cannot take the account.
    Sits on top of the page so a redraw never closes it. */
+// name (and, for the owner, the business name) above the password fields
+function acctLoad(){
+  api('/auth/account').then(function(r){
+    var box = document.getElementById('acct_box'); if (!box) return;
+    if (!r.ok) { box.textContent = (r.data && r.data.detail) || 'Could not read your account.'; return; }
+    var a = r.data;
+    box.innerHTML = '<div style="display:grid;gap:8px">' +
+      '<label class="card-note">Your name<input class="fld" id="ac_name" maxlength="80" value="' + esc(a.name) + '"></label>' +
+      (a.can_rename_business ? '<label class="card-note">Business name<input class="fld" id="ac_biz" maxlength="120" value="' + esc(a.business_name || '') + '"></label>' : '') +
+      (a.email ? '<div class="card-note">Signs in as ' + esc(a.email) + '</div>' : '') +
+      '<div style="display:flex;gap:8px;align-items:center"><button class="btn" type="button" id="ac_save">Save name</button><span id="ac_msg" class="card-note"></span></div></div>';
+    if (!a.has_password) { var f = document.getElementById('pw_f'); f.querySelectorAll('label,b+label').forEach(function(l){ if (/password/i.test(l.textContent)) l.style.display = 'none'; }); document.getElementById('pw_go').style.display = 'none'; }
+    document.getElementById('ac_save').onclick = function(){
+      var b = this, body = { name: document.getElementById('ac_name').value }, bz = document.getElementById('ac_biz');
+      if (bz) body.business_name = bz.value;
+      b.disabled = true;
+      api('/auth/account', { method: 'PUT', body: body }).then(function(r){
+        b.disabled = false;
+        var m = document.getElementById('ac_msg'); if (!m) return;
+        m.textContent = r.ok ? (r.data.changed.length ? 'Saved.' : 'Nothing changed.') : ((r.data && r.data.detail) || 'Not saved.');
+        m.style.color = r.ok ? 'var(--growth)' : 'var(--danger)';
+        if (r.ok && r.data.changed.indexOf('business_name') !== -1)
+          api('/portal/summary').then(function(x){ if (x.ok) { S.summary = x.data; renderShell(); } });
+      });
+    };
+  });
+}
 function pwClose(){ var o = document.getElementById('pw-box'); if (o) o.remove(); }
 function pwOpen(){
   pwClose();
   var o = document.createElement('div'); o.id = 'pw-box';
   o.style.cssText = 'position:fixed;inset:0;z-index:320;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:16px';
   o.innerHTML = '<form id="pw_f" style="background:var(--panel,#111);border:1px solid var(--line);border-radius:12px;padding:18px;width:min(380px,100%);display:grid;gap:10px">' +
-    '<b>Change my password</b>' +
+    '<b>My account</b><div id="acct_box" class="card-note">Loading…</div>' +
+    '<b style="margin-top:6px">Change my password</b>' +
     '<label class="card-note">Current password<input class="fld" type="password" id="pw_cur" autocomplete="current-password" required></label>' +
     '<label class="card-note">New password (at least 10 characters)<input class="fld" type="password" id="pw_new" autocomplete="new-password" minlength="10" required></label>' +
     '<label class="card-note">New password again<input class="fld" type="password" id="pw_new2" autocomplete="new-password" minlength="10" required></label>' +
@@ -7109,7 +7137,7 @@ function pwOpen(){
   document.body.appendChild(o);
   var g = function(id){ return document.getElementById(id); }, msg = function(t, ok){ g('pw_msg').textContent = t; g('pw_msg').style.color = ok ? 'var(--growth)' : 'var(--danger)'; };
   g('pw_x').onclick = pwClose;
-  g('pw_cur').focus();
+  acctLoad();
   g('pw_f').onsubmit = function(e){
     e.preventDefault();
     if (g('pw_new').value.length < 10) { msg('The new password must be at least 10 characters.'); return; }

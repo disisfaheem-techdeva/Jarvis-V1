@@ -69,6 +69,11 @@ class ChangePasswordIn(BaseModel):
     new_password: str
 
 
+class AccountIn(BaseModel):
+    name: str | None = None
+    business_name: str | None = None
+
+
 class RejectIn(BaseModel):
     reason: str
 
@@ -286,8 +291,78 @@ def make_portal_router(P) -> APIRouter:
         with tenant_session(None, "techdeva_admin") as cur:
             record(cur, action="auth.password_change", resource="users", resource_id=str(user["id"]),
                    actor=str(user["id"]), actor_type="human", status="ok", detail={},
-                   tenant_id=user["tenant_id"])
+                   tenant_id=_audit_tenant(cur, user["tenant_id"]))
         return {"ok": True}
+
+    # ------------------------------------------------------ my name / business name
+    def _audit_tenant(cur, tenant_id):
+        """Where a person's own account change is logged: their business, or for
+        the founder (no business) TechDeva's own business. The log needs one."""
+        if tenant_id:
+            return tenant_id
+        from .tdwork import _home
+        h = _home(cur)
+        return h["id"] if h else None
+
+    def _me_row(cur, uid):
+        cur.execute("SELECT u.id, u.tenant_id, u.name, u.email, u.role, u.staff_id, t.name AS business_name "
+                    "FROM users u LEFT JOIN tenants t ON t.id = u.tenant_id WHERE u.id::text = %s", (str(uid),))
+        return cur.fetchone()
+
+    @router.get("/auth/account")
+    def account(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                authorization: str | None = Header(None),
+                td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        _tid, role, uid = identity(x_tenant_id, x_role, authorization, td_session)
+        if not uid:
+            raise HTTPException(401, "Sign in again first.")
+        with tenant_session(None, "techdeva_admin") as cur:
+            u = _me_row(cur, uid)
+        if not u:
+            raise HTTPException(404, "Your account was not found.")
+        return {"name": u["name"] or "", "email": u["email"] or "", "role": u["role"],
+                "business_name": u["business_name"], "has_password": bool(u["email"]),
+                "can_rename_business": u["role"] == "owner" and u["tenant_id"] is not None}
+
+    @router.put("/auth/account")
+    def save_account(body: AccountIn, x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                     authorization: str | None = Header(None),
+                     td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """A signed-in person changes their own name; the owner can also rename
+        the business (its web address stays the same)."""
+        _tid, role, uid = identity(x_tenant_id, x_role, authorization, td_session)
+        if not uid:
+            raise HTTPException(401, "Sign in again first.")
+        name = " ".join((body.name or "").split()) if body.name is not None else None
+        biz = " ".join((body.business_name or "").split()) if body.business_name is not None else None
+        if name is not None and not 2 <= len(name) <= 80:
+            raise HTTPException(400, "Your name must be 2 to 80 characters.")
+        if biz is not None and not 2 <= len(biz) <= 120:
+            raise HTTPException(400, "The business name must be 2 to 120 characters.")
+        with tenant_session(None, "techdeva_admin") as cur:
+            u = _me_row(cur, uid)
+            if not u:
+                raise HTTPException(404, "Your account was not found.")
+            changed = {}
+            if name is not None and name != (u["name"] or ""):
+                cur.execute("UPDATE users SET name = %s WHERE id = %s", (name, u["id"]))
+                if u["staff_id"]:      # the HR record shows the same person
+                    cur.execute("UPDATE staff SET name = %s WHERE id = %s AND tenant_id = %s",
+                                (name, u["staff_id"], u["tenant_id"]))
+                changed["name"] = name
+            if biz is not None and biz != (u["business_name"] or ""):
+                if u["role"] != "owner" or u["tenant_id"] is None:
+                    raise HTTPException(403, "Only the business owner can rename the business.")
+                cur.execute("UPDATE tenants SET name = %s WHERE id = %s", (biz, u["tenant_id"]))
+                changed["business_name"] = biz
+            if changed:
+                record(cur, action="auth.account_edit", resource="users", resource_id=str(u["id"]),
+                       actor=str(u["id"]), actor_type="human", status="ok",
+                       detail={"changed": sorted(changed), "business_from": u["business_name"]
+                               if "business_name" in changed else None},
+                       tenant_id=_audit_tenant(cur, u["tenant_id"]))
+            u = _me_row(cur, uid)
+        return {"ok": True, "changed": sorted(changed), "name": u["name"], "business_name": u["business_name"]}
 
     # ------------------------------------------------------------------ growth
     @router.get("/portal/growth")
