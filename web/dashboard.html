@@ -317,15 +317,19 @@ VIEWS.overview = function(){
   out += '</div>';
 
   out += '<h2>This month</h2>';
-  var gP = need('ov_pnl', '/operations/pnl'),
+  // money totals are the owner's: staff get bookings and customers only
+  var own = isOwner();
+  var gP = own ? need('ov_pnl', '/operations/pnl') : true,
       gA = need('ov_appts', '/operations/appointments?when=upcoming'),
       gC = need('ov_cust', '/business/customers');
   if (!(gP && gA && gC)) return out + panel('Money and bookings', loading('Loading your figures...'));
   var P = S.ov_pnl, AP = S.ov_appts, CU = S.ov_cust;
   out += '<div class="grid">';
-  out += metric('Collected', P ? money(P.collected) : null, P ? (P.payment_count + ' payment(s) this month') : 'Could not load');
-  out += metric('Invoiced', P ? money(P.invoiced) : null, P ? (P.invoice_count + ' invoice(s) this month') : null);
-  out += metric('Outstanding', P ? money(P.outstanding_all_time) : null, 'Owed to you, all time');
+  if (own) {
+    out += metric('Collected', P ? money(P.collected) : null, P ? (P.payment_count + ' payment(s) this month') : 'Could not load');
+    out += metric('Invoiced', P ? money(P.invoiced) : null, P ? (P.invoice_count + ' invoice(s) this month') : null);
+    out += metric('Outstanding', P ? money(P.outstanding_all_time) : null, 'Owed to you, all time');
+  }
   out += metric('Upcoming appointments', AP ? AP.count : null);
   out += metric('Customers', CU ? CU.count : null);
   out += '</div>';
@@ -3893,7 +3897,14 @@ VIEWS.products = function(){ return VIEWS.catalogue(); };
 
 /* #18. Only sections that exist are listed. OWNER_ONLY_NAV are pages whose data
    the API refuses to an operator (P&L, HR), so they are not offered. */
-var OWNER_ONLY_NAV = { pnl: 1, hr: 1 };
+var OWNER_ONLY_NAV = { pnl: 1, hr: 1, revenue: 1, reports: 1, advisor: 1 };
+// Opened anyway (a link, the address bar): say plainly it is the owner's page,
+// instead of letting the refused data show up as "the service did not respond".
+function ownerOnlyPage(id){
+  return '<h1>Owner only</h1>' + panel('This page is for the business owner',
+    '<div style="padding:14px 16px" class="sub">The money figures on this page are only shown to the owner of the business. ' +
+    'Ask the owner if you need them.</div>');
+}
 (function(){
   function it(id, icon, name, sub){ return { id: id, icon: icon || '', name: name, sub: !!sub }; }
   NAV.length = 0;
@@ -7143,10 +7154,20 @@ function pwOpen(){
     '<label class="card-note">New password (at least 10 characters)<input class="fld" type="password" id="pw_new" autocomplete="new-password" minlength="10" required></label>' +
     '<label class="card-note">New password again<input class="fld" type="password" id="pw_new2" autocomplete="new-password" minlength="10" required></label>' +
     '<div id="pw_msg" class="card-note" style="min-height:18px"></div>' +
-    '<div style="display:flex;gap:8px"><button class="btn primary" type="submit" id="pw_go">Change password</button><button class="btn" type="button" id="pw_x">Cancel</button></div></form>';
+    '<div style="display:flex;gap:8px"><button class="btn primary" type="submit" id="pw_go">Change password</button><button class="btn" type="button" id="pw_x">Cancel</button></div>' +
+    '<div style="border-top:1px solid var(--line);padding-top:10px"><button class="btn" type="button" id="pw_all">Sign out all other devices</button>' +
+    '<div class="card-note" style="margin-top:4px">Use this if you signed in on a phone or computer that is not yours. This device stays signed in.</div></div></form>';
   document.body.appendChild(o);
   var g = function(id){ return document.getElementById(id); }, msg = function(t, ok){ g('pw_msg').textContent = t; g('pw_msg').style.color = ok ? 'var(--growth)' : 'var(--danger)'; };
   g('pw_x').onclick = pwClose;
+  g('pw_all').onclick = function(){
+    if (!confirm('Sign out every other device where you are signed in?')) return;
+    g('pw_all').disabled = true;
+    api('/auth/sign-out-everywhere', { method: 'POST' }).then(function(r){
+      g('pw_all').disabled = false;
+      msg(r.ok ? 'Done: every other device is signed out.' : ((r.data && r.data.detail) || 'That did not work.'), r.ok);
+    });
+  };
   acctLoad();
   g('pw_f').onsubmit = function(e){
     e.preventDefault();
@@ -7154,11 +7175,19 @@ function pwOpen(){
     if (g('pw_new').value !== g('pw_new2').value) { msg('The two new passwords are not the same.'); return; }
     g('pw_go').disabled = true;
     api('/auth/change-password', { method: 'POST', body: { current_password: g('pw_cur').value, new_password: g('pw_new').value } }).then(function(r){
-      if (r.ok) { msg('Password changed. Use the new one next time you sign in.', true); setTimeout(pwClose, 1800); }
+      if (r.ok) { msg('Password changed. Any other device signed in as you has been signed out.', true); setTimeout(pwClose, 2200); }
       else { g('pw_go').disabled = false; msg((r.data && r.data.detail) || 'The password was not changed.'); }
     });
   };
 }
+/* ======================================================== Part 28: owner-only pages, enforced on screen too
+   The API already refuses staff the money figures; this makes the page say so
+   (last in the file, so it wraps whichever version of each page is current). */
+Object.keys(OWNER_ONLY_NAV).forEach(function(id){
+  var inner = VIEWS[id];
+  if (!inner) return;
+  VIEWS[id] = function(){ return isOwner() ? inner.apply(this, arguments) : ownerOnlyPage(id); };
+});
 window.addEventListener('hashchange', function(){
   // Every section reads fresh data when it is opened, so something added in
   // one section (a staff member, a product, a booking) shows up in the others.

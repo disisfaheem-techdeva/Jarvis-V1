@@ -223,6 +223,7 @@ TechDeva runs everything from a **founder console**: clients, money, sales team,
 ### 6.2 Founder console (21 pages)
 - **Jarvis for any one client**, kept strictly separate per client.
 - **Overview**, **Requests** (WhatsApp agent requests, now approved automatically), **Clients**, **Connections**, **Pipeline & trials**.
+- **Requests: Rebuild** button on a built agent: the server removes the old agent and builds it again from the current template within a minute. The number must be scanned again, the agent's chat memory starts fresh, business data is untouched. Never offered for irfan / clinic / salon / workspace agents (button hidden, server refuses).
 - **Bookings**, **AI workforce**, **Waiting on you**.
 - **Money:**
   - **Growth proof:** each client's sales before and after TechDeva, the growth, your profit share, and a printable before/after **one-pager** for selling (hides the client's name and amounts by default);
@@ -237,7 +238,7 @@ TechDeva runs everything from a **founder console**: clients, money, sales team,
   - Client services;
   - Client work (delivery tasks).
 - **Platform:** Health, Incidents, Trial data and server.
-- **My account** (name, password).
+- **My account** (name, password, sign out all other devices).
 
 ### 6.3 Automatic behind the scenes
 - New signup gives the business, its own address, its dashboard and its WhatsApp agent, all built automatically (up to 5 a day, with memory checks so the clinic's server never runs out).
@@ -273,8 +274,8 @@ TechDeva runs everything from a **founder console**: clients, money, sales team,
 ## 8. Bugs still open
 
 ### Code bugs (confirmed)
-1. **Staff see broken money pages.** Revenue, Reports, Growth Advisor and the money tiles on the Dashboard page are open to staff. The server correctly refuses them the figures, but the page says "the reporting service did not respond" instead of "owner only". *Fix: hide them for staff, or show the owner-only message.*
-2. **Changing a password does not sign out other devices.** Old logins stay valid until they expire. *Fix: "sign out everywhere".*
+1. ~~Staff see broken money pages~~ **fixed 3 Oct 2026**: P&L, HR, Revenue, Reports and Growth Advisor show "owner only" to staff, and the Dashboard's money tiles are shown to the owner only.
+2. ~~Changing a password does not sign out other devices~~ **fixed 3 Oct 2026**: a password change signs out every other device, and "Sign out all other devices" is in My account (dashboard and founder console). Done with `users.sessions_valid_after` (migration 56): a login issued before it is refused.
 3. **The older test files** in `tests/` point at the live server and cannot be run safely. Test debt, not a user-facing bug.
 
 ### Waiting on an account or a decision (not code)
@@ -296,14 +297,11 @@ TechDeva runs everything from a **founder console**: clients, money, sales team,
 
 ## 9. What to improve next (in order)
 
-1. **Fix the staff money pages** (bug 1). Small and quick.
-2. **Enter the clinic's "before" sales and the profit-share %.** Growth proof is the number TechDeva sells and bills on.
-3. **Meta: go Live and pass App Review.** Until then, clients outside test accounts cannot connect Facebook.
-4. **Turn on Gemini billing**, then test AI pictures once.
-5. **Separate the Facebook Pages** between the clinic and TechDeva.
-6. **Plan the server restart** and **add the video storage to backups**. Confirm the nightly database backup is scheduled.
-7. **"Sign out everywhere"** after a password change.
-8. **A Rebuild button for WhatsApp agents** in the founder console. Today a rebuild needs a server command.
-9. **Split the dashboard code into modules.** One very large file with 27 layered parts works today, but each change gets riskier.
-10. **Replace the old live-server tests** with tests that run on a copy, so every change can be checked automatically.
-11. **Later:** the AI call bot (after the clinic's growth is proven); a WhatsApp Business API option for clients who want calls and templates; a second server once 8 clients are paying.
+1. **Enter the clinic's "before" sales and the profit-share %.** Growth proof is the number TechDeva sells and bills on.
+2. **Meta: go Live and pass App Review.** Until then, clients outside test accounts cannot connect Facebook.
+3. **Turn on Gemini billing**, then test AI pictures once.
+4. **Separate the Facebook Pages** between the clinic and TechDeva.
+5. **Plan the server restart** and **add the video storage to backups**. Confirm the nightly database backup is scheduled.
+6. **Split the dashboard code into modules.** One very large file with 27 layered parts works today, but each change gets riskier.
+7. **Replace the old live-server tests** with tests that run on a copy, so every change can be checked automatically.
+8. **Later:** the AI call bot (after the clinic's growth is proven); a WhatsApp Business API option for clients who want calls and templates; a second server once 8 clients are paying.

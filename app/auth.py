@@ -135,6 +135,7 @@ def issue_token(*, tenant_id: str | None, user_id: str, role: str,
         "u": str(user_id),
         "r": role,
         "exp": int(time.time()) + int(ttl or SESSION_TTL_SECONDS),
+        "iat": int(time.time()),
     }
     payload = _b64u(json.dumps(claims, separators=(",", ":"), sort_keys=True).encode())
     sig = _b64u(hmac.new(_secret(), payload.encode(), hashlib.sha256).digest())
@@ -161,7 +162,42 @@ def verify_token(token: str) -> dict:
         claims["t"] = None          # tokens issued before the rule above
     elif not claims.get("t"):
         raise AuthError("token names no business")
+    cut = _valid_after(claims.get("u"))
+    if cut and int(claims.get("iat", 0)) < cut:
+        raise AuthError("signed out everywhere: sign in again")
     return claims
+
+
+# "Sign out everywhere" (db/56): a person's logins made before
+# users.sessions_valid_after are refused. Looked up per person, cached briefly.
+_REVOKED: dict = {}
+_REVOKED_TTL = 30
+
+
+def _valid_after(uid) -> int:
+    if not uid or len(str(uid)) != 36:          # service tokens (provisioner, scripts) are not people
+        return 0
+    hit = _REVOKED.get(uid)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    cut = 0
+    try:
+        from .db import tenant_session
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("SELECT extract(epoch FROM sessions_valid_after)::bigint AS c FROM users WHERE id::text = %s",
+                        (str(uid),))
+            r = cur.fetchone()
+            cut = int(r["c"]) if r and r["c"] else 0
+    except Exception:  # noqa: BLE001 -- the database briefly away must not sign everyone out
+        cut = hit[1] if hit else 0
+    _REVOKED[uid] = (time.time() + _REVOKED_TTL, cut)
+    return cut
+
+
+def revoke_sessions(cur, uid) -> None:
+    """Refuse every login this person made until now (call inside a transaction)."""
+    cur.execute("UPDATE users SET sessions_valid_after = now() WHERE id::text = %s", (str(uid),))
+    _REVOKED.pop(str(uid), None)
 
 
 def token_from(authorization: str | None, cookie: str | None) -> str | None:

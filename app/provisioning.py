@@ -29,7 +29,7 @@ from .auth import AuthError, SESSION_COOKIE, resolve_scope
 from .db import tenant_session
 
 COLS = ("id, tenant_id, owner_phone, home_name, business_name, assistant, status, agent_key, "
-        "error, created_at, updated_at")
+        "error, created_at, updated_at, rebuild")
 HOST_STATES = ("building", "ready", "failed")
 
 
@@ -238,6 +238,26 @@ def make_provisioning_router():
             raise HTTPException(400, "status must be building, ready or failed")
         frm = {"building": ("approved",), "ready": ("building",), "failed": ("approved", "building")}[to]
         err = str(body.get("error") or "")[:1000] or None
+        if to == "ready":                     # a finished rebuild is an ordinary agent again
+            return {"request": _move(rid, "provisioner", frm, to, error=err, rebuild=False)}
         return {"request": _move(rid, "provisioner", frm, to, error=err)}
+
+    @router.post("/techdeva/agent-requests/{rid}/rebuild")
+    def rebuild(rid: str, x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                authorization: str | None = Header(None),
+                td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Build a client's agent again from the current template. The server
+        removes the old agent first: the number must be connected again with a
+        new QR scan, and the agent's own chat memory starts fresh."""
+        uid = _admin(x_tenant_id, x_role, authorization, td_session)
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("SELECT agent_key, status FROM agent_requests WHERE id = %s", (rid,))
+            r = cur.fetchone()
+        if not r:
+            raise HTTPException(404, "No such request.")
+        if not r["agent_key"] or re.search(r"irfan|clinic|salon|workspace", r["agent_key"]):
+            raise HTTPException(409, "This agent cannot be rebuilt from here.")
+        return {"request": _move(rid, str(uid), ("ready", "failed"), "approved", rebuild=True, error=None,
+                                 decided_by=str(uid))}
 
     return router

@@ -31,7 +31,7 @@ from fastapi import APIRouter, Header, Cookie, HTTPException, Response
 from pydantic import BaseModel
 
 from .auth import (AuthError, SESSION_COOKIE, SESSION_TTL_SECONDS, auth_required,
-                   issue_token, resolve_scope, verify_password,
+                   issue_token, resolve_scope, verify_password, revoke_sessions,
                    hash_password, verify_setup_token, _unb64u)
 from .audit import record
 from .db import tenant_session
@@ -259,8 +259,36 @@ def make_portal_router(P) -> APIRouter:
         return {"ok": True}
 
     # --------------------------------------------------- change own password
+    def _fresh_session(response, user):
+        """After revoking, keep THIS device signed in with a new login."""
+        token = issue_token(tenant_id=user["tenant_id"], user_id=user["id"], role=user["role"])
+        response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax", max_age=SESSION_TTL_SECONDS,
+                            secure=os.environ.get("COOKIE_SECURE", "true").lower() == "true")
+        return token
+
+    @router.post("/auth/sign-out-everywhere")
+    def sign_out_everywhere(response: Response, x_tenant_id: str | None = Header(None),
+                            x_role: str | None = Header(None), authorization: str | None = Header(None),
+                            td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Every other device where this person is signed in is signed out now;
+        this one stays signed in."""
+        _tid, _role, uid = identity(x_tenant_id, x_role, authorization, td_session)
+        if not uid:
+            raise HTTPException(401, "Sign in again first.")
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("SELECT id, tenant_id, role FROM users WHERE id::text = %s", (str(uid),))
+            user = cur.fetchone()
+            if not user:
+                raise HTTPException(404, "Your account was not found.")
+            revoke_sessions(cur, user["id"])
+            record(cur, action="auth.sign_out_everywhere", resource="users", resource_id=str(user["id"]),
+                   actor=str(user["id"]), actor_type="human", status="ok", detail={},
+                   tenant_id=_audit_tenant(cur, user["tenant_id"]))
+        time.sleep(1.1)       # the new login must be newer than the cut-off (whole seconds)
+        return {"ok": True, "token": _fresh_session(response, user)}
+
     @router.post("/auth/change-password")
-    def change_password(body: ChangePasswordIn, x_tenant_id: str | None = Header(None),
+    def change_password(body: ChangePasswordIn, response: Response, x_tenant_id: str | None = Header(None),
                         x_role: str | None = Header(None), authorization: str | None = Header(None),
                         td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
         """A signed-in person changes their own password (founder, owner or staff
@@ -278,7 +306,7 @@ def make_portal_router(P) -> APIRouter:
         if new == body.current_password:
             raise HTTPException(400, "The new password must be different from the current one.")
         with tenant_session(None, "techdeva_admin") as cur:
-            cur.execute("SELECT id, tenant_id, email, password_hash FROM users WHERE id::text = %s", (str(uid),))
+            cur.execute("SELECT id, tenant_id, email, role, password_hash FROM users WHERE id::text = %s", (str(uid),))
             user = cur.fetchone()
         if not user or not user["email"]:
             raise HTTPException(400, "This login has no password (it signs in with a PIN).")
@@ -289,10 +317,12 @@ def make_portal_router(P) -> APIRouter:
         if not P.set_user_password(user["email"], hash_password(new)):
             raise HTTPException(500, "The password was not changed. Try again.")
         with tenant_session(None, "techdeva_admin") as cur:
+            revoke_sessions(cur, user["id"])       # a new password signs out every other device
             record(cur, action="auth.password_change", resource="users", resource_id=str(user["id"]),
-                   actor=str(user["id"]), actor_type="human", status="ok", detail={},
+                   actor=str(user["id"]), actor_type="human", status="ok", detail={"signed_out_elsewhere": True},
                    tenant_id=_audit_tenant(cur, user["tenant_id"]))
-        return {"ok": True}
+        time.sleep(1.1)
+        return {"ok": True, "token": _fresh_session(response, user)}
 
     # ------------------------------------------------------ my name / business name
     def _audit_tenant(cur, tenant_id):

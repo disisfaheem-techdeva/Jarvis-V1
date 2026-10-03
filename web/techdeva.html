@@ -559,7 +559,9 @@ const VIEWS = {
           '<td><span class="pill">' + esc(agState[a.status] || a.status) + '</span></td><td class="dim">' + when(a.created_at) + '</td>' +
           '<td>' + (a.status === 'requested' || a.status === 'failed'
             ? '<button class="tiny primary" data-agok="' + esc(a.id) + '">' + (a.status === 'failed' ? 'Retry' : 'Approve') + '</button> ' +
-              '<button class="tiny" data-agno="' + esc(a.id) + '">Reject</button>' : '') + '</td></tr>')) +
+              '<button class="tiny" data-agno="' + esc(a.id) + '">Reject</button>' : '') +
+            (a.agent_key && !/irfan|clinic|salon|workspace/.test(a.agent_key) && (a.status === 'ready' || a.status === 'failed') ? ' <button class="tiny" data-agrb="' + esc(a.id) + '" data-name="' + esc(a.business_name) + '">Rebuild</button>' : '') +
+            (a.rebuild && a.status !== 'ready' ? '<div class="dim">rebuilding</div>' : '') + '</td></tr>')) +
       '<div class="sub" style="margin-top:6px">Approve starts the build on the server within a minute (provision-queue.sh). ' +
       'It waits by itself if the server is short of memory.</div></div></section>' +
       '<section><h2>Payments clients reported</h2><div class="card" style="padding:6px 8px">' +
@@ -795,6 +797,13 @@ function wireRequests(){
     try { await fn(b); } catch (e) { alert(e.message); b.disabled = false; }
   });
   go('[data-agok]', async b => { await api('/techdeva/agent-requests/' + b.getAttribute('data-agok') + '/approve', {method:'POST'}); load(); });
+  go('[data-agrb]', async b => {
+    if (!confirm('Rebuild the WhatsApp agent of ' + b.getAttribute('data-name') + ' from the current template?\n\n' +
+                 'The server removes the old agent and builds a new one (about 4 minutes). The business must connect its ' +
+                 'number again with a new QR scan, and the agent starts with fresh chat memory. Their business data on ' +
+                 'the platform is not affected.')) return;
+    await api('/techdeva/agent-requests/' + b.getAttribute('data-agrb') + '/rebuild', {method:'POST'}); load();
+  });
   go('[data-agno]', async b => {
     const why = prompt('What should the client read? (e.g. We will call you to set it up)', '');
     if (why === null) { b.disabled = false; return; }
@@ -1360,10 +1369,19 @@ function pwOpen(){
     '<label class="k-note">New password (at least 10 characters)<br><input type="password" id="pw_new" autocomplete="new-password" minlength="10" required style="width:100%"></label>' +
     '<label class="k-note">New password again<br><input type="password" id="pw_new2" autocomplete="new-password" minlength="10" required style="width:100%"></label>' +
     '<div id="pw_msg" class="k-note" style="min-height:18px"></div>' +
-    '<div style="display:flex;gap:8px"><button class="primary" type="submit" id="pw_go">Change password</button><button type="button" id="pw_x">Cancel</button></div></form>';
+    '<div style="display:flex;gap:8px"><button class="primary" type="submit" id="pw_go">Change password</button><button type="button" id="pw_x">Cancel</button></div>' +
+    '<div style="border-top:1px solid #333;padding-top:10px"><button type="button" id="pw_all">Sign out all other devices</button>' +
+    '<div class="k-note" style="margin-top:4px">This device stays signed in.</div></div></form>';
   document.body.appendChild(o);
   const g = id => document.getElementById(id), msg = (t, ok) => { g('pw_msg').textContent = t; g('pw_msg').className = ok ? 'k-note good' : 'k-note bad'; };
   g('pw_x').onclick = () => o.remove();
+  g('pw_all').onclick = async () => {
+    if (!confirm('Sign out every other device where you are signed in?')) return;
+    g('pw_all').disabled = true;
+    try { const r = await api('/auth/sign-out-everywhere', {method: 'POST'}); if (TOKEN && r.token) TOKEN = r.token; msg('Done: every other device is signed out.', true); }
+    catch (ex) { msg(ex.message); }
+    g('pw_all').disabled = false;
+  };
   api('/auth/account').then(a => {
     g('acct_box').innerHTML = '<label class="k-note">Your name<br><input id="ac_name" maxlength="80" value="' + esc(a.name) + '" style="width:100%"></label>' +
       '<div class="k-note">Signs in as ' + esc(a.email) + '</div>' +
@@ -1382,8 +1400,9 @@ function pwOpen(){
     if (g('pw_new').value !== g('pw_new2').value) return msg('The two new passwords are not the same.');
     g('pw_go').disabled = true;
     try {
-      await api('/auth/change-password', {method: 'POST', body: JSON.stringify({current_password: g('pw_cur').value, new_password: g('pw_new').value})});
-      msg('Password changed. Use the new one next time you sign in.', true); setTimeout(() => o.remove(), 1800);
+      const r = await api('/auth/change-password', {method: 'POST', body: JSON.stringify({current_password: g('pw_cur').value, new_password: g('pw_new').value})});
+      if (TOKEN && r.token) TOKEN = r.token;      // the old login was just signed out with the others
+      msg('Password changed. Any other device signed in as you has been signed out.', true); setTimeout(() => o.remove(), 2200);
     } catch (ex) { g('pw_go').disabled = false; msg(ex.message); }
   };
 }

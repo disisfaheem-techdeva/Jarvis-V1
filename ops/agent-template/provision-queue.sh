@@ -104,13 +104,14 @@ rows = json.load(sys.stdin).get("requests") or []
 clean = lambda v: re.sub(r"[\t\r\n]", " ", str(v or ""))
 if rows:
     r = rows[0]
-    print("\t".join(clean(r[k]) for k in ("id","agent_key","tenant_id","owner_phone","home_name","business_name","assistant")))
+    print("\t".join([clean(r[k]) for k in ("id","agent_key","tenant_id","owner_phone","home_name","business_name","assistant")]
+                    + ["rebuild" if r.get("rebuild") else "new"]))
 ')
 [ -n "$job" ] || exit 0
 # HOME_NAME, never HOME: overwriting $HOME made docker write its settings into
 # a folder named after the client inside the repo ("Networkometis Pakistan/"),
 # which then blocked deploy.sh (2 Oct 2026).
-IFS=$'\t' read -r RID KEY TENANT PHONE HOME_NAME BUSINESS ASSISTANT <<< "$job"
+IFS=$'\t' read -r RID KEY TENANT PHONE HOME_NAME BUSINESS ASSISTANT KIND <<< "$job"
 
 free=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
 agents=$(docker ps -a --filter label=techdeva.pairwatch=true --format '{{.Names}}' | wc -l)
@@ -121,6 +122,15 @@ if [ $DRY = 1 ]; then echo "$(now) would build $KEY for tenant $TENANT (${free} 
 
 echo "$(now) building $KEY for tenant $TENANT"
 report "$RID" building
+# "Rebuild agent" (founder console): the old agent goes first. remove-agent.sh
+# refuses irfan / clinic / salon / workspace* and anything the template did not make.
+if [ "${KIND:-new}" = rebuild ]; then
+  echo "$(now) rebuild: removing the old $KEY first"
+  if ! out=$(bash "$HERE/remove-agent.sh" --key "$KEY" --yes 2>&1); then
+    echo "$out"; report "$RID" failed "rebuild: could not remove the old agent: $(printf '%s' "$out" | tail -1)"; exit 1
+  fi
+  echo "$out"; rm -f "/var/lib/techdeva/trial-paused/$KEY"
+fi
 LOG=$(mktemp)
 if bash "$HERE/new-agent.sh" --key "$KEY" --tenant "$TENANT" --owner-phone "$PHONE" \
      --home-name "$HOME_NAME" --business "$BUSINESS" --assistant "$ASSISTANT" > "$LOG" 2>&1; then
