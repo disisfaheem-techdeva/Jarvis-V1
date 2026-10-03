@@ -82,6 +82,9 @@ services:
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # AI pictures for posts (app/aidesign.py): image models in order, daily limit per business
+      GEMINI_IMAGE_MODELS: ${GEMINI_IMAGE_MODELS:-gemini-2.5-flash-image,gemini-3-pro-image-preview}
+      AI_PICTURES_PER_DAY: ${AI_PICTURES_PER_DAY:-20}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
