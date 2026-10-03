@@ -7028,6 +7028,65 @@ pstCard = function(p, own, connected, pgList){
   document.head.appendChild(css);
 })();
 
+/* ======================================================== Part 25: AI pictures (in the designer)
+   "Describe the picture" -> the AI makes the photo (no words in it), then the
+   designer lays the headline, text and logo on top, so prices and spelling
+   are always the owner's own. Limited per day on the server (cost). */
+var _edRenderBefore25 = edRender;
+edRender = function(){
+  _edRenderBefore25();
+  var ctl = document.querySelector('#pst-ed .ed-ctl'); if (!ctl || !ED) return;
+  var box = document.createElement('div');
+  box.className = 'ed-ai';
+  box.innerHTML = '<div class="card-note"><b>✨ Make the picture with AI</b></div>' +
+    '<textarea class="fld" id="ed_ai" rows="2" maxlength="400" placeholder="e.g. a smiling woman getting a HydraFacial in a calm, bright clinic room">' + esc(ED.ai || '') + '</textarea>' +
+    '<div class="ed-row"><button type="button" class="btn primary" id="ed_aigo"' + (ED.aiBusy ? ' disabled' : '') + '>' + (ED.aiBusy ? 'Making… (10–30 seconds)' : (ED.img ? 'Make a new one' : 'Make it')) + '</button>' +
+    (ED.aiLeft !== undefined ? '<span class="card-note">' + ED.aiLeft + ' AI pictures left today</span>' : '') + '</div>' +
+    '<div class="card-note">The AI makes the photo only. Put prices and words in Headline and Text below, so they are spelled right.</div>';
+  ctl.insertBefore(box, ctl.firstChild);
+  var ta = document.getElementById('ed_ai');
+  ta.oninput = function(){ ED.ai = ta.value; };
+  document.getElementById('ed_aigo').onclick = function(){
+    var idea = (ED.ai || '').trim();
+    if (idea.length < 4) { say('Describe the picture in a few words.'); ta.focus(); return; }
+    ED.aiBusy = true; edRender(); edDraw();
+    api('/social/ai-picture', { method: 'POST', body: { idea: idea, size: ED.size, text_at: ED.pos, colour: ED.bg } }).then(function(r){
+      if (!ED) return;
+      ED.aiBusy = false;
+      if (!r.ok) { edRender(); edDraw(); alert((r.data && r.data.detail) || 'The AI picture did not come (' + r.status + ').'); return; }
+      ED.aiLeft = r.data.left_today;
+      return edLoadImg(r.data.image).then(function(i){
+        ED.img = i; ED.img2 = null; ED.tpl = ''; ED.zoom = 1; ED.ox = 0; ED.oy = 0;
+        if (!ED.head && !ED.sub) { ED.band = true; ED.pos = ED.pos === 'center' ? 'bottom' : ED.pos; }
+        ED.logo = ED.logo || !!ED_LOGO;
+        edRender(); edDraw();
+      });
+    }).catch(function(e){ if (ED) { ED.aiBusy = false; edRender(); edDraw(); } say(e.message); });
+  };
+};
+var _pstWireBefore25 = pstWire;
+pstWire = function(){
+  _pstWireBefore25();
+  var dz = document.getElementById('ps_design');
+  if (dz && !document.getElementById('ps_ai')) {
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'btn'; b.id = 'ps_ai'; b.textContent = '✨ AI picture';
+    dz.parentNode.insertBefore(b, dz.nextSibling);
+  }
+  var ai = document.getElementById('ps_ai');
+  if (ai) {
+    ai.disabled = !!PST.vid;
+    ai.onclick = function(){
+      edOpen(-1);
+      var t = 0; (function f(){ var e = document.getElementById('ed_ai'); if (e) e.focus(); else if (t++ < 20) setTimeout(f, 100); })();
+    };
+  }
+};
+(function(){
+  var css = document.createElement('style');
+  css.textContent = '.ed-ai{display:grid;gap:6px;padding:10px;border:1px solid var(--line);border-radius:10px;margin-bottom:4px}';
+  document.head.appendChild(css);
+})();
+
 window.addEventListener('hashchange', function(){
   // Every section reads fresh data when it is opened, so something added in
   // one section (a staff member, a product, a booking) shows up in the others.

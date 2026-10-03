@@ -32,6 +32,7 @@ from .brand import make_brand_router
 from .console import make_console_router
 from .social import make_social_router, make_media_router
 from .videos import make_video_router, make_video_media_router
+from .aidesign import make_aidesign_router
 from .founder import router as founder_router
 from .policy import make_policy_router
 from .whatsapp import make_whatsapp_router
@@ -81,6 +82,7 @@ app.include_router(make_social_router())
 app.include_router(make_media_router())
 app.include_router(make_video_router())
 app.include_router(make_video_media_router())
+app.include_router(make_aidesign_router())
 app.include_router(make_team_router())
 app.include_router(make_booking_router())
 app.include_router(founder_router)
