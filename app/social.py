@@ -41,6 +41,7 @@ def is_our_media(url):
     pre = PUBLIC_BASE + "/media/"
     return url.startswith(pre) and bool(_TOKEN.match(url[len(pre):].replace(".jpg", "", 1)))
 PLATFORMS = ("facebook", "instagram")
+LOCAL_OFFSET = "+05:00"   # Asia/Karachi (no daylight saving), as Jarvis's clock in console.py
 COLS = ("id, platforms, caption, image_url, image_urls, page_id, status, results, source, created_by, "
         "approved_by, created_at, updated_at, published_at, scheduled_at")
 SCHEDULE_MAX_DAYS = 90
@@ -490,6 +491,11 @@ def make_social_router():
         _owner_only(role)
         _client_decides(x_tenant_id, x_role, authorization, td_session)
         at = str(body.get("at") or "").strip()
+        # The dashboard always sends UTC ("...Z"). A time with no zone (Jarvis)
+        # is the business's local time, the same zone Jarvis reads the clock in,
+        # never the database's UTC.
+        if re.match(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$", at):
+            at += LOCAL_OFFSET
         with tenant_session(tid, role) as cur:
             pages = _meta_pages(cur, tid)
             if not pages:

@@ -4667,7 +4667,7 @@ function boot(){
    posts are published by the platform's worker at that time; the owner can
    take one back to a draft until then. Nothing goes public without the owner. */
 // imgs: the new post's pictures in order, each { src: preview, url: link once uploaded }
-var PST = { imgs: [], busy: false, MAX: 10, page: null };
+var PST = { imgs: [], busy: false, MAX: 10, page: null, at: {} };   // at: the time picked per post, kept across redraws
 function pstWhen(s){
   if (!s) return '';
   var d = new Date(s);
@@ -4762,7 +4762,7 @@ function pstCard(p, own, connected, pgList){
   if (own && (p.status === 'draft' || p.status === 'failed')) {
     acts = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">' +
       (connected ? '<button class="btn primary" data-pnow="' + esc(p.id) + '">Post now</button>' +
-        '<input type="datetime-local" class="fld" id="pat_' + esc(p.id) + '" min="' + pstLocalMin() + '" value="' + pstLocalMin() + '" style="max-width:220px">' +
+        '<input type="datetime-local" class="fld" id="pat_' + esc(p.id) + '" data-pat="' + esc(p.id) + '" min="' + pstLocalMin() + '" value="' + esc(PST.at[p.id] || pstLocalMin()) + '" style="max-width:220px">' +
         '<button class="btn" data-psch="' + esc(p.id) + '">Schedule</button>' : '') +
       '<button class="btn" data-pdis="' + esc(p.id) + '">Discard</button>' +
       (connected ? '' : '<span class="card-note">Post now and Schedule appear once a Facebook Page is connected (see the top of this page).</span>') + '</div>';
@@ -4826,15 +4826,20 @@ function pstWire(){
       act('/social/posts/' + b.getAttribute('data-pnow') + '/publish', { method: 'POST', body: { page_id: PST.page } }, 'Posted.').then(pstReload);
     };
   });
+  // a redraw (new data, Page picked) must not reset the time the owner chose
+  document.querySelectorAll('[data-pat]').forEach(function(inp){
+    inp.oninput = inp.onchange = function(){ PST.at[inp.getAttribute('data-pat')] = inp.value; };
+  });
   document.querySelectorAll('[data-psch]').forEach(function(b){
     b.onclick = function(){
       var id = b.getAttribute('data-psch'), v = (g('pat_' + id) || {}).value;
       var d = v ? new Date(v) : null;
       if (!d || isNaN(d)) { say('Pick a date and time.'); return; }
       if (needPage()) return;
+      if (!confirm('Schedule this post for ' + pstWhen(d) + '?')) return;
       b.disabled = true;
       act('/social/posts/' + id + '/schedule', { method: 'POST', body: { at: d.toISOString(), page_id: PST.page } }, 'Scheduled for ' + pstWhen(d) + '.')
-        .then(function(r){ if (r.ok) pstReload(); else b.disabled = false; });
+        .then(function(r){ if (r.ok) { delete PST.at[id]; pstReload(); } else b.disabled = false; });
     };
   });
   document.querySelectorAll('[data-punsch]').forEach(function(b){
