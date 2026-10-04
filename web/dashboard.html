@@ -270,7 +270,8 @@ function bizIdentity(){
   var name = t.name;
   var setup = !name;
   var bits = [];
-  if (t.industry) bits.push(t.industry);
+  if (typeof BP !== 'undefined' && BP.data && BP.data.category) bits.push(BP.data.category.name);
+  else if (t.industry) bits.push(t.industry);
   if (t.plan) bits.push(t.plan);
   if (t.status) bits.push(t.status);
   if (typeof t.days_left === 'number') bits.push(t.days_left + ' days left in trial');
@@ -343,7 +344,7 @@ VIEWS.leads = function(){
   var rows = S.leads.map(function(l){
     return '<tr><td>' + esc(l.name || '—') + '</td><td>' + esc(l.phone || '—') + '</td>' +
       '<td>' + esc(l.service || '—') + '</td>' +
-      '<td><span class="tag">' + esc(l.status || 'new') + '</span></td>' +
+      '<td><span class="tag">' + esc(stageName(l.status || 'new')) + '</span></td>' +
       '<td>' + esc(l.source || '—') + '</td>' +
       '<td>' + esc(l.priority === null || l.priority === undefined ? '—' : l.priority) + '</td></tr>';
   }).join('');
@@ -7192,6 +7193,190 @@ Object.keys(OWNER_ONLY_NAV).forEach(function(id){
   if (!inner) return;
   VIEWS[id] = function(){ return isOwner() ? inner.apply(this, arguments) : ownerOnlyPage(id); };
 });
+/* ======================================================== Part 29: Business type & what the agent knows
+   (4 Oct 2026) The WhatsApp agent used to get only the business name, so it
+   guessed services. Now: the owner picks the business type once (gate below),
+   the dashboard uses that type's words and lead stage names, and the "Business
+   & agent" page holds the facts the agent may use (services and prices come
+   from Services & Products), shows what was sent to the agent, and lists the
+   replies the reply checker flagged. Types are data (business_categories). */
+var BP = { data: undefined, busy: false, cats: null, gateOpen: false, kn: { kind: 'faq' }, note: null, flags: undefined };
+function bpLoad(force){
+  if (BP.busy || (BP.data !== undefined && !force) || !S.me || !S.me.tenant_id) return;
+  BP.busy = true;
+  api('/business-profile').then(function(r){
+    BP.busy = false;
+    BP.data = r.ok ? r.data : { error: (r.data && r.data.detail) || 'Could not read your business profile.' };
+    bpApplyWords();
+    if (r.ok && r.data.needs_type && isOwner() && !BP.gateOpen) bpGate();
+    renderShell();
+  });
+}
+function bpWords(){ return (BP.data && BP.data.category && BP.data.category.labels) || {}; }
+/* Lead stage names follow the business type (a restaurant's "booked" is a reservation). */
+function stageName(s){
+  var st = BP.data && BP.data.category && BP.data.category.pipeline_stages;
+  return (st && st[s]) || s;
+}
+function bpApplyWords(){
+  var w = bpWords();
+  NAV.forEach(function(g){ g.items.forEach(function(it){
+    if (it._base === undefined) it._base = it.name;
+    if (it.id === 'appointments') it.name = w.bookings || it._base;
+    else if (it.id === 'customers') it.name = w.customers || it._base;
+    else if (it.id === 'catalogue') it.name = w.services ? (w.services + ' & Products') : it._base;
+    else if (it.id === 'services') it.name = w.services || it._base;
+  }); });
+}
+(function(){
+  NAV.forEach(function(g){
+    if (g.label === 'Business' && !g.items.some(function(it){ return it.id === 'bizagent'; }))
+      g.items.splice(0, 0, { id: 'bizagent', icon: '🧠', name: 'Business & agent', sub: false });
+  });
+  var shell = renderShell;
+  renderShell = function(){ if (S.me && S.me.tenant_id && BP.data === undefined) bpLoad(); return shell.apply(this, arguments); };
+})();
+
+function bpGate(){
+  BP.gateOpen = true;
+  var o = document.createElement('div'); o.id = 'bp-gate';
+  o.style.cssText = 'position:fixed;inset:0;z-index:330;background:rgba(0,0,0,.78);display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto';
+  o.innerHTML = '<div style="background:var(--panel,#111);border:1px solid var(--line);border-radius:14px;padding:20px;width:min(640px,100%);display:grid;gap:12px">' +
+    '<b style="font-size:18px">What type of business do you run?</b>' +
+    '<div class="card-note">Your dashboard and your WhatsApp agent set themselves up for it. You can change this later in Business &amp; agent.</div>' +
+    '<div id="bp_cats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">' + loading('Loading business types...') + '</div>' +
+    '<label id="bp_other_l" class="card-note" style="display:none">In a few words, what does your business do?<input class="fld" id="bp_other" maxlength="120" placeholder="e.g. car rental, printing shop, physiotherapy"></label>' +
+    '<div id="bp_msg" class="card-note" style="min-height:18px"></div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="bp_save" disabled>Continue</button>' +
+    (BP.data && !BP.data.needs_type ? '<button class="btn" id="bp_x">Cancel</button>' : '') + '</div></div>';
+  document.body.appendChild(o);
+  var g = function(id){ return document.getElementById(id); }, pick = null;
+  if (g('bp_x')) g('bp_x').onclick = function(){ o.remove(); BP.gateOpen = false; };
+  var draw = function(cats){
+    g('bp_cats').innerHTML = cats.map(function(c){
+      return '<button type="button" class="btn" data-bpc="' + esc(c.slug) + '" style="text-align:left;padding:12px;display:grid;gap:2px;min-height:70px">' +
+        '<span style="font-size:20px">' + esc(c.icon || '') + '</span><b>' + esc(c.name) + '</b><span class="card-note">' + esc(c.blurb || '') + '</span></button>';
+    }).join('');
+    document.querySelectorAll('[data-bpc]').forEach(function(b){ b.onclick = function(){
+      pick = b.getAttribute('data-bpc');
+      document.querySelectorAll('[data-bpc]').forEach(function(x){ x.style.outline = x === b ? '2px solid var(--accent, #6C8CFF)' : ''; });
+      g('bp_other_l').style.display = pick === 'other' ? '' : 'none';
+      g('bp_save').disabled = false;
+      if (pick === 'other') g('bp_other').focus();
+    }; });
+  };
+  if (BP.cats) draw(BP.cats);
+  else api('/categories').then(function(r){
+    if (!r.ok) { g('bp_cats').innerHTML = errState((r.data && r.data.detail) || 'Could not load the business types.'); return; }
+    BP.cats = r.data.categories || []; draw(BP.cats);
+  });
+  g('bp_save').onclick = function(){
+    if (!pick) return;
+    g('bp_save').disabled = true; g('bp_msg').textContent = 'Saving...';
+    api('/business-profile/type', { method: 'PUT', body: { slug: pick, other: pick === 'other' ? g('bp_other').value : '' } }).then(function(r){
+      if (!r.ok) { g('bp_save').disabled = false; g('bp_msg').textContent = (r.data && r.data.detail) || 'That did not save.'; g('bp_msg').style.color = 'var(--danger)'; return; }
+      o.remove(); BP.gateOpen = false; BP.data = undefined; bpLoad(true);
+      location.hash = '#/bizagent';
+    });
+  };
+}
+
+var BP_KIND = { faq: 'Question customers ask', info: 'Fact about the business', policy: 'Policy or rule', not_offered: 'We do NOT offer' };
+var BP_FLAG = { bot_error: 'Error sent to a customer', unknown_service: 'Offered something not on your list', unbacked_claim: 'Price, discount or promise not in your records' };
+VIEWS.bizagent = function(){
+  bpLoad(false);
+  var out = '<h1>Business &amp; agent</h1><p class="sub">Your business type and everything your WhatsApp agent is allowed to say. It answers only from this, never anything else.</p>';
+  if (BP.data === undefined) return out + panel('Your business', loading());
+  if (BP.data.error) return out + panel('Your business', errState(BP.data.error));
+  var d = BP.data, c = d.category, w = bpWords(), owner = isOwner();
+  if (BP.flags === undefined) { BP.flags = null; api('/business-profile/checks').then(function(r){ BP.flags = r.ok ? r.data : { error: 'Could not read the reply checks.' }; renderShell(); }); }
+  out += panel('Business type', (c ? '<div style="display:flex;gap:10px;align-items:center"><span style="font-size:26px">' + esc(c.icon || '') + '</span><div><b>' + esc(c.name) + '</b>' +
+      (d.business_type_other ? '<div class="card-note">' + esc(d.business_type_other) + '</div>' : '') + '</div></div>'
+      : empty('Not chosen yet', 'Pick your business type so the dashboard and the agent fit it.')),
+    owner ? '<button class="btn" id="bp_change">' + (c ? 'Change' : 'Choose') + '</button>' : '');
+  var intake = (c && c.intake_fields) || [];
+  var have = [
+    { ok: d.services_count > 0, t: (w.services || 'Services') + ' with prices: ' + d.services_count + ' listed', href: '#/catalogue' },
+    { ok: d.hours_set, t: 'Opening hours ' + (d.hours_set ? 'set' : 'not set'), href: '#/settings' }
+  ];
+  out += panel('What your agent must know', '<div style="display:grid;gap:6px">' + have.map(function(h){
+      return '<div>' + (h.ok ? '✅' : '⚠️') + ' ' + esc(h.t) + ' · <a href="' + h.href + '">' + (h.ok ? 'Edit' : 'Add now') + '</a></div>'; }).join('') +
+    (intake.length ? '<div class="card-note" style="margin-top:6px">For your type of business, also add below: ' + intake.map(esc).join(' · ') + '</div>' : '') + '</div>');
+  var list = d.knowledge || [];
+  var rows = ['faq', 'info', 'policy', 'not_offered'].map(function(k){
+    var items = list.filter(function(x){ return x.kind === k; });
+    if (!items.length) return '';
+    return '<div style="margin-top:8px"><b>' + esc(BP_KIND[k]) + '</b>' + items.map(function(x){
+      return '<div style="display:flex;gap:8px;justify-content:space-between;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--line)"><div style="min-width:0"><div>' + esc(x.title) + '</div>' +
+        (x.body ? '<div class="card-note">' + esc(x.body) + '</div>' : '') + '</div>' +
+        (owner ? '<button class="btn" data-bpdel="' + esc(x.id) + '">Remove</button>' : '') + '</div>';
+    }).join('') + '</div>';
+  }).join('');
+  var form = owner ? '<form id="bp_kf" style="display:grid;gap:8px;margin-top:10px;border-top:1px solid var(--line);padding-top:10px">' +
+      '<label class="card-note">Type<select class="fld" id="bp_kind">' + Object.keys(BP_KIND).map(function(k){ return '<option value="' + k + '"' + (BP.kn.kind === k ? ' selected' : '') + '>' + esc(BP_KIND[k]) + '</option>'; }).join('') + '</select></label>' +
+      '<label class="card-note">Question, fact, rule, or what you do not offer<input class="fld" id="bp_title" maxlength="300" required placeholder="e.g. Do you do home delivery?"></label>' +
+      '<label class="card-note">Answer or details (optional)<textarea class="fld" id="bp_body" maxlength="2000" rows="2" placeholder="e.g. Yes, within 5 km, Rs 150 delivery charge"></textarea></label>' +
+      '<div><button class="btn primary" type="submit" id="bp_add">Add and teach the agent</button></div></form>' : '';
+  out += panel('Facts, questions and what you do not offer', (rows || empty('Nothing added yet', 'Add common questions, policies, and anything you do NOT offer, so the agent never offers it.')) + form);
+  var s = d.sync || {}, st = String(s.status || 'never');
+  var stTxt = st.indexOf('synced') === 0 ? '✅ Sent to your WhatsApp agent ' + (s.synced_at ? when(s.synced_at) : '')
+    : st === 'never' ? 'Not sent yet (it is sent when your agent is set up, and after every change)'
+    : '⚠️ Last send did not reach your agent. It is retried every 10 minutes.';
+  out += panel('Your WhatsApp agent', '<div>' + esc(stTxt) + '</div>' +
+      (owner ? '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="bp_sync">Send to my agent now</button></div>' : '') +
+      (d.agent_text ? '<details style="margin-top:10px"><summary class="card-note">Show exactly what your agent knows</summary><pre style="white-space:pre-wrap;font-size:12.5px;max-height:420px;overflow:auto">' + esc(d.agent_text) + '</pre></details>' : '') +
+      (BP.note ? '<div class="card-note" style="margin-top:6px;color:' + (BP.note.bad ? 'var(--danger)' : 'var(--growth)') + '">' + esc(BP.note.text) + '</div>' : ''));
+  var f = BP.flags;
+  var flagsHtml = f === null || f === undefined ? loading('Reading the reply checks...') : f.error ? errState(f.error)
+    : !(f.flags || []).length ? empty('Nothing to check', 'Every few minutes the reply checker reads what your agent sent. Errors, or anything not on your list, will show here.' + (f.scanned_at ? ' Last check ' + when(f.scanned_at) + '.' : ''))
+    : f.flags.map(function(x){
+        return '<div style="padding:8px 0;border-bottom:1px solid var(--line)"><b>' + esc(BP_FLAG[x.kind] || x.kind) + '</b> <span class="card-note">' + esc(x.message_at ? when(x.message_at) : '') + '</span>' +
+          '<div style="white-space:pre-wrap;margin:4px 0">“' + esc(x.excerpt) + '”</div><div class="card-note">' + esc(x.detail) + '</div>' +
+          (owner ? '<button class="btn" style="margin-top:6px" data-bpdis="' + esc(x.id) + '">Checked, dismiss</button>' : '') + '</div>';
+      }).join('');
+  out += panel('Replies to check', flagsHtml);
+  setTimeout(bpWire, 0);
+  return out;
+};
+function bpWire(){
+  var g = function(id){ return document.getElementById(id); };
+  if (g('bp_change')) g('bp_change').onclick = bpGate;
+  if (g('bp_kind')) g('bp_kind').onchange = function(){ BP.kn.kind = g('bp_kind').value; };
+  if (g('bp_kf')) g('bp_kf').onsubmit = function(e){
+    e.preventDefault(); g('bp_add').disabled = true;
+    api('/business-profile/knowledge', { method: 'POST', body: { kind: g('bp_kind').value, title: g('bp_title').value, body: g('bp_body').value } }).then(function(r){
+      BP.note = r.ok ? { text: 'Added. ' + bpSyncText(r.data.sync) } : { text: (r.data && r.data.detail) || 'That did not save.', bad: true };
+      if (r.ok) { BP.data = undefined; bpLoad(true); } else { g('bp_add').disabled = false; renderShell(); }
+    });
+  };
+  document.querySelectorAll('[data-bpdel]').forEach(function(b){ b.onclick = function(){
+    if (!confirm('Remove this? Your agent will no longer use it.')) return;
+    b.disabled = true;
+    api('/business-profile/knowledge/' + b.getAttribute('data-bpdel'), { method: 'DELETE' }).then(function(r){
+      BP.note = r.ok ? { text: 'Removed. ' + bpSyncText(r.data.sync) } : { text: (r.data && r.data.detail) || 'That did not work.', bad: true };
+      BP.data = undefined; bpLoad(true);
+    });
+  }; });
+  if (g('bp_sync')) g('bp_sync').onclick = function(){
+    g('bp_sync').disabled = true;
+    api('/business-profile/sync', { method: 'POST' }).then(function(r){
+      BP.note = r.ok ? { text: 'Sent to your agent.' } : { text: (r.data && r.data.detail) || 'Could not reach your agent.', bad: true };
+      BP.data = undefined; bpLoad(true);
+    });
+  };
+  document.querySelectorAll('[data-bpdis]').forEach(function(b){ b.onclick = function(){
+    b.disabled = true;
+    api('/business-profile/checks/' + b.getAttribute('data-bpdis') + '/dismiss', { method: 'POST' }).then(function(){ BP.flags = undefined; renderShell(); });
+  }; });
+}
+function bpSyncText(s){
+  s = String(s || '');
+  if (s.indexOf('synced') === 0 || s === 'unchanged') return 'Your WhatsApp agent knows it now.';
+  if (s === 'no_agent') return 'Your WhatsApp agent will learn it as soon as it is set up.';
+  return 'Your agent could not be reached; it is retried every 10 minutes.';
+}
+window.addEventListener('hashchange', function(){ if (typeof BP !== 'undefined') { BP.flags = undefined; BP.note = null; } });
+
 window.addEventListener('hashchange', function(){
   // Every section reads fresh data when it is opened, so something added in
   // one section (a staff member, a product, a booking) shows up in the others.

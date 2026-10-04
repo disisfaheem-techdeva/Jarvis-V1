@@ -224,6 +224,34 @@ function readBody(req) {
   });
 }
 
+// The business's own facts (services, prices, hours, FAQs, what it does NOT
+// offer, rules for its kind of business), written by the platform from the
+// dashboard (app/categories.py). Kept between its own markers, before the
+// owner's standing instructions so those still win. Template agents only call
+// it; a hand-built agent is never sent this.
+const K_START = '<!-- TECHDEVA-KNOWLEDGE-START -->';
+const K_END = '<!-- TECHDEVA-KNOWLEDGE-END -->';
+function writeKnowledge(text) {
+  const clean = String(text || '').replace(/<!--|-->/g, '').slice(0, 60000).trim();
+  if (!clean) throw new Error('knowledge text is empty');
+  const soul = fs.existsSync(SOUL) ? fs.readFileSync(SOUL, 'utf8') : '';
+  const block = K_START + '\n' + clean + '\n' + K_END;
+  const a = soul.indexOf(K_START), b = soul.indexOf(K_END);
+  let next;
+  if (a !== -1 && b > a) next = soul.slice(0, a) + block + soul.slice(b + K_END.length);
+  else {
+    const l = soul.indexOf(L_START);
+    next = l !== -1 ? soul.slice(0, l).replace(/\s*$/, '') + '\n\n' + block + '\n\n' + soul.slice(l)
+                    : soul.replace(/\s*$/, '') + '\n\n' + block + '\n';
+  }
+  if (soul && !fs.existsSync(SOUL + '.pre-knowledge')) fs.writeFileSync(SOUL + '.pre-knowledge', soul);
+  const tmp = SOUL + '.tmp-' + process.pid;
+  fs.writeFileSync(tmp, next);
+  fs.renameSync(tmp, SOUL);
+  log('wrote the business knowledge into SOUL.md (' + clean.length + ' chars)');
+  return { chars: clean.length };
+}
+
 function writeLessons(lessons) {
   if (!Array.isArray(lessons)) throw new Error('lessons must be a list');
   const clean = lessons.slice(0, 200)
@@ -343,6 +371,14 @@ const server = http.createServer(async (req, res) => {
     catch (e) { return send(res, 400, { error: 'bad json' }); }
     try { return send(res, 200, { agent: AGENT, ...writeLessons(body.lessons) }); }
     catch (e) { log('lesson write failed', e.message); return send(res, 500, { error: 'could not write SOUL.md' }); }
+  }
+
+  if (req.method === 'POST' && url === '/soul/knowledge') {
+    let body;
+    try { body = JSON.parse((await readBody(req)) || '{}'); }
+    catch (e) { return send(res, 400, { error: 'bad json' }); }
+    try { return send(res, 200, { agent: AGENT, ...writeKnowledge(body.text) }); }
+    catch (e) { log('knowledge write failed', e.message); return send(res, 500, { error: 'could not write SOUL.md' }); }
   }
 
   if (req.method === 'POST' && url === '/send') {

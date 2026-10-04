@@ -69,6 +69,14 @@ class Scheduler:
         except Exception as e:
             print(f"[scheduler] ad autopilot skipped: {e}", flush=True)
 
+        # Reply checker: what each business's WhatsApp agent actually said (bot
+        # errors, services or prices it does not have). Every 10 minutes.
+        try:
+            from .replycheck import run_due as replycheck_due
+            emitted += replycheck_due()
+        except Exception as e:
+            print(f"[scheduler] reply checker skipped: {e}", flush=True)
+
         # Trial data retention: warn 3 days before, delete unpaid trials 15 days
         # after the trial ended (hourly inside).
         try:
