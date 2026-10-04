@@ -114,7 +114,7 @@ def _public(r):
     }
 
 
-def _pairctl(url, path, method="GET"):
+def _pairctl(url, path, method="GET", timeout=PAIRCTL_TIMEOUT):
     key = _key()
     if not key:
         raise HTTPException(503, "Pairing is not configured on this server.")
@@ -125,7 +125,7 @@ def _pairctl(url, path, method="GET"):
         data=b"" if method == "POST" else None,
     )
     try:
-        with urllib.request.urlopen(req, timeout=PAIRCTL_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode() or "{}")
     except urllib.error.HTTPError as e:
         if e.code == 409:
@@ -212,7 +212,7 @@ def make_whatsapp_router():
             raise HTTPException(403, "Only the business owner can connect a WhatsApp number.")
         with tenant_session(tid, role) as cur:
             r = _row(cur, tid, conn)
-            _pairctl(r["pairctl_url"], "/pair/start", "POST")
+            _pairctl(r["pairctl_url"], "/pair/start", "POST", timeout=35)   # the guard may wait up to 20 s
             cur.execute("""UPDATE whatsapp_connections
                               SET status = 'pairing', last_error = NULL, updated_at = now()
                             WHERE id = %s""", (r["id"],))

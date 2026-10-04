@@ -301,7 +301,15 @@ const server = http.createServer(async (req, res) => {
       // 4 Oct 2026). So: refuse while it is connected; and when it is not, an old
       // login left on the volume would only log straight out again, so it is
       // moved aside (renamed, never deleted) and the scan starts clean.
-      const h = await agentBridgeHealth();
+      let h = await agentBridgeHealth();
+      // A login that is only reconnecting (network blip, agent restart) must not
+      // be moved aside: give it up to 20 s to come back before calling it dead.
+      if (h.status !== 'connected' && fs.existsSync(path.join(SESSION_DIR, 'creds.json'))) {
+        for (let i = 0; i < 5 && h.status !== 'connected'; i++) {
+          await new Promise(r => setTimeout(r, 4000));
+          h = await agentBridgeHealth();
+        }
+      }
       if (h.status === 'connected') {
         return send(res, 409, { agent: AGENT, error: 'already_connected',
           message: 'This WhatsApp number is already connected and answering customers.' });
