@@ -825,6 +825,11 @@ def _integration_view(r):
     }
 
 
+# Platform-wide incidents a client may see: only ones about the service they
+# use. Everything else the server monitor opens is TechDeva's to act on.
+CLIENT_VISIBLE_PLATFORM_INCIDENTS = ("ai.fallback",)
+
+
 @app.get("/incidents")
 def list_incidents(x_tenant_id: str | None = Header(None),
                    x_role: str | None = Header(None),
@@ -842,7 +847,12 @@ def list_incidents(x_tenant_id: str | None = Header(None),
     # business they only alarm (a 10-second restart during a deploy stayed on
     # every dashboard for hours, 2 Oct 2026). The founder console still shows
     # them; clients keep the incidents about their own service (AI fallback).
-    hide = "" if role == "techdeva_admin" else " AND NOT (tenant_id IS NULL AND kind = 'platform.monitor')"
+    # Default-deny (4 Oct 2026): a new monitor finding, "Alerts are not
+    # reaching Faheem", reached client dashboards because only platform.monitor
+    # was hidden. Clients now see their own incidents plus the platform-wide
+    # kinds listed here, and nothing else.
+    admin = role == "techdeva_admin"
+    hide = "" if admin else " AND (tenant_id IS NOT NULL OR kind = ANY(%s))"
     with tenant_session(tid, role) as cur:
         cur.execute("""SELECT kind, severity, title, detail, status, seen_count,
                               opened_at, last_seen_at,
@@ -852,7 +862,7 @@ def list_incidents(x_tenant_id: str | None = Header(None),
                         ORDER BY CASE severity WHEN 'critical' THEN 0
                                                WHEN 'warn' THEN 1 ELSE 2 END,
                                  last_seen_at DESC
-                        LIMIT 50""")
+                        LIMIT 50""", () if admin else (list(CLIENT_VISIBLE_PLATFORM_INCIDENTS),))
         rows = [dict(r) for r in cur.fetchall()]
     return {"incidents": rows, "open": len(rows)}
 
