@@ -13,7 +13,7 @@ and tonight's fixes lived only inside `hermes-agent-irfan`. This folder makes ev
 | T5 | SOUL voice rules (female Zara, "aap", 2–4 lines Roman Urdu, one follow-up question) | `soul/voice_rules.md`, `apply_soul.py` |
 | T6 | pairctl shares the agent's network (dashboard **Send** works, the bridge is loopback-only), writes a marker when a scan completes; `pairwatch.sh` restarts that agent once | `docker-compose.agent.yml`, `ops/pairctl/pairctl.mjs`, `pairwatch.sh` |
 | T7 | Throwaway proof, then removal | `prove.sh` |
-| T9 | Bridge packages carry the gateway's install stamp (`node_modules/.hermes-pkg-hash`), and once a number is paired `pairwatch.sh` switches WhatsApp on (`WHATSAPP_ENABLED=true` in that agent's `agent.env`) and recreates it. Without these two, a paired agent never starts WhatsApp (found 4 Oct 2026) | `new-agent.sh`, `pairwatch.sh` |
+| T9 | Bridge packages carry the gateway's install stamp (`node_modules/.hermes-pkg-hash`), and once a number is paired `pairwatch.sh` switches WhatsApp on (`WHATSAPP_ENABLED=true` in that agent's `agent.env`) and recreates it. It also sets `WHATSAPP_MODE=bot` (the compose file sets it for new agents too): the bridge's default self-chat mode answers only the phone's owner. Without these, a paired agent never answers a customer (found 4 Oct 2026) | `new-agent.sh`, `pairwatch.sh` |
 
 ## Use
 

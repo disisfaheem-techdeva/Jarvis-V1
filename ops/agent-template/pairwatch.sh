@@ -47,16 +47,22 @@ for c in $(docker ps --filter label=techdeva.pairwatch=true --format '{{.Names}}
       fi
     fi
   fi
-  # paired: WhatsApp must be on
-  if ! docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c" | grep -qx 'WHATSAPP_ENABLED=true'; then
+  # paired: WhatsApp must be on, in bot mode. The bridge defaults to
+  # WHATSAPP_MODE=self-chat, which answers only the phone's owner and drops every
+  # customer ("self_chat_mode_rejects_non_self", Networkometis 4 Oct 2026).
+  envnow=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c")
+  if ! grep -qx 'WHATSAPP_ENABLED=true' <<<"$envnow" || ! grep -qx 'WHATSAPP_MODE=bot' <<<"$envnow"; then
     dir=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$c" 2>/dev/null)
     [ -n "$dir" ] || dir="/docker/hermes-$key"
     if [ ! -f "$dir/agent.env" ] || [ ! -f "$dir/docker-compose.yml" ]; then echo "$(now) $c: paired but WhatsApp off, and no template files in $dir: left alone"; continue; fi
-    if [ $DRY = 1 ]; then echo "$(now) would switch WhatsApp on for $c and recreate it"; continue; fi
-    if ! grep -qx 'WHATSAPP_ENABLED=true' "$dir/agent.env"; then
-      sed -i '/^WHATSAPP_ENABLED=/d' "$dir/agent.env" && echo 'WHATSAPP_ENABLED=true' >> "$dir/agent.env" && chmod 600 "$dir/agent.env"
-    fi
-    echo "$(now) $c: paired but WhatsApp was off -> switched on, recreating"
+    if [ $DRY = 1 ]; then echo "$(now) would switch WhatsApp on (bot mode) for $c and recreate it"; continue; fi
+    for kv in WHATSAPP_ENABLED=true WHATSAPP_MODE=bot; do
+      if ! grep -qx "$kv" "$dir/agent.env"; then
+        sed -i "/^${kv%%=*}=/d" "$dir/agent.env" && echo "$kv" >> "$dir/agent.env"
+      fi
+    done
+    chmod 600 "$dir/agent.env"
+    echo "$(now) $c: paired but WhatsApp was off or not in bot mode -> switched on (bot), recreating"
     (cd "$dir" && docker compose up -d --force-recreate >/dev/null 2>&1) \
       && echo "$(now) $c recreated: $(docker inspect -f '{{.State.Status}} since {{.State.StartedAt}}' "$c" 2>/dev/null)" \
       || echo "$(now) $c: RECREATE FAILED (cd $dir && docker compose up -d)"
