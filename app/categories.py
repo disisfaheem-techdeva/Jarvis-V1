@@ -91,8 +91,8 @@ def knowledge_block(f):
         kind = t["business_type_other"]
     out = ["## About this business",
            "%s is a %s." % (t["name"], kind.lower() if kind else "business"),
-           "Anything earlier in this file about consultations, treatments or a clinic does not apply "
-           "unless it is listed below. This section is the truth about this business."]
+           "If anything earlier in this file disagrees with this section, this section wins: "
+           "it is the truth about this business."]
     out += ["", "## %s (the ONLY ones you may offer)" % services_word]
     if f["services"]:
         for s in f["services"]:
