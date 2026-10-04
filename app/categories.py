@@ -24,7 +24,7 @@ import hashlib
 import json
 import re
 
-from fastapi import APIRouter, Body, Cookie, Header, HTTPException
+from fastapi import APIRouter, Body, Cookie, Header, HTTPException, Request
 
 from .audit import record
 from .auth import SESSION_COOKIE
@@ -33,6 +33,7 @@ from .whatsapp import _identity, _rows, _pairctl_json
 
 PROTECTED = re.compile(r"irfan|clinic|salon|workspace")
 KINDS = ("faq", "policy", "not_offered", "info")
+DAYS_LOWER = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
 DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 CAT_COLS = ("slug, name, blurb, icon, sort_order, labels, dashboard_widgets, pipeline_stages, "
             "agent_menu, agent_rules, intake_fields")
@@ -302,6 +303,125 @@ def make_categories_router():
         if s.startswith("failed"):
             raise HTTPException(503, "Could not reach your WhatsApp agent. Try again in a minute.")
         return {"ok": True, "status": s}
+
+    # ---- Set up my business with Jarvis: read, preview, then apply on "yes"
+    def _slugs(cur):
+        cur.execute("SELECT slug FROM business_categories WHERE active ORDER BY sort_order")
+        return [r["slug"] for r in cur.fetchall()]
+
+    @router.post("/business-profile/setup/read")
+    def setup_read(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                   authorization: str | None = Header(None),
+                   td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Read what the owner pasted into a draft. Saves nothing."""
+        from .setup_reader import read_text, compare
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        _owner(role)
+        text = str(body.get("text") or "")
+        if len(text.strip()) < 10:
+            raise HTTPException(400, "Paste your menu or price list, hours and anything customers ask about.")
+        with tenant_session(tid, role) as cur:
+            slugs = _slugs(cur)
+        d = compare(tid, read_text(text, slugs))
+        return {"draft": d, "source": text.strip()[:20000]}
+
+    @router.post("/business-profile/setup/read-photo")
+    async def setup_photo(request: Request, x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                          authorization: str | None = Header(None),
+                          td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """A photo of the menu or price list: its words are read, then treated like pasted text."""
+        from .setup_reader import read_text, compare, photo_to_text
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        _owner(role)
+        mime = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+        if mime not in ("image/jpeg", "image/png", "image/webp"):
+            raise HTTPException(400, "Send a JPG, PNG or WEBP photo.")
+        data = await request.body()
+        if not data or len(data) > 6 * 1024 * 1024:
+            raise HTTPException(400, "The photo must be under 6 MB.")
+        try:
+            text = photo_to_text(data, mime)
+        except RuntimeError as e:
+            raise HTTPException(503, str(e))
+        with tenant_session(tid, role) as cur:
+            slugs = _slugs(cur)
+        return {"draft": compare(tid, read_text(text, slugs)), "source": text}
+
+    @router.post("/business-profile/setup/apply")
+    def setup_apply(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                    authorization: str | None = Header(None),
+                    td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Save what the owner ticked in the preview. Adds; never deletes; a price
+        is only changed where the owner ticked that change."""
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        _owner(role)
+        d = body.get("draft") or {}
+        change = {re.sub(r"\s+", " ", str(x)).strip().lower() for x in (body.get("change_prices") or [])}
+        done = {"type": None, "services_added": 0, "prices_changed": 0, "hours_set": 0, "knowledge_added": 0, "skipped": 0}
+        with tenant_session(tid, role) as cur:
+            slugs = _slugs(cur)
+        slug = str(d.get("business_type") or "")
+        if slug in slugs:
+            other = (str(d.get("business_type_other") or "").strip()[:120] or None) if slug == "other" else None
+            if slug != "other" or other:
+                with tenant_session(None, "techdeva_admin") as cur:      # see set_type
+                    cur.execute("UPDATE tenants SET business_type = %s, business_type_other = %s WHERE id = %s",
+                                (slug, other, tid))
+                done["type"] = slug
+        with tenant_session(tid, role) as cur:
+            cur.execute("SELECT lower(btrim(name)) AS n FROM services WHERE tenant_id = %s", (tid,))   # incl. removed: name is unique
+            have = {r["n"] for r in cur.fetchall()}
+            for i, s in enumerate((d.get("services") or [])[:300]):
+                name = re.sub(r"\s+", " ", str((s or {}).get("name") or "")).strip()[:120]
+                if not name:
+                    continue
+                try:
+                    price = float(s["price"]) if s.get("price") not in (None, "") else None
+                except (TypeError, ValueError):
+                    price = None
+                if price is not None and price < 0:
+                    price = None
+                if name.lower() in have:
+                    if name.lower() in change and price is not None:
+                        cur.execute("""UPDATE services SET price = %s, updated_at = now()
+                                        WHERE tenant_id = %s AND lower(name) = %s AND active""", (price, tid, name.lower()))
+                        done["prices_changed"] += cur.rowcount
+                    else:
+                        done["skipped"] += 1
+                    continue
+                dur = s.get("duration_minutes") if isinstance(s.get("duration_minutes"), int) and 0 < s["duration_minutes"] < 1440 else None
+                cur.execute("""INSERT INTO services (tenant_id, name, price, category, duration_minutes, sort_order)
+                               VALUES (%s, %s, %s, %s, %s, %s)""",
+                            (tid, name, price, (str(s.get("category") or "").strip()[:60] or None), dur, 1000 + i))
+                have.add(name.lower()); done["services_added"] += 1
+            for h in (d.get("hours") or [])[:7]:
+                day = str((h or {}).get("day") or "").lower()
+                if day not in DAYS_LOWER:
+                    continue
+                dow = DAYS_LOWER.index(day)
+                closed = bool(h.get("closed"))
+                o, c = str(h.get("opens") or ""), str(h.get("closes") or "")
+                if not closed and not (re.match(r"^\d{1,2}:\d{2}$", o) and re.match(r"^\d{1,2}:\d{2}$", c)):
+                    continue
+                cur.execute("DELETE FROM business_hours WHERE tenant_id = %s AND location_id IS NULL AND day_of_week = %s", (tid, dow))
+                cur.execute("""INSERT INTO business_hours (tenant_id, day_of_week, opens, closes, is_closed)
+                               VALUES (%s, %s, %s, %s, %s)""", (tid, dow, None if closed else o, None if closed else c, closed))
+                done["hours_set"] += 1
+            cur.execute("SELECT lower(title) AS t FROM business_knowledge WHERE tenant_id = %s AND active", (tid,))
+            titles = {r["t"] for r in cur.fetchall()}
+            for k in (d.get("knowledge") or [])[:60]:
+                kind = str((k or {}).get("kind") or "")
+                title = re.sub(r"\s+", " ", str(k.get("title") or "")).strip()[:300]
+                if kind not in KINDS or not title or title.lower() in titles:
+                    continue
+                cur.execute("""INSERT INTO business_knowledge (tenant_id, kind, title, body, created_by)
+                               VALUES (%s, %s, %s, %s, %s)""",
+                            (tid, kind, title, str(k.get("body") or "").strip()[:2000], uid if uid and len(str(uid)) == 36 else None))
+                titles.add(title.lower()); done["knowledge_added"] += 1
+            record(cur, action="business.setup_with_jarvis", resource="services", resource_id=tid, actor=str(uid),
+                   actor_type="human", status="ok", detail=done)
+        done["sync"] = sync_knowledge(tid)
+        return done
 
     @router.get("/business-profile/checks")
     def checks(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),

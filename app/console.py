@@ -169,7 +169,9 @@ closing), pnl (profit and loss), services, products, packages, catalogue,
 inventory (stock), integrations, reports, settings, console (Jarvis), posts
 (social posts), billing (plan and billing), team (staff logins and PINs),
 whatsapp, inbox, needshuman (chats needing a human), marketing, attendance,
-hr, hermes (AI agents), ai.
+hr, hermes (AI agents), ai, bizagent (Business & agent: business type, what the
+WhatsApp agent knows, and "set up my business": the owner pastes a menu, price
+list, hours or rules there and Jarvis fills the dashboard).
 
 "Open/show/go to <page>" is action navigate. Booking, moving, cancelling or
 finishing an appointment, adding a customer, a lead or an expense, and posting
