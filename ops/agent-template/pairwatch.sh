@@ -1,7 +1,16 @@
 #!/bin/bash
-# T6 pairwatch: restart an agent once after its WhatsApp number is paired.
+# T6 pairwatch: switch WhatsApp on, and restart an agent once, after its
+# WhatsApp number is paired.
 #
-# Why: the Hermes gateway starts, finds no WhatsApp session, disables WhatsApp
+# WhatsApp on (Oct 2026): the gateway only starts its WhatsApp bridge when
+# WHATSAPP_ENABLED=true, and the template never set it (the shared env does not
+# reach the agents), so a paired agent stayed silent: Networkometis answered no
+# one for 35 hours. It is switched on only once the number is paired, never
+# before, so the gateway can never compete with pairctl's pairing bridge for the
+# login folder. It goes in the agent's own agent.env and the agent is recreated
+# with docker compose (a plain restart does not reload env files).
+#
+# Restart: the Hermes gateway starts, finds no WhatsApp session, disables WhatsApp
 # and never retries. pairctl (the pairing sidecar) writes
 # /opt/data/pairing/techdeva-paired.json when a scan completes. If that marker
 # is newer than the agent's start time, this restarts the agent (and its
@@ -16,12 +25,27 @@
 set -u
 DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1
 now() { date -u +%FT%TZ; }
-for c in $(docker ps --filter label=techdeva.pairwatch=true --format '{{.Names}}'); do
+for c in $(docker ps --filter label=techdeva.pairwatch=true --format '{{.Names}}' | grep '^hermes-agent-'); do
   key=$(docker inspect -f '{{index .Config.Labels "techdeva.agent"}}' "$c")
-  case "$key" in ""|irfan|clinic|salon) echo "$(now) skip $c: refusing key '$key'"; continue;; esac
+  case "$key" in ""|*irfan*|*clinic*|*salon*|*workspace*) echo "$(now) skip $c: refusing key '$key'"; continue;; esac
   src=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/opt/data"}}{{.Source}}{{end}}{{end}}' "$c")
   marker="$src/pairing/techdeva-paired.json"
   [ -n "$src" ] && [ -f "$marker" ] || continue
+  # paired: WhatsApp must be on
+  if ! docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c" | grep -qx 'WHATSAPP_ENABLED=true'; then
+    dir=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$c" 2>/dev/null)
+    [ -n "$dir" ] || dir="/docker/hermes-$key"
+    if [ ! -f "$dir/agent.env" ] || [ ! -f "$dir/docker-compose.yml" ]; then echo "$(now) $c: paired but WhatsApp off, and no template files in $dir: left alone"; continue; fi
+    if [ $DRY = 1 ]; then echo "$(now) would switch WhatsApp on for $c and recreate it"; continue; fi
+    if ! grep -qx 'WHATSAPP_ENABLED=true' "$dir/agent.env"; then
+      sed -i '/^WHATSAPP_ENABLED=/d' "$dir/agent.env" && echo 'WHATSAPP_ENABLED=true' >> "$dir/agent.env" && chmod 600 "$dir/agent.env"
+    fi
+    echo "$(now) $c: paired but WhatsApp was off -> switched on, recreating"
+    (cd "$dir" && docker compose up -d --force-recreate >/dev/null 2>&1) \
+      && echo "$(now) $c recreated: $(docker inspect -f '{{.State.Status}} since {{.State.StartedAt}}' "$c" 2>/dev/null)" \
+      || echo "$(now) $c: RECREATE FAILED (cd $dir && docker compose up -d)"
+    continue
+  fi
   started=$(date -d "$(docker inspect -f '{{.State.StartedAt}}' "$c")" +%s 2>/dev/null || echo 0)
   paired=$(stat -c %Y "$marker")
   if [ "$paired" -gt "$started" ]; then
