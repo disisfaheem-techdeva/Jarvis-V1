@@ -153,33 +153,65 @@ def read_text(text, slugs):
     return out
 
 
-def photo_to_text(data, mime):
-    """Read the words off a menu or price-list photo. Raises RuntimeError with a plain reason."""
-    from . import ai
-    if ai.provider() != "gemini" or not ai.available():
-        raise RuntimeError("Reading photos needs the Gemini AI, which is not set up. Paste the text instead.")
-    url = "%s/v1beta/models/%s:generateContent" % (ai.base_url("gemini"), ai.model_name())
-    body = {"contents": [{"parts": [
-        {"inline_data": {"mime_type": mime, "data": base64.b64encode(data).decode()}},
-        {"text": "Copy every word of this menu or price list exactly as written, one item per line with its "
-                 "price after it, then any hours, rules or notes. Do not add anything that is not in the picture."}]}],
-        "generationConfig": {"maxOutputTokens": 4000}}
-    try:
-        r = requests.post(url, params={"key": ai._key()}, json=body, timeout=90)
-    except requests.RequestException:
-        raise RuntimeError("The AI could not be reached to read this photo. Paste the text instead.")
-    if r.status_code == 429:
-        raise RuntimeError("Reading photos is not available on the current AI plan. Paste the text instead.")
+PHOTO_ASK = ("Copy every word of this menu or price list exactly as written, one item per line with its "
+             "price after it, then any hours, rules or notes. Do not add anything that is not in the picture.")
+
+
+def _photo_gemini(ai, b64, mime):
+    r = requests.post("%s/v1beta/models/%s:generateContent" % (ai.base_url("gemini"), ai.model_name()),
+                      params={"key": ai._key()}, timeout=90,
+                      json={"contents": [{"parts": [{"inline_data": {"mime_type": mime, "data": b64}}, {"text": PHOTO_ASK}]}],
+                            "generationConfig": {"maxOutputTokens": 4000}})
     if r.status_code >= 400:
-        raise RuntimeError("The AI could not read this photo (%s). Paste the text instead." % r.status_code)
-    try:
-        c = (r.json().get("candidates") or [{}])[0]
-    except ValueError:
-        raise RuntimeError("The AI could not read this photo. Paste the text instead.")
-    text = "".join(p.get("text", "") for p in (c.get("content") or {}).get("parts", []))
-    if not text.strip():
+        return r.status_code, ""
+    c = (r.json().get("candidates") or [{}])[0]
+    return 200, "".join(p.get("text", "") for p in (c.get("content") or {}).get("parts", []))
+
+
+def _photo_openai(ai, b64, mime):
+    """OpenAI-compatible endpoints (how this server reaches Gemini today)."""
+    r = requests.post(ai.base_url("openai") + "/v1/chat/completions", timeout=90,
+                      headers={"Authorization": "Bearer " + ai._key()},
+                      json={"model": ai.model_name(), "max_tokens": 4000, "messages": [{"role": "user", "content": [
+                          {"type": "text", "text": PHOTO_ASK},
+                          {"type": "image_url", "image_url": {"url": "data:%s;base64,%s" % (mime, b64)}}]}]})
+    if r.status_code >= 400:
+        return r.status_code, ""
+    return 200, ((r.json().get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+
+
+def photo_to_text(data, mime):
+    """Read the words off a menu or price-list photo with the AI this server is set
+    up with, trying each model in its chain. Raises RuntimeError with a plain reason."""
+    from . import ai
+    b64 = base64.b64encode(data).decode()
+    calls = {"gemini": _photo_gemini, "openai": _photo_openai}
+    codes = []
+    for p, m in ai.chain_entries():
+        if p not in calls:
+            continue
+        ai._ACTIVE, ai._ACTIVE_MODEL = p, m
+        try:
+            if not ai._key():
+                continue
+            code, text = calls[p](ai, b64, mime)
+        except (requests.RequestException, ValueError, KeyError, IndexError, TypeError) as e:
+            print("[setup] photo via %s:%s failed: %s" % (p, m, type(e).__name__), flush=True)
+            codes.append(0)
+            continue
+        finally:
+            ai._ACTIVE, ai._ACTIVE_MODEL = None, None
+        if code == 200 and str(text).strip():
+            return str(text)[:MAX_TEXT]
+        print("[setup] photo via %s:%s answered %s" % (p, m, code), flush=True)
+        codes.append(code)
+    if not codes:
+        raise RuntimeError("Reading photos needs an AI that can see pictures, and none is set up. Paste the text instead.")
+    if 429 in codes:
+        raise RuntimeError("Reading photos is not available on the current AI plan right now. Paste the text instead.")
+    if all(c == 200 for c in codes):
         raise RuntimeError("No text was found in this photo. Try a clearer photo, or paste the text.")
-    return text[:MAX_TEXT]
+    raise RuntimeError("The AI could not read this photo. Paste the text instead.")
 
 
 def compare(tid, draft):
