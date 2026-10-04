@@ -2331,10 +2331,12 @@ VIEWS.inbox = function(){
   var out = '<h1>WhatsApp Inbox</h1><p class="sub">Every WhatsApp conversation your AI agent has had with customers.</p>';
   ibxLoad(false);
   if (IBX.data === undefined) return out + panel('Conversations', loading('Reading your conversations...'));
-  if (IBX.data.error) return out + panel('Conversations', errState(IBX.data.error +
-    ' If your number is not connected yet, open WhatsApp in the menu and scan the QR code.'));
-  var chats = IBX.data.chats || [];
   var head = '<button class="btn" id="ibx_ref">Refresh</button>';
+  // An error must still offer Refresh: an agent that comes back (or a number
+  // just re-linked) used to need a full page reload to show its chats.
+  if (IBX.data.error) return out + panel('Conversations', errState(IBX.data.error +
+    ' If your number is not connected yet, open WhatsApp in the menu and scan the QR code.'), head) + ibxWire();
+  var chats = IBX.data.chats || [];
   if (!chats.length) return out + panel('Conversations', empty('No conversations yet',
     IBX.data.connected ? 'When customers message your WhatsApp, their chats appear here.'
                        : 'Connect your WhatsApp number first: open WhatsApp in the menu and scan the QR code.'), head) + ibxWire();
@@ -3803,10 +3805,12 @@ VIEWS.inbox = function(){
   if (want && IBX.sel !== want) { setTimeout(function(){ ibxOpen(want); }, 0); }
   ibxLoad(false);
   if (IBX.data === undefined) return out + panel('Conversations', loading('Reading your conversations...'));
-  if (IBX.data.error) return out + panel('Conversations', errState(IBX.data.error +
-    ' If your number is not connected yet, open WhatsApp in the menu and scan the QR code.'));
-  var chats = IBX.data.chats || [];
   var head = '<button class="btn" id="ibx_ref">Refresh</button>';
+  // An error must still offer Refresh: an agent that comes back (or a number
+  // just re-linked) used to need a full page reload to show its chats.
+  if (IBX.data.error) return out + panel('Conversations', errState(IBX.data.error +
+    ' If your number is not connected yet, open WhatsApp in the menu and scan the QR code.'), head) + ibxWire();
+  var chats = IBX.data.chats || [];
   if (!chats.length) return out + panel('Conversations', empty('No conversations yet',
     IBX.data.connected ? 'When customers message your WhatsApp, their chats appear here.'
                        : 'Connect your WhatsApp number first: open WhatsApp in the menu and scan the QR code.'), head) + ibxWire();
