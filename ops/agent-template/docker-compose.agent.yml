@@ -41,6 +41,8 @@ services:
       # owner and drops every customer. A client agent is a bot for customers.
       # (WhatsApp itself is switched on by pairwatch once the number is paired.)
       WHATSAPP_MODE: "bot"
+      # The bridge's allow-list is empty by default, which lets nobody in.
+      WHATSAPP_ALLOWED_USERS: "*"
       WHATSAPP_HOME_CHANNEL: "__PHONE__@s.whatsapp.net"
       WHATSAPP_HOME_CHANNEL_NAME: "__HOME_NAME__"
     volumes:

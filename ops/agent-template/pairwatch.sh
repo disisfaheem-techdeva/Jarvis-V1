@@ -23,8 +23,12 @@
 # cron (as root):  * * * * * /opt/techdeva-platform/techdeva-platform/ops/agent-template/pairwatch.sh >> /var/log/techdeva-pairwatch.log 2>&1
 #   pairwatch.sh --dry-run   shows what it would do
 set -u
+set -f   # no filename globbing: WHATSAPP_ALLOWED_USERS=* must stay literal
 DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1
 now() { date -u +%FT%TZ; }
+# What a paired template agent needs to answer customers (each found missing
+# on the live server, 4 Oct 2026).
+REQUIRED="WHATSAPP_ENABLED=true WHATSAPP_MODE=bot WHATSAPP_ALLOWED_USERS=*"
 for c in $(docker ps --filter label=techdeva.pairwatch=true --format '{{.Names}}' | grep '^hermes-agent-'); do
   key=$(docker inspect -f '{{index .Config.Labels "techdeva.agent"}}' "$c")
   case "$key" in ""|*irfan*|*clinic*|*salon*|*workspace*) echo "$(now) skip $c: refusing key '$key'"; continue;; esac
@@ -51,18 +55,22 @@ for c in $(docker ps --filter label=techdeva.pairwatch=true --format '{{.Names}}
   # WHATSAPP_MODE=self-chat, which answers only the phone's owner and drops every
   # customer ("self_chat_mode_rejects_non_self", Networkometis 4 Oct 2026).
   envnow=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c")
-  if ! grep -qx 'WHATSAPP_ENABLED=true' <<<"$envnow" || ! grep -qx 'WHATSAPP_MODE=bot' <<<"$envnow"; then
+  # It must also let every sender through: the bridge's own allow-list is empty
+  # by default, which means nobody ("allowlist_mismatch"; the gateway's
+  # *_ALLOW_ALL_USERS switches are not read by the bridge).
+  need=""; for kv in $REQUIRED; do grep -qxF "$kv" <<<"$envnow" || need="$need $kv"; done
+  if [ -n "$need" ]; then
     dir=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$c" 2>/dev/null)
     [ -n "$dir" ] || dir="/docker/hermes-$key"
     if [ ! -f "$dir/agent.env" ] || [ ! -f "$dir/docker-compose.yml" ]; then echo "$(now) $c: paired but WhatsApp off, and no template files in $dir: left alone"; continue; fi
-    if [ $DRY = 1 ]; then echo "$(now) would switch WhatsApp on (bot mode) for $c and recreate it"; continue; fi
-    for kv in WHATSAPP_ENABLED=true WHATSAPP_MODE=bot; do
-      if ! grep -qx "$kv" "$dir/agent.env"; then
+    if [ $DRY = 1 ]; then echo "$(now) would set$need for $c and recreate it"; continue; fi
+    for kv in $REQUIRED; do
+      if ! grep -qxF "$kv" "$dir/agent.env"; then
         sed -i "/^${kv%%=*}=/d" "$dir/agent.env" && echo "$kv" >> "$dir/agent.env"
       fi
     done
     chmod 600 "$dir/agent.env"
-    echo "$(now) $c: paired but WhatsApp was off or not in bot mode -> switched on (bot), recreating"
+    echo "$(now) $c: paired, missing$need -> set, recreating"
     (cd "$dir" && docker compose up -d --force-recreate >/dev/null 2>&1) \
       && echo "$(now) $c recreated: $(docker inspect -f '{{.State.Status}} since {{.State.StartedAt}}' "$c" 2>/dev/null)" \
       || echo "$(now) $c: RECREATE FAILED (cd $dir && docker compose up -d)"
