@@ -31,6 +31,22 @@ for c in $(docker ps --filter label=techdeva.pairwatch=true --format '{{.Names}}
   src=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/opt/data"}}{{.Source}}{{end}}{{end}}' "$c")
   marker="$src/pairing/techdeva-paired.json"
   [ -n "$src" ] && [ -f "$marker" ] || continue
+  # paired: the bridge packages must carry the gateway's "already installed"
+  # stamp, or it tries npm install inside the agent, which fails (agents built
+  # before template bridge-deps-v2). Written on the host into the agent's volume.
+  bdir="$src/scripts/whatsapp-bridge"
+  if [ -f "$bdir/package.json" ] && [ -d "$bdir/node_modules" ]; then
+    want=$(sha256sum "$bdir/package.json" | cut -c1-16)
+    if [ "$(cat "$bdir/node_modules/.hermes-pkg-hash" 2>/dev/null)" != "$want" ]; then
+      if [ $DRY = 1 ]; then echo "$(now) would stamp the WhatsApp bridge packages of $c"
+      else
+        chmod u+w "$bdir/node_modules" 2>/dev/null
+        printf '%s\n' "$want" > "$bdir/node_modules/.hermes-pkg-hash" \
+          && chown --reference="$bdir/package.json" "$bdir/node_modules/.hermes-pkg-hash" \
+          && echo "$(now) $c: bridge packages stamped ($want)" || echo "$(now) $c: could not stamp the bridge packages"
+      fi
+    fi
+  fi
   # paired: WhatsApp must be on
   if ! docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c" | grep -qx 'WHATSAPP_ENABLED=true'; then
     dir=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$c" 2>/dev/null)

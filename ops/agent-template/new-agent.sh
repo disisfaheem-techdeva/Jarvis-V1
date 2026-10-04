@@ -64,7 +64,7 @@ GEMINI_API_KEY="$(envval GEMINI_API_KEY)"; INTERNAL="$(envval HERMES_INTERNAL_KE
 BASE_IMG=nousresearch/hermes-agent:latest
 BASE_ID=$(docker image inspect -f '{{.Id}}' "$BASE_IMG" 2>/dev/null | cut -c8-19) || true
 [ -n "$BASE_ID" ] || { docker pull "$BASE_IMG" >/dev/null; BASE_ID=$(docker image inspect -f '{{.Id}}' "$BASE_IMG" | cut -c8-19); }
-TPL_ID=$( (cd "$HERE" && cat patch_gateway.py patch_bridge.py apply_config.py apply_soul.py $(find soul -type f | sort); echo "bridge-deps-v1") | sha256sum | cut -c1-8)
+TPL_ID=$( (cd "$HERE" && cat patch_gateway.py patch_bridge.py apply_config.py apply_soul.py $(find soul -type f | sort); echo "bridge-deps-v2") | sha256sum | cut -c1-8)
 IMG="techdeva/hermes-agent:$BASE_ID-td-$TPL_ID"
 if [ $REBUILD = 1 ] || ! docker image inspect "$IMG" >/dev/null 2>&1; then
   BASE_USER=$(docker image inspect -f '{{.Config.User}}' "$BASE_IMG")
@@ -78,7 +78,11 @@ if [ $REBUILD = 1 ] || ! docker image inspect "$IMG" >/dev/null 2>&1; then
     # The WhatsApp bridge ships without its packages (node_modules was empty in
     # the upstream image, 2 Oct 2026): install them here so the pairing helper
     # and the gateway can both run it.
-    echo "RUN cd /opt/hermes/scripts/whatsapp-bridge && npm ci --omit=dev --no-audit --no-fund && test -n \"\$(ls node_modules)\""
+    # The gateway reinstalls the packages (npm install, which fails in the agent)
+    # unless node_modules/.hermes-pkg-hash holds the first 16 hex characters of
+    # the SHA-256 of package.json (whatsapp adapter.py in the image, read on the
+    # server 4 Oct 2026). Write that stamp with the packages.
+    echo "RUN cd /opt/hermes/scripts/whatsapp-bridge && npm ci --omit=dev --no-audit --no-fund && test -n \"\$(ls node_modules)\" && sha256sum package.json | cut -c1-16 > node_modules/.hermes-pkg-hash"
     # The stock bridge only draws the QR in the terminal; give it the clinic's
     # GET /session so the dashboard can show the code (patch_bridge.py).
     echo "RUN python3 /opt/techdeva/patch_bridge.py /opt/hermes/scripts/whatsapp-bridge/bridge.js && node --check /opt/hermes/scripts/whatsapp-bridge/bridge.js"
@@ -108,7 +112,7 @@ echo "wrote $DIR (compose + agent.env + pairctl.env, secrets mode 600)"
 # ---- volume + SOUL (T5)
 docker volume create --label techdeva.agent="$KEY" "$VOL" >/dev/null
 docker run --rm --user 0 -v "$VOL:/opt/data" --entrypoint sh "$IMG" -c \
-  "python3 /opt/techdeva/apply_soul.py /opt/data/SOUL.md --new --assistant \"\$0\" --business \"\$1\" && mkdir -p /opt/data/scripts && cp -a /opt/hermes/scripts/whatsapp-bridge /opt/data/scripts/ && chown -R $AGENT_UID:$AGENT_GID /opt/data" \
+  "python3 /opt/techdeva/apply_soul.py /opt/data/SOUL.md --new --assistant \"\$0\" --business \"\$1\" && mkdir -p /opt/data/scripts && cp -a /opt/hermes/scripts/whatsapp-bridge /opt/data/scripts/ && chmod -R u+w /opt/data/scripts/whatsapp-bridge && chown -R $AGENT_UID:$AGENT_GID /opt/data" \
   "$ASSISTANT" "$BUSINESS"
 
 # ---- first boot creates config.yaml; then enforce T1/T2/T3 on it and start for real
@@ -136,6 +140,8 @@ docker exec "$PAIR" sh -c 'test -f /opt/data/scripts/whatsapp-bridge/bridge.js &
   && ok "T7 WhatsApp bridge and its packages are where pairing looks for them" || bad "T7 WhatsApp bridge missing (the QR could never start)"
 docker exec "$PAIR" grep -q "'/session'" /opt/data/scripts/whatsapp-bridge/bridge.js \
   && ok "T8 bridge hands the QR code to the dashboard (/session)" || bad "T8 bridge has no /session (the dashboard would wait for a code forever)"
+docker exec "$PAIR" sh -c 'cd /opt/data/scripts/whatsapp-bridge && [ "$(sha256sum package.json | cut -c1-16)" = "$(cat node_modules/.hermes-pkg-hash 2>/dev/null)" ]' \
+  && ok "T9 bridge packages stamped (the gateway will not try to reinstall them)" || bad "T9 bridge package stamp missing (WhatsApp would never start after pairing)"
 [ $fail = 0 ] || die "verification failed; the agent is up but NOT assigned to the tenant. Remove with remove-agent.sh --key $KEY --yes"
 
 # ---- tell the platform which agent this tenant uses (TechDeva action)
