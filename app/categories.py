@@ -25,6 +25,7 @@ import json
 import re
 
 from fastapi import APIRouter, Body, Cookie, Header, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
 from .audit import record
 from .auth import SESSION_COOKIE
@@ -339,13 +340,15 @@ def make_categories_router():
         data = await request.body()
         if not data or len(data) > 6 * 1024 * 1024:
             raise HTTPException(400, "The photo must be under 6 MB.")
-        try:
+        def work():                 # AI calls block: run them off the event loop
             text = photo_to_text(data, mime)
+            with tenant_session(tid, role) as cur:
+                slugs = _slugs(cur)
+            return {"draft": compare(tid, read_text(text, slugs)), "source": text}
+        try:
+            return await run_in_threadpool(work)
         except RuntimeError as e:
             raise HTTPException(503, str(e))
-        with tenant_session(tid, role) as cur:
-            slugs = _slugs(cur)
-        return {"draft": compare(tid, read_text(text, slugs)), "source": text}
 
     @router.post("/business-profile/setup/apply")
     def setup_apply(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),

@@ -157,9 +157,27 @@ PHOTO_ASK = ("Copy every word of this menu or price list exactly as written, one
              "price after it, then any hours, rules or notes. Do not add anything that is not in the picture.")
 
 
-def _photo_gemini(ai, b64, mime):
-    r = requests.post("%s/v1beta/models/%s:generateContent" % (ai.base_url("gemini"), ai.model_name()),
-                      params={"key": ai._key()}, timeout=90,
+PHOTO_TIMEOUT = 30          # per model
+PHOTO_BUDGET = 50           # whole chain
+
+
+def _model_for(ai, p, m):
+    """The model to use, worked out without touching ai's shared 'active provider'
+    state (another request may be generating at the same moment)."""
+    import os
+    if m:
+        return m
+    per = os.environ.get("AI_MODEL_" + p.upper(), "").strip()
+    if per:
+        return per
+    if p == ai.configured_provider():
+        return os.environ.get("AI_MODEL") or ai.DEFAULT_MODELS.get(p, "")
+    return ai.DEFAULT_MODELS.get(p, "")
+
+
+def _photo_gemini(ai, key, model, b64, mime):
+    r = requests.post("%s/v1beta/models/%s:generateContent" % (ai.base_url("gemini"), model),
+                      params={"key": key}, timeout=PHOTO_TIMEOUT,
                       json={"contents": [{"parts": [{"inline_data": {"mime_type": mime, "data": b64}}, {"text": PHOTO_ASK}]}],
                             "generationConfig": {"maxOutputTokens": 4000}})
     if r.status_code >= 400:
@@ -168,11 +186,11 @@ def _photo_gemini(ai, b64, mime):
     return 200, "".join(p.get("text", "") for p in (c.get("content") or {}).get("parts", []))
 
 
-def _photo_openai(ai, b64, mime):
+def _photo_openai(ai, key, model, b64, mime):
     """OpenAI-compatible endpoints (how this server reaches Gemini today)."""
-    r = requests.post(ai.base_url("openai") + "/v1/chat/completions", timeout=90,
-                      headers={"Authorization": "Bearer " + ai._key()},
-                      json={"model": ai.model_name(), "max_tokens": 4000, "messages": [{"role": "user", "content": [
+    r = requests.post(ai.base_url("openai") + "/v1/chat/completions", timeout=PHOTO_TIMEOUT,
+                      headers={"Authorization": "Bearer " + key},
+                      json={"model": model, "max_tokens": 4000, "messages": [{"role": "user", "content": [
                           {"type": "text", "text": PHOTO_ASK},
                           {"type": "image_url", "image_url": {"url": "data:%s;base64,%s" % (mime, b64)}}]}]})
     if r.status_code >= 400:
@@ -186,21 +204,21 @@ def photo_to_text(data, mime):
     from . import ai
     b64 = base64.b64encode(data).decode()
     calls = {"gemini": _photo_gemini, "openai": _photo_openai}
-    codes = []
+    import os, time
+    codes, started = [], time.time()
     for p, m in ai.chain_entries():
-        if p not in calls:
+        key = os.environ.get(ai._KEY_ENV.get(p, ""), "").strip()
+        if p not in calls or not key:
             continue
-        ai._ACTIVE, ai._ACTIVE_MODEL = p, m
+        if time.time() - started > PHOTO_BUDGET:
+            codes.append(0)
+            break
         try:
-            if not ai._key():
-                continue
-            code, text = calls[p](ai, b64, mime)
+            code, text = calls[p](ai, key, _model_for(ai, p, m), b64, mime)
         except (requests.RequestException, ValueError, KeyError, IndexError, TypeError) as e:
             print("[setup] photo via %s:%s failed: %s" % (p, m, type(e).__name__), flush=True)
             codes.append(0)
             continue
-        finally:
-            ai._ACTIVE, ai._ACTIVE_MODEL = None, None
         if code == 200 and str(text).strip():
             return str(text)[:MAX_TEXT]
         print("[setup] photo via %s:%s answered %s" % (p, m, code), flush=True)
