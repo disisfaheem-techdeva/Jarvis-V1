@@ -148,6 +148,30 @@ function chatMessages(sid) {
 // in the agent template). Anywhere else the connect fails and the caller gets
 // that failure verbatim -- never a pretend "sent".
 const AGENT_BRIDGE_PORT = parseInt(process.env.PAIRCTL_AGENT_BRIDGE_PORT || '3000', 10);
+// Set only by the agent template (pairctl shares the agent's network there, so
+// 127.0.0.1:AGENT_BRIDGE_PORT really is that agent's bridge). Hand-built
+// pairctls (the clinic's) leave it unset and behave exactly as before.
+const GUARD_LIVE = process.env.PAIRCTL_GUARD_LIVE === '1';
+
+function agentBridgeHealth() {
+  return new Promise((resolve) => {
+    const req = http.get({ host: '127.0.0.1', port: AGENT_BRIDGE_PORT, path: '/health', timeout: 3000 }, (r) => {
+      let b = ''; r.on('data', c => { b += c; if (b.length > 20000) req.destroy(); });
+      r.on('end', () => { try { resolve(JSON.parse(b)); } catch (e) { resolve({ status: 'unknown' }); } });
+    });
+    req.on('timeout', () => { req.destroy(); resolve({ status: 'unreachable' }); });
+    req.on('error', () => resolve({ status: 'unreachable' }));
+  });
+}
+
+function moveOldLoginAside() {
+  try {
+    if (!fs.existsSync(path.join(SESSION_DIR, 'creds.json'))) return null;
+    const to = SESSION_DIR + '.old-' + new Date().toISOString().replace(/[:.]/g, '-');
+    fs.renameSync(SESSION_DIR, to);
+    return to;
+  } catch (e) { log('could not move the old login aside:', e.message); return null; }
+}
 
 function chatJid(sid) {
   const d = openDb();
@@ -242,6 +266,21 @@ const server = http.createServer(async (req, res) => {
   const url = (req.url || '').split('?')[0];
 
   if (req.method === 'POST' && url === '/pair/start') {
+    if (GUARD_LIVE && !child) {
+      // Template agents only (PAIRCTL_GUARD_LIVE=1). A second bridge on the same
+      // login while the agent's own bridge is connected makes WhatsApp drop the
+      // device ("conflict: replaced", then "device_removed": Networkometis,
+      // 4 Oct 2026). So: refuse while it is connected; and when it is not, an old
+      // login left on the volume would only log straight out again, so it is
+      // moved aside (renamed, never deleted) and the scan starts clean.
+      const h = await agentBridgeHealth();
+      if (h.status === 'connected') {
+        return send(res, 409, { agent: AGENT, error: 'already_connected',
+          message: 'This WhatsApp number is already connected and answering customers.' });
+      }
+      const moved = moveOldLoginAside();
+      if (moved) log('old login moved aside to', moved, '(agent bridge:', h.status || 'unreachable', ')');
+    }
     const r = startBridge();
     return send(res, 200, { agent: AGENT, ...r, bridge_port: BRIDGE_PORT });
   }

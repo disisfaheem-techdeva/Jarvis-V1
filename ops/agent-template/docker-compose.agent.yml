@@ -71,6 +71,7 @@ services:
       PAIRCTL_PORT: "3010"
       PAIRCTL_BRIDGE_PORT: "3011"
       PAIRCTL_AGENT_BRIDGE_PORT: "3000"
+      PAIRCTL_GUARD_LIVE: "1"           # refuse Connect while connected; clear a dead login before a new scan
       PAIRCTL_SESSION_DIR: /opt/data/whatsapp/session
       HOME: /tmp
     volumes:

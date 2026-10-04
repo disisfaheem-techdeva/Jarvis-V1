@@ -128,6 +128,11 @@ def _pairctl(url, path, method="GET"):
         with urllib.request.urlopen(req, timeout=PAIRCTL_TIMEOUT) as resp:
             return json.loads(resp.read().decode() or "{}")
     except urllib.error.HTTPError as e:
+        if e.code == 409:
+            # pairctl refuses a new pairing while the number is connected: a
+            # second login on the same number makes WhatsApp drop the device.
+            raise HTTPException(409, "This WhatsApp number is already connected and answering "
+                                     "customers. There is nothing to connect.")
         raise HTTPException(502, "The pairing service refused the request (%s)." % e.code)
     except Exception:
         # The agent may simply be down. Say so plainly rather than 500.
