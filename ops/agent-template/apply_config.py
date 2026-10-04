@@ -11,6 +11,8 @@ set, and each is read back afterwards; any mismatch exits non-zero.
       reasoning model in that chain once sent its private thinking to a
       customer. The key comes from GEMINI_API_KEY in the environment.
   T3  display.tool_progress: off (no "using tool X" lines to customers).
+      display.busy_input_mode: queue and busy_ack_enabled: false (no
+      "Interrupting current task" or "/busy" tip sent to a customer).
 """
 import sys
 import yaml
@@ -42,6 +44,8 @@ cfg.setdefault("agent", {})["disabled_toolsets"] = DISABLED
 cfg.setdefault("display", {})["tool_progress"] = "off"
 cfg["display"]["show_reasoning"] = False
 cfg["display"]["interim_assistant_messages"] = False
+cfg["display"]["busy_input_mode"] = "queue"
+cfg["display"]["busy_ack_enabled"] = False
 
 with open(PATH + ".tmp", "w", encoding="utf-8") as f:
     yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
@@ -61,6 +65,8 @@ if back["agent"].get("disabled_toolsets") != DISABLED:
     problems.append("agent.disabled_toolsets")
 if str(back["display"].get("tool_progress")) not in ("off", "False"):
     problems.append("display.tool_progress")
+if back["display"].get("busy_input_mode") != "queue" or back["display"].get("busy_ack_enabled") is not False:
+    problems.append("display.busy")
 if problems:
     sys.exit("apply_config: not applied: " + ", ".join(problems))
 print("apply_config: model=%s/%s fallbacks=%s disabled_toolsets=%d tool_progress=%s" % (

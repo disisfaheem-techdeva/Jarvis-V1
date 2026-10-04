@@ -18,6 +18,10 @@ services:
       HERMES_UID: '__UID__'
       API_SERVER_HOST: '0.0.0.0'
       API_SERVER_ENABLED: 'true'
+      # A customer's message while the agent is still answering waits its turn;
+      # no "Interrupting current task" / "/busy" notice is ever sent to them.
+      HERMES_GATEWAY_BUSY_INPUT_MODE: "queue"
+      HERMES_GATEWAY_BUSY_ACK_ENABLED: "false"
       # T2: Gemini only. Blank any other provider key the shared env may carry,
       # so no fallback can reach OpenRouter/OpenAI.
       OPENROUTER_API_KEY: ""

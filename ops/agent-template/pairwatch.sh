@@ -28,7 +28,10 @@ DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1
 now() { date -u +%FT%TZ; }
 # What a paired template agent needs to answer customers (each found missing
 # on the live server, 4 Oct 2026).
-REQUIRED="WHATSAPP_ENABLED=true WHATSAPP_MODE=bot WHATSAPP_ALLOWED_USERS=*"
+# Busy settings (5 Oct 2026): a customer's second message while the agent is still
+# answering used to interrupt it and send "Interrupting current task (iteration 2/60)"
+# plus a "/busy queue" tip to the customer. Queue it instead, and send no notice.
+REQUIRED="WHATSAPP_ENABLED=true WHATSAPP_MODE=bot WHATSAPP_ALLOWED_USERS=* HERMES_GATEWAY_BUSY_INPUT_MODE=queue HERMES_GATEWAY_BUSY_ACK_ENABLED=false"
 for c in $(docker ps --filter label=techdeva.pairwatch=true --format '{{.Names}}' | grep '^hermes-agent-'); do
   key=$(docker inspect -f '{{index .Config.Labels "techdeva.agent"}}' "$c")
   case "$key" in ""|*irfan*|*clinic*|*salon*|*workspace*) echo "$(now) skip $c: refusing key '$key'"; continue;; esac
