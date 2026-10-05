@@ -907,6 +907,8 @@ function need(key, path, force){
   api(path).then(function(r){
     LOADING[key] = false;
     S[key] = r.ok ? r.data : null;
+    S[key + '_status'] = r.ok ? 200 : r.status;      // so a page can say "not on your plan" instead of nothing
+    S[key + '_detail'] = r.ok ? null : (r.data && r.data.detail) || null;
     renderShell();
   });
   return false;
@@ -6345,7 +6347,14 @@ function apDraft(d, p){
 }
 function apPanels(){
   if (!need('adpilot', '/adpilot')) return panel('Ad autopilot', loading('Loading your ad settings...'));
-  var p = S.adpilot; if (!p) return '';
+  var p = S.adpilot;
+  if (!p) {
+    var st = S.adpilot_status;
+    if (st === 402) return panel('Ad autopilot', empty('Part of the Pro plan', 'The ad autopilot pauses costly ads and launches new ones within the daily budget you set. It comes with the Pro plan.') +
+      '<div style="padding:0 16px 14px"><a class="btn primary" href="#/billing">See plans</a></div>');
+    if (st === 403) return panel('Ad autopilot', empty('Owner only', S.adpilot_detail || 'The ad autopilot settings are for the business owner.'));
+    return panel('Ad autopilot', errState(S.adpilot_detail || 'Could not load the ad autopilot.'));
+  }
   var s = p.settings || {}, con = p.connected || {};
   var set = '<div style="padding:14px 16px">' +
     '<div class="sub" style="margin-bottom:10px">Your rules for the planner. It never spends more than you allow here.</div>' +
