@@ -62,7 +62,9 @@ def sources(cur, tid):
     sites += [x["website_url"] for x in cur.fetchall()]
     cur.execute("SELECT website_url FROM signups WHERE tenant_id = %s ORDER BY created_at DESC LIMIT 1", (tid,))
     sites += [x["website_url"] for x in cur.fetchall()]
-    sites = list(dict.fromkeys(u for u in (normalise(s) for s in sites) if u))[:2]
+    # only real addresses (a host with a dot): "http@cozzytaste" was stored as one
+    sites = list(dict.fromkeys(u for u in (normalise(s) for s in sites)
+                               if u and re.match(r"^https?://[a-z0-9.-]+\.[a-z]{2,}(?:[:/?#]|$)", u, re.I)))[:2]
     return pages, sites
 
 

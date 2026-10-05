@@ -94,12 +94,18 @@ def knowledge_block(f):
     if f.get("products") and services_word.lower() == "products":
         services_word = "Services"          # real products are listed in their own section
     kind = (cat or {}).get("name") or "service business"
-    if (cat or {}).get("slug") == "shop":
-        kind = "shop"
+    kind = {"restaurant": "restaurant or café", "clinic": "clinic", "salon": "salon, barber or spa",
+            "gym": "gym or fitness studio", "academy": "academy or training centre", "shop": "shop",
+            "other": "business"}.get((cat or {}).get("slug"), kind)
     if t.get("business_type") == "other" and t.get("business_type_other"):
         kind = t["business_type_other"]
+    kind = (kind or "business").strip()
+    if t.get("business_type") != "other":
+        kind = kind.lower()                     # "a restaurant, café or food"; the owner's own words keep their case
+    article = "an" if re.match(r"(?i)^(?:[aeiou]|it\b|hr\b|fm\b|mri\b|x-?ray)", kind) else "a"
     out = ["## About this business",
-           "%s is a %s." % (t["name"], kind.lower() if kind else "business"),
+           "The business's name is %s. If anything earlier in this file uses another name, use %s." % (t["name"], t["name"]),
+           "%s is %s %s." % (t["name"], article, kind),
            "If anything earlier in this file disagrees with this section, this section wins: "
            "it is the truth about this business."]
     out += ["", "## %s (the ONLY ones you may offer)" % services_word]
