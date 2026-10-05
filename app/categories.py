@@ -128,6 +128,9 @@ def knowledge_block(f):
     if menu:
         out += ["", "## When someone first writes, offer these choices",
                 " / ".join("%d. %s" % (i + 1, m) for i, m in enumerate(menu))]
+    out += ["", "## Greeting",
+            "Say \"Welcome to %s\" (or any greeting) only in your FIRST reply in a chat. In every later "
+            "reply, answer straight away: never start a reply with the welcome line again." % t["name"]]
     out += ["", "## Hard rule",
             "Offer, describe and price ONLY the %s listed above, at exactly the prices listed. "
             "If someone asks for anything that is not listed, say plainly that %s does not offer it, "
