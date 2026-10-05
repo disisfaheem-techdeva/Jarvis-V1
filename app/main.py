@@ -109,6 +109,9 @@ from .trialcap import make_trialcap_router
 app.include_router(make_trialcap_router())
 from .categories import make_categories_router
 app.include_router(make_categories_router())
+# Orders: products sold (bookings stay appointments); money through invoices/payments
+from .orders import make_orders_router
+app.include_router(make_orders_router())
 trial.install(app)
 
 # The two client-facing pages. The API image is built from ./app, so web/ is

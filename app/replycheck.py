@@ -30,6 +30,7 @@ import re
 import time
 
 from .agents.guards import unbacked_claims
+from .orders import order_from_chat, parse_summary
 from .db import tenant_session
 from .whatsapp import _pairctl_json
 
@@ -108,6 +109,7 @@ def check_tenant(tid):
     since = (r and r["last_message_at"]) or (_dt.datetime.now(_dt.timezone.utc) - FIRST_LOOK)
     newest = since
     replies = []                                    # (agent_key, session, at, text)
+    phones = {}                                     # session -> customer phone
     for c in conns:
         try:
             chats = _pairctl_json(c["pairctl_url"], "/chats").get("chats") or []
@@ -115,6 +117,7 @@ def check_tenant(tid):
             print("[replycheck] %s unreachable: %s" % (c["agent_key"], getattr(e, "detail", e)), flush=True)
             continue
         for ch in chats:
+            phones[ch.get("session_id")] = ch.get("phone") or ""
             last = _ts(ch.get("last_at"))
             if not last or last <= since:
                 continue
@@ -134,6 +137,16 @@ def check_tenant(tid):
     for k, sid, at, text in replies:
         if ERROR.search(text):
             findings.append((k, sid, at, text, "bot_error", "The agent sent an error message to a customer."))
+        if parse_summary(text):
+            # an ORDER SUMMARY becomes a New order, priced from the business's own
+            # list; a total that differs is noted on the order, not guessed at here
+            try:
+                n = order_from_chat(tid, agent_key=k, session_id=sid, phone=phones.get(sid), at=at, text=text)
+                if n:
+                    print("[replycheck] %s new WhatsApp order %s" % (tid, n), flush=True)
+            except Exception as e:
+                print("[replycheck] %s order not created: %s" % (tid, str(e)[:200]), flush=True)
+            continue
         bad = unbacked_claims(text, config)
         if bad:
             findings.append((k, sid, at, text, "unbacked_claim", "; ".join(bad)[:500]))

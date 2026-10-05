@@ -77,7 +77,9 @@ Fields:
             navigate (open a page of the dashboard),
             book_appointment, reschedule_appointment, cancel_appointment,
             complete_appointment (mark done), add_customer, add_lead,
-            add_expense, schedule_post (a post to go out at a later time)
+            add_expense, schedule_post (a post to go out at a later time),
+            update_order (confirm / out for delivery / delivered),
+            record_order_payment, cancel_order
   "args": if kind is action, an object:
             navigate: section (a section id from the list below)
             book_appointment: name, phone, date (YYYY-MM-DD), time (HH:MM
@@ -94,6 +96,16 @@ Fields:
                 3 to 5 hashtags),
                 platforms, at (ISO time with +05:00, e.g.
                 2026-10-02T18:00:00+05:00), at_words (e.g. "Friday 6 pm")
+            update_order: order_id, status ("confirmed", "out_for_delivery" or
+                "delivered")
+            record_order_payment: order_id, amount (number, PKR), method
+                (cash, bank, online, card, other)
+            cancel_order: order_id, reason
+          order_id must be the "id" of one of orders.recent_and_open in BUSINESS
+          FACTS (match the customer's name, phone or order number). Questions
+          about orders, sales or what is owed are kind "question", answered
+          from orders in BUSINESS FACTS: "sales" means delivered AND fully paid
+          orders only; money not yet paid is "still owed", never a sale.
           appointment_id must be the "id" of one of upcoming_appointments in
           BUSINESS FACTS. Turn "today", "tomorrow", "Friday" into a date with
           next_7_days. Never make up a phone number, id, price or time (an
@@ -168,7 +180,8 @@ calendar, dailyentry (daily entry), revenue, invoices, expenses, dayclose (day
 closing), pnl (profit and loss), services, products, packages, catalogue,
 inventory (stock), integrations, reports, settings, console (Jarvis), posts
 (social posts), billing (plan and billing), team (staff logins and PINs),
-whatsapp, inbox, needshuman (chats needing a human), marketing, attendance,
+whatsapp, inbox, needshuman (chats needing a human), orders (products sold:
+new, confirmed, delivered, payments), marketing, attendance,
 hr, hermes (AI agents), ai, bizagent (Business & agent: business type, what the
 WhatsApp agent knows, and "set up my business": the owner pastes a menu, price
 list, hours or rules there and Jarvis fills the dashboard).
@@ -373,6 +386,24 @@ def _facts_fresh(tid, role):
             f["leads"] = dict(cur.fetchone())
             cur.execute("SELECT count(*) AS total FROM customers")
             f["customers"] = cur.fetchone()["total"]
+            # Orders (products sold). A sale counts only when delivered AND fully
+            # paid; with ids so "mark Ali's order delivered" can name one.
+            from .orders import summary as _osum, list_orders as _olist
+            os_ = _osum(cur, role)
+            f["orders"] = {"counts": os_["counts"], "sources_this_month": os_["sources"],
+                           "rule": "a sale counts only when an order is delivered AND fully paid"}
+            if os_.get("money"):
+                f["orders"]["money_pkr"] = os_["money"]
+            cur.execute("SELECT id::text FROM orders WHERE status IN ('new','confirmed','out_for_delivery') "
+                        "OR created_at >= now() - interval '30 days' OR (status = 'delivered' AND recognised_at IS NULL) "
+                        "ORDER BY created_at DESC LIMIT 40")
+            keep = {r["id"] for r in cur.fetchall()}
+            f["orders"]["recent_and_open"] = [
+                {"id": o["id"], "number": o["number"], "customer": o["customer_name"], "phone": o["customer_phone"],
+                 "items": o["items"], "total": o["total"], "status": o["status_label"],
+                 "payment": o["payment_status"], "paid": o["paid"], "still_owed": o["balance"],
+                 "source": o["source"], "placed": str(o["created_at"])[:16]}
+                for o in _olist(cur, None, None, 200) if o["id"] in keep][:40]
             if role in ("owner", "techdeva_admin"):
                 cur.execute("""
                     SELECT coalesce(sum(amount), 0)::float AS collected_this_month
@@ -531,6 +562,12 @@ def _done_text(action, args):
         return "Done, %s%s is recorded." % (amt, " for " + what if what else "")
     if action == "schedule_post":
         return "Done, the post will go out %s." % (args.get("at_words") or "at the time you picked")
+    if action == "update_order":
+        return "Done, the order is updated."
+    if action == "record_order_payment":
+        return "Done, the payment is recorded."
+    if action == "cancel_order":
+        return "Done, that order is cancelled."
     if action == "navigate":
         return "Here you go."
     return "Done."

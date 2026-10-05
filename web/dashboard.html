@@ -7224,8 +7224,9 @@ function bpApplyWords(){
     if (it._base === undefined) it._base = it.name;
     if (it.id === 'appointments') it.name = w.bookings || it._base;
     else if (it.id === 'customers') it.name = w.customers || it._base;
-    else if (it.id === 'catalogue') it.name = w.services ? (w.services + ' & Products') : it._base;
-    else if (it.id === 'services') it.name = w.services || it._base;
+    // a shop's "services" word is Products, which already has its own page
+    else if (it.id === 'catalogue') it.name = w.services && w.services !== 'Products' ? (w.services + ' & Products') : it._base;
+    else if (it.id === 'services') it.name = w.services && w.services !== 'Products' ? w.services : it._base;
   }); });
 }
 (function(){
@@ -7558,6 +7559,246 @@ function jsWire(){
     });
   };
 }
+
+/* ======================================================== Part 31: Orders (commerce layer)
+   (5 Oct 2026) Booking = something with a time (Appointments). Order = something
+   sold (Orders). New -> Confirmed -> Out for delivery -> Delivered, or Cancelled.
+   Payment is separate. A sale counts only when an order is delivered AND fully
+   paid; stock goes out then. The WhatsApp agent can only create New orders. */
+var ORD = { list: undefined, key: null, sum: undefined, sumAt: 0, detail: undefined, did: null, form: null, cat: null, msg: null, busy: false, payAmt: '', payMethod: 'cash', q: '' };
+var ORD_LABEL = { 'new': 'New', confirmed: 'Confirmed', out_for_delivery: 'Out for delivery', delivered: 'Delivered', cancelled: 'Cancelled' };
+var ORD_SRC = { whatsapp_ai: 'WhatsApp AI', website: 'Website', facebook: 'Facebook', instagram: 'Instagram', manual: 'Manual', dashboard: 'Dashboard', api: 'API' };
+var ORD_PAY = { unpaid: 'Unpaid', partial: 'Part paid', paid: 'Paid' };
+function hq(name){ var m = (location.hash || '').match(new RegExp('[?&]' + name + '=([^&]*)')); return m ? decodeURIComponent(m[1]) : ''; }
+function ordPill(st){
+  var c = st === 'new' ? 'attn' : st === 'cancelled' ? 'soon' : 'count';
+  return '<span class="pill ' + c + '">' + esc(ORD_LABEL[st] || st) + '</span>';
+}
+function ordPayPill(p){ return '<span class="pill ' + (p === 'paid' ? 'count' : 'attn') + '">' + esc(ORD_PAY[p] || p) + '</span>'; }
+function ordSummary(force){
+  if (!S.me || !S.me.tenant_id) return;
+  if (!force && ORD.sumAt && Date.now() - ORD.sumAt < 60000) return;
+  ORD.sumAt = Date.now();
+  api('/orders/summary').then(function(r){ if (r.ok) { ORD.sum = r.data; renderShell(); } });
+}
+(function(){
+  NAV.forEach(function(g){
+    if (g.label === 'CRM' && !g.items.some(function(it){ return it.id === 'orders'; })) {
+      var i = 0; g.items.forEach(function(it, k){ if (it.id === 'calendar' || it.id === 'appointments') i = k + 1; });
+      g.items.splice(i, 0, { id: 'orders', icon: '🛒', name: 'Orders', sub: false });
+    }
+  });
+  var nav = navHTML;
+  navHTML = function(active){
+    var h = nav.apply(this, arguments);
+    var n = ORD.sum && ORD.sum.counts && ORD.sum.counts['new'];
+    if (n) h = h.replace(/(href="#\/orders"[^>]*>[\s\S]*?<span class="nt">[^<]*<\/span>)/, '$1<span class="pill attn">' + esc(n) + '</span>');
+    return h;
+  };
+  var shell = renderShell;
+  renderShell = function(){ ordSummary(false); return shell.apply(this, arguments); };
+})();
+function ordTile(label, value, note, href, isMoney){
+  var has = value !== null && value !== undefined;
+  return '<a class="card" href="' + href + '" style="text-decoration:none;color:inherit;display:block">' +
+    '<div class="card-label">' + esc(label) + '</div><div class="card-value">' + (has ? (isMoney ? money(value) : esc(value)) : '—') + '</div>' +
+    (note ? '<div class="card-note">' + esc(note) + '</div>' : '') + '</a>';
+}
+function ordTiles(){
+  var s = ORD.sum; if (!s) return loading('Loading orders...');
+  var c = s.counts, m = s.money;
+  var h = '<div class="card-label" style="margin:4px 0 6px">Orders</div><div class="grid">' +
+    ordTile('New orders', c['new'], 'waiting for you to confirm', '#/orders?status=new') +
+    ordTile('Confirmed', c.confirmed, '', '#/orders?status=confirmed') +
+    ordTile('Out for delivery', c.out_for_delivery, '', '#/orders?status=out_for_delivery') +
+    ordTile('Delivered', c.delivered_month, 'this month', '#/orders?status=delivered') + '</div>';
+  if (m) h += '<div class="card-label" style="margin:14px 0 6px">Sales</div><div class="grid">' +
+    ordTile("Today's sales", m.sales_today, 'delivered and fully paid', '#/orders?status=delivered', true) +
+    ordTile('This month', m.sales_month, 'delivered and fully paid', '#/orders?status=delivered', true) +
+    ordTile('Outstanding', m.outstanding, m.outstanding_orders + ' delivered order' + (m.outstanding_orders === 1 ? '' : 's') + ' not fully paid', '#/orders?status=unpaid', true) +
+    ordTile('Collected today', m.collected_today, 'money received for orders', '#/orders', true) + '</div>';
+  h += '<div class="card-label" style="margin:14px 0 6px">Operations</div><div class="grid">' +
+    ordTile('Waiting for delivery', c.waiting_delivery, 'confirmed or on the way', '#/orders?status=waiting') +
+    ordTile('Low stock', c.low_stock, 'products', '#/inventory') +
+    ordTile('Cancelled', c.cancelled_month, 'this month', '#/orders?status=cancelled') + '</div>';
+  if ((s.sources || []).length) h += '<div class="card-note" style="margin-top:10px">Where this month\'s orders came from: ' + s.sources.map(function(x){
+    return esc(ORD_SRC[x.source] || x.source) + ' ' + x.share + '% (' + x.orders + ' order' + (x.orders === 1 ? '' : 's') + ', ' + x.sold + ' sold)';
+  }).join(' · ') + '</div>';
+  return h;
+}
+VIEWS.orders = function(){
+  var id = hq('id');
+  if (id) return ordDetailView(id);
+  var st = hq('status') || 'all', key = st + '|' + ORD.q;
+  if (ORD.key !== key) { ORD.key = key; ORD.list = undefined; }
+  if (ORD.list === undefined) {
+    ORD.list = null;
+    api('/orders?limit=200' + (st !== 'all' ? '&status=' + encodeURIComponent(st) : '') + (ORD.q ? '&q=' + encodeURIComponent(ORD.q) : '')).then(function(r){
+      ORD.list = r.ok ? r.data.orders : { error: (r.data && r.data.detail) || 'Could not read your orders.' };
+      if (r.ok) ORD.sum = r.data.summary;
+      renderShell();
+    });
+  }
+  var out = '<h1>Orders</h1><p class="sub">Products sold: from WhatsApp, the dashboard or the phone. A sale counts only when an order is delivered <b>and</b> fully paid; stock goes out then. Bookings with a time stay in Appointments.</p>';
+  out += panel('Overview', '<div style="padding:4px 0">' + ordTiles() + '</div>', '<button class="btn primary" id="ord_new">+ New order</button>');
+  if (ORD.form) out += panel('New order', ordFormHTML());
+  if (ORD.msg) out += '<div class="card-note" style="margin:6px 0;color:' + (ORD.msg.bad ? 'var(--danger)' : 'var(--growth)') + '">' + esc(ORD.msg.text) + '</div>';
+  var tabs = [['all', 'All'], ['new', 'New'], ['confirmed', 'Confirmed'], ['out_for_delivery', 'Out for delivery'], ['waiting', 'Waiting for delivery'],
+              ['delivered', 'Delivered'], ['unpaid', 'Delivered, not fully paid'], ['cancelled', 'Cancelled']];
+  var bar = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' + tabs.map(function(t){
+    return '<a class="btn' + (st === t[0] ? ' primary' : '') + '" href="#/orders' + (t[0] === 'all' ? '' : '?status=' + t[0]) + '">' + esc(t[1]) + '</a>';
+  }).join('') + '<input class="fld" id="ord_q" placeholder="Search name, phone or ORD-0001" value="' + esc(ORD.q) + '" style="flex:1;min-width:180px"></div>';
+  var L = ORD.list, body;
+  if (L === null || L === undefined) body = loading('Loading orders...');
+  else if (L.error) body = errState(L.error);
+  else if (!L.length) body = empty('No orders here', st === 'all' ? 'Orders from your WhatsApp agent and the ones you add appear here.' : 'Nothing in this list right now.');
+  else body = '<div class="tbl-wrap"><table><thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Source</th><th>When</th></tr></thead><tbody>' +
+    L.map(function(o){
+      return '<tr data-ord="' + esc(o.id) + '" style="cursor:pointer"><td><b>' + esc(o.number) + '</b></td><td>' + esc(o.customer_name || '—') +
+        (o.customer_phone ? '<div class="card-note">' + esc(o.customer_phone) + '</div>' : '') + '</td><td>' + esc(o.items || '') + '</td><td>' + money(o.total) +
+        (o.payment_status === 'partial' ? '<div class="card-note">' + money(o.balance) + ' owed</div>' : '') + '</td><td>' + ordPayPill(o.payment_status) + '</td><td>' + ordPill(o.status) +
+        '</td><td>' + esc(ORD_SRC[o.source] || o.source) + '</td><td>' + when(o.created_at) + '</td></tr>';
+    }).join('') + '</tbody></table></div>';
+  out += panel('Orders', bar + body);
+  setTimeout(ordWire, 0);
+  return out;
+};
+function ordFormHTML(){
+  var f = ORD.form, cat = ORD.cat;
+  if (!cat) { api('/orders/catalogue').then(function(r){ ORD.cat = r.ok ? r.data.items : []; renderShell(); }); return loading('Loading your products...'); }
+  if (!cat.length) return empty('Nothing to sell yet', 'Add products (Products page) or services first, then take orders here.');
+  var opts = function(sel){ return '<option value="">Choose an item</option>' + cat.map(function(c){
+    return '<option value="' + esc(c.id) + '"' + (sel === c.id ? ' selected' : '') + '>' + esc(c.name) + (c.price !== null ? ' — ' + money(c.price) : ' (no price)') + '</option>'; }).join(''); };
+  var rows = f.items.map(function(it, i){
+    return '<div style="display:flex;gap:6px;align-items:center"><select class="fld" data-ofi="' + i + '" style="flex:1">' + opts(it.id) + '</select>' +
+      '<input class="fld" type="number" min="1" step="1" data-ofq="' + i + '" value="' + esc(it.q) + '" style="width:80px">' +
+      (f.items.length > 1 ? '<button class="btn" type="button" data-ofx="' + i + '">✕</button>' : '') + '</div>';
+  }).join('');
+  var sub = 0; f.items.forEach(function(it){ var c = cat.filter(function(x){ return x.id === it.id; })[0]; if (c && c.price !== null) sub += c.price * (Number(it.q) || 0); });
+  var total = Math.max(0, sub + (Number(f.fee) || 0));
+  return '<div style="display:grid;gap:8px">' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px">' +
+    '<label class="card-note">Customer name<input class="fld" id="of_name" value="' + esc(f.name) + '" maxlength="120"></label>' +
+    '<label class="card-note">Phone<input class="fld" id="of_phone" value="' + esc(f.phone) + '" maxlength="40"></label>' +
+    '<label class="card-note">Delivery or pickup<select class="fld" id="of_ful"><option value="delivery"' + (f.ful === 'delivery' ? ' selected' : '') + '>Delivery</option><option value="pickup"' + (f.ful === 'pickup' ? ' selected' : '') + '>Pickup</option></select></label>' +
+    (f.ful === 'delivery' ? '<label class="card-note">Delivery charge (Rs)<input class="fld" id="of_fee" type="number" min="0" value="' + esc(f.fee) + '"></label>' : '') + '</div>' +
+    (f.ful === 'delivery' ? '<label class="card-note">Delivery address<input class="fld" id="of_addr" value="' + esc(f.addr) + '" maxlength="500"></label>' : '') +
+    '<div class="card-note">Items</div>' + rows + '<div><button class="btn" type="button" id="of_add">+ Another item</button></div>' +
+    '<label class="card-note">Notes (optional)<input class="fld" id="of_notes" value="' + esc(f.notes) + '" maxlength="500"></label>' +
+    '<div><b>Total: ' + money(total) + '</b> <span class="card-note">(prices from your list)</span></div>' +
+    '<div style="display:flex;gap:8px"><button class="btn primary" id="of_save"' + (ORD.busy ? ' disabled' : '') + '>Save order</button><button class="btn" id="of_cancel">Close</button></div></div>';
+}
+function ordDetailView(id){
+  if (ORD.did !== id) { ORD.did = id; ORD.detail = undefined; ORD.payAmt = ''; }
+  if (ORD.detail === undefined) {
+    ORD.detail = null;
+    api('/orders/' + encodeURIComponent(id)).then(function(r){ ORD.detail = r.ok ? r.data : { error: (r.data && r.data.detail) || 'Could not read this order.' }; renderShell(); });
+  }
+  var out = '<p><a href="#/orders">← All orders</a></p>';
+  var o = ORD.detail;
+  if (o === null) return out + panel('Order', loading('Loading the order...'));
+  if (o.error) return out + panel('Order', errState(o.error));
+  out += '<h1>' + esc(o.number) + ' ' + ordPill(o.status) + ' ' + ordPayPill(o.payment_status) + '</h1>';
+  out += '<p class="sub">' + (o.recognised ? '✅ Counted as a sale (delivered and fully paid).'
+    : o.status === 'cancelled' ? 'Cancelled: not counted.'
+    : o.status === 'delivered' ? '⚠️ Delivered, but ' + money(o.balance) + ' is still owed: not counted as a sale until fully paid.'
+    : 'Not counted as a sale yet: it counts once it is delivered and fully paid.') + '</p>';
+  if (ORD.msg) out += '<div class="card-note" style="margin:6px 0;color:' + (ORD.msg.bad ? 'var(--danger)' : 'var(--growth)') + '">' + esc(ORD.msg.text) + '</div>';
+  var acts = '';
+  var NAMES = { confirmed: 'Confirm order', out_for_delivery: 'Out for delivery', delivered: o.fulfilment === 'pickup' ? 'Collected by customer' : 'Mark delivered', cancelled: 'Cancel order' };
+  (o.next || []).forEach(function(n){
+    if (n === 'cancelled' && !isOwner()) return;
+    acts += '<button class="btn' + (n === 'cancelled' ? '' : ' primary') + '" data-omove="' + n + '">' + esc(NAMES[n] || n) + '</button>';
+  });
+  var who = '<div style="display:grid;gap:4px"><div><b>' + esc(o.customer_name || 'No name') + '</b>' + (o.customer_phone ? ' · ' + esc(o.customer_phone) : '') + '</div>' +
+    '<div>' + (o.fulfilment === 'pickup' ? 'Pickup from the shop' : 'Delivery to: ' + esc(o.address || '(no address yet: ask the customer)')) + '</div>' +
+    '<div class="card-note">From ' + esc(ORD_SRC[o.source] || o.source) + (o.created_by_type === 'agent' ? ' (taken by your WhatsApp agent)' : '') + ' · ' + when(o.created_at) +
+    (o.chat_session_id ? ' · <a href="#/inbox">Open the WhatsApp chat</a>' : '') + '</div>' +
+    (o.notes ? '<div style="white-space:pre-wrap;padding:8px;border:1px solid var(--warn);border-radius:8px;margin-top:6px">' + esc(o.notes) + '</div>' : '') +
+    (o.cancel_reason ? '<div class="card-note">Cancelled: ' + esc(o.cancel_reason) + '</div>' : '') + '</div>';
+  out += panel('Customer', who, acts ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + acts + '</div>' : '');
+  var items = '<div class="tbl-wrap"><table><thead><tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead><tbody>' +
+    o.items.map(function(i){ return '<tr><td>' + esc(i.description) + '</td><td>' + esc(Number(i.quantity)) + '</td><td>' + money(i.unit_price) + '</td><td>' + money(i.line_total) + '</td></tr>'; }).join('') +
+    (o.delivery_fee ? '<tr><td colspan="3">Delivery charge</td><td>' + money(o.delivery_fee) + '</td></tr>' : '') +
+    (o.discount ? '<tr><td colspan="3">Discount</td><td>- ' + money(o.discount) + '</td></tr>' : '') +
+    '<tr><td colspan="3"><b>Total</b></td><td><b>' + money(o.total) + '</b></td></tr></tbody></table></div>';
+  out += panel('Items', items);
+  var payBox = '<div style="display:grid;gap:6px"><div>Paid: <b>' + money(o.paid) + '</b> · Still owed: <b>' + money(o.balance) + '</b></div>';
+  if (o.status !== 'cancelled' && o.balance > 0) payBox += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
+    '<input class="fld" id="op_amt" type="number" min="1" placeholder="Amount" value="' + esc(ORD.payAmt || o.balance) + '" style="width:140px">' +
+    '<select class="fld" id="op_m">' + ['cash', 'bank', 'online', 'card', 'other'].map(function(m){ return '<option value="' + m + '"' + (ORD.payMethod === m ? ' selected' : '') + '>' + ({ cash: 'Cash', bank: 'Bank transfer', online: 'JazzCash / EasyPaisa / online', card: 'Card', other: 'Other' })[m] + '</option>'; }).join('') + '</select>' +
+    '<button class="btn primary" id="op_pay"' + (ORD.busy ? ' disabled' : '') + '>Record payment</button></div>';
+  out += panel('Payment', payBox + '</div>');
+  out += panel('Timeline', '<div style="display:grid;gap:6px">' + (o.timeline || []).map(function(e){
+    var lab = { created: 'Order placed', confirmed: 'Confirmed', out_for_delivery: 'Out for delivery', delivered: 'Delivered', cancelled: 'Cancelled', payment: 'Payment', recognised: 'Counted as a sale', check: 'Check' }[e.event] || e.event;
+    return '<div><span class="card-note">' + when(e.at) + '</span> · <b>' + esc(lab) + '</b>' + (e.actor_type === 'agent' ? ' <span class="card-note">(WhatsApp agent)</span>' : '') + (e.detail ? ' — ' + esc(e.detail) : '') + '</div>';
+  }).join('') + '</div>');
+  setTimeout(ordWire, 0);
+  return out;
+}
+function ordAfter(r, okText){
+  ORD.busy = false;
+  if (!r.ok) { ORD.msg = { text: (r.data && r.data.detail) || 'That did not work.', bad: true }; renderShell(); return false; }
+  ORD.msg = okText ? { text: okText } : null; ORD.list = undefined; ORD.sumAt = 0; ordSummary(true);
+  return true;
+}
+function ordWire(){
+  var g = function(id){ return document.getElementById(id); };
+  if (g('ord_new')) g('ord_new').onclick = function(){ ORD.form = ORD.form || { name: '', phone: '', ful: 'delivery', addr: '', fee: '', notes: '', items: [{ id: '', q: 1 }] }; ORD.msg = null; renderShell(); };
+  if (g('ord_q')) g('ord_q').onchange = function(){ ORD.q = g('ord_q').value.trim(); ORD.key = null; renderShell(); };
+  document.querySelectorAll('[data-ord]').forEach(function(tr){ tr.onclick = function(){ ORD.msg = null; location.hash = '#/orders?id=' + tr.getAttribute('data-ord'); }; });
+  var f = ORD.form;
+  if (f && g('of_name')) {
+    [['of_name', 'name'], ['of_phone', 'phone'], ['of_addr', 'addr'], ['of_fee', 'fee'], ['of_notes', 'notes']].forEach(function(p){
+      if (g(p[0])) g(p[0]).oninput = function(){ f[p[1]] = g(p[0]).value; if (p[1] === 'fee') renderShell(); };
+    });
+    g('of_ful').onchange = function(){ f.ful = g('of_ful').value; renderShell(); };
+    document.querySelectorAll('[data-ofi]').forEach(function(s){ s.onchange = function(){ f.items[+s.getAttribute('data-ofi')].id = s.value; renderShell(); }; });
+    document.querySelectorAll('[data-ofq]').forEach(function(s){ s.onchange = function(){ f.items[+s.getAttribute('data-ofq')].q = s.value; renderShell(); }; });
+    document.querySelectorAll('[data-ofx]').forEach(function(b){ b.onclick = function(){ f.items.splice(+b.getAttribute('data-ofx'), 1); renderShell(); }; });
+    g('of_add').onclick = function(){ f.items.push({ id: '', q: 1 }); renderShell(); };
+    g('of_cancel').onclick = function(){ ORD.form = null; renderShell(); };
+    g('of_save').onclick = function(){
+      var items = f.items.filter(function(it){ return it.id; }).map(function(it){ return { product_id: it.id, quantity: Number(it.q) || 1 }; });
+      if (!items.length) { ORD.msg = { text: 'Choose at least one item.', bad: true }; renderShell(); return; }
+      ORD.busy = true; renderShell();
+      api('/orders', { method: 'POST', body: { customer_name: f.name, customer_phone: f.phone, fulfilment: f.ful, address: f.addr,
+        delivery_fee: Number(f.fee) || 0, notes: f.notes, items: items, source: 'dashboard' } }).then(function(r){
+        if (ordAfter(r, 'Order ' + (r.data && r.data.number) + ' saved as New.')) { ORD.form = null; location.hash = '#/orders?id=' + r.data.id; }
+      });
+    };
+  }
+  document.querySelectorAll('[data-omove]').forEach(function(b){ b.onclick = function(){
+    var to = b.getAttribute('data-omove'), body = { status: to };
+    if (to === 'cancelled') { var why = prompt('Why is this order cancelled?'); if (!why) return; body.reason = why; }
+    ORD.busy = true; b.disabled = true;
+    api('/orders/' + ORD.did + '/status', { method: 'POST', body: body }).then(function(r){
+      if (ordAfter(r, null)) { ORD.detail = r.data; ORD.msg = { text: 'Order ' + r.data.number + ' is now ' + (ORD_LABEL[r.data.status] || r.data.status).toLowerCase() + '.' +
+        (r.data.status === 'delivered' && !r.data.recognised ? ' Record the payment to count it as a sale.' : '') + (r.data.recognised ? ' Counted as a sale.' : '') }; renderShell(); }
+    });
+  }; });
+  if (g('op_amt')) g('op_amt').oninput = function(){ ORD.payAmt = g('op_amt').value; };
+  if (g('op_m')) g('op_m').onchange = function(){ ORD.payMethod = g('op_m').value; };
+  if (g('op_pay')) g('op_pay').onclick = function(){
+    ORD.busy = true; renderShell();
+    api('/orders/' + ORD.did + '/pay', { method: 'POST', body: { amount: Number(g('op_amt').value), method: g('op_m').value } }).then(function(r){
+      if (ordAfter(r, null)) { ORD.detail = r.data; ORD.payAmt = ''; ORD.msg = { text: r.data.recognised ? 'Payment recorded. Fully paid and delivered: counted as a sale.' :
+        r.data.payment_status === 'paid' ? 'Payment recorded. Fully paid: it counts as a sale once delivered.' : 'Payment recorded. ' + money(r.data.balance) + ' still owed.' }; renderShell(); }
+    });
+  };
+}
+(function(){
+  var base = VIEWS.overview;
+  VIEWS.overview = function(){
+    var out = base.apply(this, arguments);
+    var s = ORD.sum, t = BP.data && BP.data.business_type;
+    if (!s || !(s.counts.month > 0 || s.counts['new'] > 0 || s.counts.waiting_delivery > 0 || t === 'shop' || t === 'restaurant')) return out;
+    var p = panel('🛒 Orders and sales', '<div style="padding:4px 0">' + ordTiles() + '</div>', '<a class="btn" href="#/orders">Open orders</a>');
+    var i = out.indexOf('</p>');
+    return i < 0 ? p + out : out.slice(0, i + 4) + p + out.slice(i + 4);
+  };
+})();
+window.addEventListener('hashchange', function(){ if (typeof ORD !== 'undefined') { ORD.list = undefined; ORD.detail = undefined; ORD.did = null; ORD.msg = (location.hash.indexOf('?id=') > 0) ? ORD.msg : null; } });
 
 window.addEventListener('hashchange', function(){
   // Every section reads fresh data when it is opened, so something added in

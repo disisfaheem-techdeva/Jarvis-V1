@@ -270,7 +270,8 @@ def photo_to_text(data, mime):
 def compare(tid, draft):
     """Mark each service: new, already listed, listed with a different price, or removed earlier."""
     with tenant_session(tid, "techdeva_admin") as cur:
-        cur.execute("SELECT name, price, active FROM services WHERE tenant_id = %s", (tid,))
+        cur.execute("SELECT name, price, active FROM services WHERE tenant_id = %s "
+                    "UNION ALL SELECT name, price, active FROM products WHERE tenant_id = %s", (tid, tid))
         have = {_norm(r["name"]): r for r in cur.fetchall()}
     for s in draft["services"]:
         h = have.get(_norm(s["name"]))

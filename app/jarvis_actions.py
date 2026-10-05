@@ -33,12 +33,13 @@ SECTIONS = ("overview", "leads", "customers", "appointments", "calendar", "daily
             "revenue", "invoices", "expenses", "dayclose", "pnl", "services", "products",
             "packages", "catalogue", "inventory", "integrations", "reports", "settings",
             "console", "posts", "billing", "team", "whatsapp", "inbox", "needshuman",
-            "marketing", "attendance", "hr", "hermes", "ai", "bizagent")
+            "marketing", "attendance", "hr", "hermes", "ai", "bizagent", "orders")
 
 # What needs a "yes" first.
-CONFIRM = {"add_expense", "cancel_appointment", "schedule_post"}
+CONFIRM = {"add_expense", "cancel_appointment", "schedule_post", "record_order_payment", "cancel_order"}
 ACTIONS = {"navigate", "book_appointment", "reschedule_appointment", "cancel_appointment",
-           "complete_appointment", "add_customer", "add_lead", "add_expense", "schedule_post"}
+           "complete_appointment", "add_customer", "add_lead", "add_expense", "schedule_post",
+           "update_order", "record_order_payment", "cancel_order"}
 _HHMM = re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -236,6 +237,38 @@ def run(tid, role, uid, action, args, founder=False):
             body = {"status": "cancelled" if action == "cancel_appointment" else "completed"}
         _call(tid, role, uid, "PATCH", "/appointments/" + aid, body)
         return {"refresh": ["appointments"]}, None
+
+    if action in ("update_order", "record_order_payment", "cancel_order"):
+        oid = _need(args, "order_id", "order")
+        if not re.match(r"^[0-9a-f-]{36}$", oid):
+            raise ActionError("I could not find that order")
+        if action == "update_order":
+            st = str(args.get("status") or "").strip().lower().replace(" ", "_")
+            if st not in ("confirmed", "out_for_delivery", "delivered"):
+                raise ActionError("I can mark an order confirmed, out for delivery or delivered")
+            o = _call(tid, role, uid, "POST", "/orders/%s/status" % oid, {"status": st})
+        elif action == "cancel_order":
+            o = _call(tid, role, uid, "POST", "/orders/%s/status" % oid,
+                      {"status": "cancelled", "reason": str(args.get("reason") or "").strip() or "Cancelled by the owner"})
+        else:
+            o = _call(tid, role, uid, "POST", "/orders/%s/pay" % oid,
+                      {"amount": _money(args.get("amount")), "method": str(args.get("method") or "cash").lower()})
+        who = o.get("customer_name") or o.get("number")
+        if o.get("status") == "cancelled":
+            note = "%s's order %s is cancelled and nothing is counted" % (who, o["number"])
+        elif o.get("recognised"):
+            note = "%s's order %s is delivered and fully paid, so Rs {:,.0f} is counted as a sale".format(o["total"]) % (who, o["number"])
+        elif o.get("status") == "delivered" and o.get("payment_status") == "partial":
+            note = ("%s's order %s is delivered; Rs {:,.0f} is received and Rs {:,.0f} is still owed, so it is "
+                    "not counted as a sale until fully paid").format(o["paid"], o["balance"]) % (who, o["number"])
+        elif o.get("status") == "delivered":
+            note = ("%s's order %s is delivered, but payment is still pending, so Rs {:,.0f} is not counted "
+                    "as collected sales yet").format(o["balance"]) % (who, o["number"])
+        elif o.get("payment_status") == "paid":
+            note = "%s's order %s is fully paid; it counts as a sale once delivered" % (who, o["number"])
+        else:
+            note = "%s's order %s is now %s" % (who, o["number"], o.get("status_label", "").lower())
+        return {"refresh": ["orders"]}, note
 
     if action == "add_customer":
         body = {"name": _need(args, "name", "customer's name"), "source": "jarvis"}

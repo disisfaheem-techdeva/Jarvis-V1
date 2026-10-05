@@ -34,6 +34,7 @@ from .whatsapp import _identity, _rows, _pairctl_json
 
 PROTECTED = re.compile(r"irfan|clinic|salon|workspace")
 KINDS = ("faq", "policy", "not_offered", "info")
+ORDER_TYPES = ("shop", "restaurant")   # businesses that take orders even before products are listed
 DAYS_LOWER = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
 DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 CAT_COLS = ("slug, name, blurb, icon, sort_order, labels, dashboard_widgets, pipeline_stages, "
@@ -67,10 +68,14 @@ def facts(cur, tid):
     cur.execute("""SELECT day_of_week, opens, closes, is_closed FROM business_hours
                     WHERE tenant_id = %s AND location_id IS NULL ORDER BY day_of_week""", (tid,))
     hours = [dict(r) for r in cur.fetchall()]
+    cur.execute("""SELECT name, description, category, price, currency FROM products
+                    WHERE tenant_id = %s AND active ORDER BY name LIMIT 300""", (tid,))
+    products = [dict(r) for r in cur.fetchall()]
     cur.execute("""SELECT id::text AS id, kind, title, body FROM business_knowledge
                     WHERE tenant_id = %s AND active ORDER BY kind, created_at LIMIT 300""", (tid,))
     knowledge = [dict(r) for r in cur.fetchall()]
-    return {"business": t, "category": cat, "services": services, "hours": hours, "knowledge": knowledge}
+    return {"business": t, "category": cat, "services": services, "products": products, "hours": hours,
+            "knowledge": knowledge}
 
 
 def _price(s):
@@ -86,7 +91,11 @@ def knowledge_block(f):
     t, cat = f["business"], f["category"]
     words = (cat or {}).get("labels") or {}
     services_word = words.get("services", "Services")
+    if f.get("products") and services_word.lower() == "products":
+        services_word = "Services"          # real products are listed in their own section
     kind = (cat or {}).get("name") or "service business"
+    if (cat or {}).get("slug") == "shop":
+        kind = "shop"
     if t.get("business_type") == "other" and t.get("business_type_other"):
         kind = t["business_type_other"]
     out = ["## About this business",
@@ -102,9 +111,18 @@ def knowledge_block(f):
             if s.get("description"):
                 line += ". " + str(s["description"]).strip()[:200]
             out.append(line)
-    else:
+    elif not f.get("products"):
         out.append("- None listed yet. Do not name or price any service: take the customer's question, "
                    "their name and number, and say the team will reply shortly.")
+    else:
+        out.append("- None. This business sells the products below.")
+    if f.get("products"):
+        out += ["", "## Products for sale (the ONLY ones you may sell, price each)"]
+        for p in f["products"]:
+            line = "- %s: %s" % (p["name"], _price(p))
+            if p.get("description"):
+                line += ". " + str(p["description"]).strip()[:200]
+            out.append(line)
     if f["hours"]:
         out += ["", "## Opening hours"]
         for h in f["hours"]:
@@ -128,6 +146,19 @@ def knowledge_block(f):
     if menu:
         out += ["", "## When someone first writes, offer these choices",
                 " / ".join("%d. %s" % (i + 1, m) for i, m in enumerate(menu))]
+    if f.get("products") or (t.get("business_type") in ORDER_TYPES):
+        out += ["", "## Taking an order",
+                "When a customer wants to buy, ask for: which item(s) from the lists above and how many, their "
+                "name, and delivery (with the full address) or pickup. For an order never ask for an appointment "
+                "day or time. Once the customer has said yes to the items and you have the name and the address "
+                "(or pickup), send ONE message in exactly this form, with item names written exactly as listed:",
+                "ORDER SUMMARY",
+                "- 2 x <item name as listed>",
+                "Name: <customer name>",
+                "Delivery: <full address>   (or: Pickup)",
+                "Total: Rs <sum of the listed prices>",
+                "Then say the team will confirm the order and the delivery time. Never say the order is confirmed, "
+                "dispatched or paid: only the team does that."]
     out += ["", "## Greeting",
             "Say \"Welcome to %s\" (or any greeting) only in your FIRST reply in a chat. In every later "
             "reply, answer straight away: never start a reply with the welcome line again." % t["name"]]
@@ -135,7 +166,8 @@ def knowledge_block(f):
             "Offer, describe and price ONLY the %s listed above, at exactly the prices listed. "
             "If someone asks for anything that is not listed, say plainly that %s does not offer it, "
             "and suggest what it does offer. Never invent a service, price, time, discount or offer. "
-            "If you are not sure, say the team will confirm." % (services_word.lower(), t["name"])]
+            "If you are not sure, say the team will confirm." % ((services_word.lower() + " and products") if f.get("products") and f["services"] else
+               ("products" if f.get("products") else services_word.lower()), t["name"])]
     return "\n".join(out)
 
 
@@ -216,7 +248,7 @@ def make_categories_router():
         t = f["business"]
         return {"business_type": t["business_type"], "business_type_other": t["business_type_other"],
                 "needs_type": not t["business_type"], "category": f["category"],
-                "services_count": len(f["services"]), "hours_set": bool(f["hours"]),
+                "services_count": len(f["services"]) + len(f.get("products") or []), "hours_set": bool(f["hours"]),
                 "knowledge": f["knowledge"], "open_flags": flags,
                 "sync": dict(s) if s else {"status": "never", "synced_at": None},
                 "suggestion": sug,
@@ -438,7 +470,11 @@ def make_categories_router():
                                 (slug, other, tid))
                 done["type"] = slug
         with tenant_session(tid, role) as cur:
-            cur.execute("SELECT lower(btrim(name)) AS n FROM services WHERE tenant_id = %s", (tid,))   # incl. removed: name is unique
+            # a shop's items are products (with stock); everyone else's are services
+            cur.execute("SELECT business_type FROM tenants WHERE id = %s", (tid,))
+            table = "products" if (cur.fetchone() or {}).get("business_type") == "shop" else "services"
+            cur.execute("SELECT lower(btrim(name)) AS n FROM services WHERE tenant_id = %s "
+                        "UNION SELECT lower(btrim(name)) FROM products WHERE tenant_id = %s", (tid, tid))   # incl. removed: names are unique
             have = {r["n"] for r in cur.fetchall()}
             for i, s in enumerate((d.get("services") or [])[:300]):
                 name = re.sub(r"\s+", " ", str((s or {}).get("name") or "")).strip()[:120]
@@ -452,16 +488,21 @@ def make_categories_router():
                     price = None
                 if name.lower() in have:
                     if name.lower() in change and price is not None:
-                        cur.execute("""UPDATE services SET price = %s, updated_at = now()
-                                        WHERE tenant_id = %s AND lower(name) = %s AND active""", (price, tid, name.lower()))
-                        done["prices_changed"] += cur.rowcount
+                        for tb in ("services", "products"):
+                            cur.execute("UPDATE " + tb + """ SET price = %s, updated_at = now()
+                                            WHERE tenant_id = %s AND lower(btrim(name)) = %s AND active""", (price, tid, name.lower()))
+                            done["prices_changed"] += cur.rowcount
                     else:
                         done["skipped"] += 1
                     continue
                 dur = s.get("duration_minutes") if isinstance(s.get("duration_minutes"), int) and 0 < s["duration_minutes"] < 1440 else None
-                cur.execute("""INSERT INTO services (tenant_id, name, price, category, duration_minutes, sort_order)
-                               VALUES (%s, %s, %s, %s, %s, %s)""",
-                            (tid, name, price, (str(s.get("category") or "").strip()[:60] or None), dur, 1000 + i))
+                if table == "products":
+                    cur.execute("""INSERT INTO products (tenant_id, name, price, category) VALUES (%s, %s, %s, %s)""",
+                                (tid, name, price, (str(s.get("category") or "").strip()[:60] or None)))
+                else:
+                    cur.execute("""INSERT INTO services (tenant_id, name, price, category, duration_minutes, sort_order)
+                                   VALUES (%s, %s, %s, %s, %s, %s)""",
+                                (tid, name, price, (str(s.get("category") or "").strip()[:60] or None), dur, 1000 + i))
                 have.add(name.lower()); done["services_added"] += 1
             for h in (d.get("hours") or [])[:7]:
                 day = str((h or {}).get("day") or "").lower()
