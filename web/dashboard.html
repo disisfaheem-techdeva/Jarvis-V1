@@ -7265,6 +7265,13 @@ function bpGate(){
       if (pick === 'other') g('bp_other').focus();
     }; });
   };
+  var sugType = BP.data && BP.data.suggestion && BP.data.suggestion.business_type;
+  var drawBase = draw;
+  draw = function(cats){
+    drawBase(cats);
+    var t = sugType && document.querySelector('[data-bpc="' + sugType + '"]');
+    if (t) { t.click(); g('bp_msg').textContent = 'Jarvis picked this from your Facebook page or website. Change it if it is wrong.'; }
+  };
   if (BP.cats) draw(BP.cats);
   else api('/categories').then(function(r){
     if (!r.ok) { g('bp_cats').innerHTML = errState((r.data && r.data.detail) || 'Could not load the business types.'); return; }
@@ -7383,7 +7390,27 @@ window.addEventListener('hashchange', function(){ if (typeof BP !== 'undefined')
    Jarvis reads it into a preview; nothing is saved until the owner ticks what
    is right and presses Save. Existing services are never removed; a changed
    price is only applied when its box is ticked. Owner only. */
-var JS = { text: '', draft: null, source: '', busy: false, msg: null, open: false };
+var JS = { text: '', draft: null, source: '', busy: false, msg: null, open: false, sid: null, from: null, sugLoaded: null };
+/* Jarvis read the business's own Facebook page / website (page_reader.py):
+   the newest unsaved read opens here as the preview, waiting for Save. */
+function jsLoadSuggestion(){
+  var sg = BP.data && BP.data.suggestion;
+  if (!sg || JS.draft || JS.busy || JS.sugLoaded === sg.id) return;
+  JS.sugLoaded = sg.id;
+  api('/business-profile/setup/suggestion').then(function(r){
+    var x = r.ok && r.data.suggestion;
+    if (!x || x.status !== 'ready' || JS.draft) return;
+    jsReadDone({ ok: true, data: { draft: x.draft, source: x.source } });
+    JS.sid = x.id; JS.from = (x.sources || []).filter(function(s){ return s.ok; });
+    JS.open = true; renderShell();
+  });
+}
+function jsFromText(){
+  if (!JS.from || !JS.from.length) return '';
+  return '<div style="padding:10px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px"><b>Jarvis read ' +
+    JS.from.map(function(s){ return (s.kind === 'facebook' ? 'your Facebook page ' : 'your website ') + esc(s.ref); }).join(' and ') +
+    '</b><div class="card-note">This is what it found there. Nothing is saved until you press Save. Prices are often not on a page: paste or photograph your price list below to add them.</div></div>';
+}
 var JS_DAY = { sunday: 'Sun', monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat' };
 function jsReadDone(r){
   JS.busy = false;
@@ -7408,6 +7435,7 @@ function jsPanel(){
     '<button class="btn primary" id="js_read"' + (JS.busy ? ' disabled' : '') + '>' + (JS.busy ? 'Jarvis is reading...' : 'Read it') + '</button>' +
     '<label class="btn" style="cursor:pointer">📷 Or a photo of the menu<input type="file" id="js_photo" accept="image/jpeg,image/png,image/webp" style="display:none"></label></div>';
   if (JS.msg) h += '<div class="card-note" style="margin-top:8px;color:' + (JS.msg.bad ? 'var(--danger)' : 'var(--growth)') + '">' + esc(JS.msg.text) + '</div>';
+  h += '<div style="margin-top:8px"><button class="btn" id="js_page"' + (JS.busy ? ' disabled' : '') + '>🌐 Read my Facebook page and website again</button></div>';
   var d = JS.draft;
   if (d) {
     var sv = d.services || [], hr = d.hours || [], kn = d.knowledge || [];
@@ -7435,10 +7463,10 @@ function jsPanel(){
       return '<label style="display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--line)"><input type="checkbox" data-jsk="' + i + '"' + (k._on ? ' checked' : '') + '>' +
         '<span><span class="card-note">' + esc(BP_KIND[k.kind] || k.kind) + '</span><div>' + esc(k.title) + '</div>' + (k.body ? '<div class="card-note">' + esc(k.body) + '</div>' : '') + '</span></label>';
     }).join('') + '</div>';
-    if ((d.dropped || []).length) h += '<div class="card-note">Left out because they are not in your text: ' + d.dropped.map(esc).join(', ') + '</div>';
-    if (JS.source && JS.source !== JS.text) h += '<details><summary class="card-note">Text read from your photo</summary><pre style="white-space:pre-wrap;font-size:12.5px">' + esc(JS.source) + '</pre></details>';
+    if ((d.dropped || []).length) h += '<div class="card-note">Left out because they are not ' + (JS.from ? 'on your page' : 'in your text') + ': ' + d.dropped.map(esc).join(', ') + '</div>';
+    if (JS.source && JS.source !== JS.text) h += '<details><summary class="card-note">' + (JS.from ? 'Text Jarvis read on your page' : 'Text read from your photo') + '</summary><pre style="white-space:pre-wrap;font-size:12.5px">' + esc(JS.source) + '</pre></details>';
     h += '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="js_save"' + (JS.busy ? ' disabled' : '') + '>Save all ticked</button>' +
-      '<button class="btn" id="js_cancel">Start again</button></div></div>';
+      '<button class="btn" id="js_cancel">' + (JS.sid ? 'Not now' : 'Start again') + '</button></div></div>';
   }
   return h;
 }
@@ -7447,14 +7475,31 @@ function jsPanel(){
   VIEWS.bizagent = function(){
     var out = base.apply(this, arguments);
     if (!isOwner() || !BP.data || BP.data.error) return out;
+    jsLoadSuggestion();
     var open = JS.open || JS.draft || (BP.data.services_count === 0);
-    var p = panel('🤖 Set up my business with Jarvis', open ? jsPanel() :
+    var p = panel('🤖 Set up my business with Jarvis', open ? jsFromText() + jsPanel() :
       (JS.msg ? '<div class="card-note" style="margin-bottom:6px;color:' + (JS.msg.bad ? 'var(--danger)' : 'var(--growth)') + '">' + esc(JS.msg.text) + '</div>' : '') +
       '<div class="card-note">Paste your menu or price list, hours and rules, and Jarvis fills everything in for you.</div>',
       open ? '' : '<button class="btn" id="js_open">Open</button>');
     var i = out.indexOf('</p>');
     setTimeout(jsWire, 0);
     return i < 0 ? out + p : out.slice(0, i + 4) + p + out.slice(i + 4);
+  };
+})();
+(function(){
+  var base = VIEWS.overview;
+  VIEWS.overview = function(){
+    var out = base.apply(this, arguments);
+    var sg = isOwner() && BP.data && BP.data.suggestion;
+    if (!sg) return out;
+    var what = [sg.business_type ? 'your business type' : '', sg.services ? sg.services + ' item' + (sg.services === 1 ? '' : 's') : '',
+                sg.hours ? 'opening hours' : '', sg.knowledge ? sg.knowledge + ' fact' + (sg.knowledge === 1 ? '' : 's') : ''].filter(Boolean).join(', ');
+    var from = (sg.sources || []).map(function(s){ return s.kind === 'facebook' ? 'Facebook page' : 'website'; }).join(' and ');
+    var bn = '<div class="panel" style="padding:14px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;border:1px solid var(--accent,#6C8CFF)">' +
+      '<div><b>🤖 Jarvis read your ' + esc(from || 'page') + '</b><div class="card-note">It found ' + esc(what || 'details') + ' to set up your dashboard and WhatsApp agent. Check it and press Save.</div></div>' +
+      '<a class="btn primary" href="#/bizagent">Review</a></div>';
+    var i = out.indexOf('</p>');
+    return i < 0 ? bn + out : out.slice(0, i + 4) + bn + out.slice(i + 4);
   };
 })();
 function jsWire(){
@@ -7476,13 +7521,30 @@ function jsWire(){
   var tick = function(attr, list){ document.querySelectorAll('[' + attr + ']').forEach(function(b){ b.onchange = function(){ list[+b.getAttribute(attr)]._on = b.checked; }; }); };
   if (JS.draft) { tick('data-jss', JS.draft.services || []); tick('data-jsh', JS.draft.hours || []); tick('data-jsk', JS.draft.knowledge || []); }
   if (g('js_type')) g('js_type').onchange = function(){ JS.draft.business_type = g('js_type').value || null; };
-  if (g('js_cancel')) g('js_cancel').onclick = function(){ JS.draft = null; JS.msg = null; renderShell(); };
+  if (g('js_cancel')) g('js_cancel').onclick = function(){
+    if (JS.sid) api('/business-profile/setup/suggestion/' + JS.sid + '/dismiss', { method: 'POST' }).then(function(){ BP.data = undefined; bpLoad(true); });
+    JS.draft = null; JS.msg = null; JS.sid = null; JS.from = null; renderShell();
+  };
+  if (g('js_page')) g('js_page').onclick = function(){
+    JS.busy = true; JS.msg = { text: 'Jarvis is reading your Facebook page and website...' }; renderShell();
+    api('/business-profile/setup/from-page', { method: 'POST' }).then(function(r){
+      JS.busy = false;
+      var st = r.ok && r.data.status;
+      JS.msg = !r.ok ? { text: (r.data && r.data.detail) || 'Jarvis could not read your page.', bad: true }
+        : st === 'ready' ? null
+        : st === 'nothing_found' ? { text: 'Jarvis read your page but found no services, hours or facts there. Paste your price list instead.', bad: true }
+        : { text: 'Jarvis could not open your Facebook page or website right now. Try again later, or paste the text.', bad: true };
+      if (st === 'ready') { JS.draft = null; JS.sid = null; JS.sugLoaded = null; }
+      BP.data = undefined; bpLoad(true);
+    });
+  };
   if (g('js_save')) g('js_save').onclick = function(){
     var d = JS.draft, on = function(x){ return x._on; };
     var sv = (d.services || []).filter(on);
     var body = { draft: { business_type: d.business_type, business_type_other: d.business_type_other,
         services: sv, hours: (d.hours || []).filter(on), knowledge: (d.knowledge || []).filter(on) },
-      change_prices: sv.filter(function(s){ return s.status === 'price_changed'; }).map(function(s){ return s.name; }) };
+      change_prices: sv.filter(function(s){ return s.status === 'price_changed'; }).map(function(s){ return s.name; }),
+      suggestion_id: JS.sid };
     JS.busy = true; renderShell();
     api('/business-profile/setup/apply', { method: 'POST', body: body }).then(function(r){
       JS.busy = false;
@@ -7490,7 +7552,7 @@ function jsWire(){
       var x = r.data;
       JS.msg = { text: 'Saved: ' + x.services_added + ' added, ' + x.prices_changed + ' price' + (x.prices_changed === 1 ? '' : 's') + ' changed, ' +
         x.hours_set + ' day' + (x.hours_set === 1 ? '' : 's') + ' of hours, ' + x.knowledge_added + ' fact' + (x.knowledge_added === 1 ? '' : 's') + '. ' + bpSyncText(x.sync) };
-      JS.draft = null; JS.text = ''; JS.open = false;
+      JS.draft = null; JS.text = ''; JS.open = false; JS.sid = null; JS.from = null;
       BP.data = undefined; bpLoad(true);
       S.services = undefined;
     });

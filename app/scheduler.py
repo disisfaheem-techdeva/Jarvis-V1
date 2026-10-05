@@ -77,6 +77,14 @@ class Scheduler:
         except Exception as e:
             print(f"[scheduler] reply checker skipped: {e}", flush=True)
 
+        # Jarvis reads each business's own Facebook page and website into a setup
+        # preview the owner confirms; again only when those sources change.
+        try:
+            from .page_reader import run_due as pagereader_due
+            emitted += pagereader_due()
+        except Exception as e:
+            print(f"[scheduler] page reader skipped: {e}", flush=True)
+
         # Trial data retention: warn 3 days before, delete unpaid trials 15 days
         # after the trial ended (hourly inside).
         try:

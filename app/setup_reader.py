@@ -53,6 +53,35 @@ def _source_lines(name, text):
     return out
 
 
+CLOSED = re.compile(r"\b(?:closed|close|off|holiday|band|chutti|chhutti)\b", re.I)
+_DAY3 = {"sunday": "sun", "monday": "mon", "tuesday": "tue", "wednesday": "wed",
+         "thursday": "thu", "friday": "fri", "saturday": "sat"}
+
+
+def _time_in(t, low):
+    """Is the time HH:MM written in the text, as 13:00, 1:00 pm, 1pm or 1 pm?"""
+    h, m = (int(x) for x in t.split(":"))
+    h12, ap = (h % 12 or 12), ("am" if h < 12 else "pm")
+    forms = ["%d:%02d" % (h, m), "%02d:%02d" % (h, m), "%d:%02d ?%s" % (h12, m, ap), "%d\\.%02d ?%s" % (h12, m, ap)]
+    if m == 0:
+        forms += ["%d ?%s" % (h12, ap)]
+    if h == 0 and m == 0:
+        forms += ["midnight"]
+    if h == 12 and m == 0:
+        forms += ["noon"]
+    return any(re.search(r"(?<![\d:])" + f + r"(?![\d])", low) for f in forms)
+
+
+def _hours_backed(h, text):
+    """Opening hours must come from the text too: the times as written, or for a
+    closed day, the day named on a line that says closed / off / band."""
+    low = (text or "").lower()
+    if h["closed"]:
+        d3 = _DAY3[h["day"]]
+        return any(re.search(r"\b" + d3, ln) and CLOSED.search(ln) for ln in low.splitlines())
+    return _time_in(h["opens"], low) and _time_in(h["closes"], low)
+
+
 def _plain_lines(text):
     """'Chicken Biryani .... Rs 450' lines, no AI needed."""
     out = []
@@ -105,7 +134,13 @@ def _clean(draft, text, slugs):
         o, c = str(h.get("opens") or ""), str(h.get("closes") or "")
         if _HHMM.match(o) and _HHMM.match(c):
             hours.append({"day": day, "closed": False, "opens": o.zfill(5), "closes": c.zfill(5)})
-    by_day = {h["day"]: h for h in hours}
+    kept = []
+    for h in hours:
+        if _hours_backed(h, text):
+            kept.append(h)
+        else:
+            dropped.append("hours for %s" % h["day"].capitalize())
+    by_day = {h["day"]: h for h in kept}
     knowledge = []
     for k in (draft.get("knowledge") or [])[:60]:
         kind = str((k or {}).get("kind") or "")

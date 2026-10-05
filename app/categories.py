@@ -199,12 +199,24 @@ def make_categories_router():
             s = cur.fetchone()
             cur.execute("SELECT count(*) AS n FROM agent_reply_flags WHERE tenant_id = %s AND status = 'open'", (tid,))
             flags = cur.fetchone()["n"]
+            sug = None
+            if role in ("owner", "techdeva_admin"):
+                cur.execute("""SELECT id::text, draft, sources FROM setup_suggestions
+                                WHERE tenant_id = %s AND status = 'ready' ORDER BY created_at DESC LIMIT 1""", (tid,))
+                r = cur.fetchone()
+                if r:
+                    d = r["draft"] or {}
+                    sug = {"id": r["id"], "business_type": d.get("business_type"),
+                           "services": len(d.get("services") or []), "hours": len(d.get("hours") or []),
+                           "knowledge": len(d.get("knowledge") or []),
+                           "sources": [x for x in (r["sources"] or []) if x.get("ok")]}
         t = f["business"]
         return {"business_type": t["business_type"], "business_type_other": t["business_type_other"],
                 "needs_type": not t["business_type"], "category": f["category"],
                 "services_count": len(f["services"]), "hours_set": bool(f["hours"]),
                 "knowledge": f["knowledge"], "open_flags": flags,
                 "sync": dict(s) if s else {"status": "never", "synced_at": None},
+                "suggestion": sug,
                 "agent_text": knowledge_block(f) if role in ("owner", "techdeva_admin") else None}
 
     @router.put("/business-profile/type")
@@ -350,6 +362,57 @@ def make_categories_router():
         except RuntimeError as e:
             raise HTTPException(503, str(e))
 
+    # ---- what Jarvis read on the business's own Facebook page and website
+    def _suggestion(cur, tid, sid=None):
+        cur.execute("""SELECT id::text, draft, sources, source_text, status, created_at FROM setup_suggestions
+                        WHERE tenant_id = %s AND (%s::uuid IS NULL OR id = %s::uuid)
+                        ORDER BY created_at DESC LIMIT 1""", (tid, sid, sid))
+        return cur.fetchone()
+
+    @router.get("/business-profile/setup/suggestion")
+    def get_suggestion(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                       authorization: str | None = Header(None),
+                       td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """The latest read of the business's own page and website (owner only)."""
+        from .setup_reader import compare
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        _owner(role)
+        with tenant_session(tid, role) as cur:
+            r = _suggestion(cur, tid)
+        if not r:
+            return {"suggestion": None}
+        d = r["draft"] or {}
+        if r["status"] == "ready":
+            d = compare(tid, {**{"services": [], "hours": [], "knowledge": [], "dropped": []}, **d})
+        return {"suggestion": {"id": r["id"], "status": r["status"], "draft": d, "sources": r["sources"],
+                               "source": r["source_text"], "read_at": r["created_at"].isoformat()}}
+
+    @router.post("/business-profile/setup/from-page")
+    async def read_page_now(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                            authorization: str | None = Header(None),
+                            td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Read the business's Facebook page and website again now."""
+        from .page_reader import read_business
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        _owner(role)
+        st = await run_in_threadpool(read_business, tid, True)
+        if st == "no_sources":
+            raise HTTPException(409, "Connect your Facebook page (Integrations) or add your website first.")
+        return {"status": st}
+
+    @router.post("/business-profile/setup/suggestion/{sid}/dismiss")
+    def dismiss_suggestion(sid: str, x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                           authorization: str | None = Header(None),
+                           td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        _owner(role)
+        with tenant_session(tid, role) as cur:
+            cur.execute("""UPDATE setup_suggestions SET status = 'dismissed', decided_at = now()
+                            WHERE tenant_id = %s AND id = %s::uuid AND status = 'ready' RETURNING id""", (tid, sid))
+            if not cur.fetchone():
+                raise HTTPException(404, "Nothing to dismiss.")
+        return {"ok": True}
+
     @router.post("/business-profile/setup/apply")
     def setup_apply(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
                     authorization: str | None = Header(None),
@@ -421,6 +484,11 @@ def make_categories_router():
                                VALUES (%s, %s, %s, %s, %s)""",
                             (tid, kind, title, str(k.get("body") or "").strip()[:2000], uid if uid and len(str(uid)) == 36 else None))
                 titles.add(title.lower()); done["knowledge_added"] += 1
+            sid = str(body.get("suggestion_id") or "")
+            if re.match(r"^[0-9a-f-]{36}$", sid):
+                cur.execute("""UPDATE setup_suggestions SET status = 'saved', decided_at = now()
+                                WHERE tenant_id = %s AND id = %s::uuid AND status = 'ready'""", (tid, sid))
+                done["from_page"] = bool(cur.rowcount)
             record(cur, action="business.setup_with_jarvis", resource="services", resource_id=tid, actor=str(uid),
                    actor_type="human", status="ok", detail=done)
         done["sync"] = sync_knowledge(tid)
