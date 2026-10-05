@@ -33,7 +33,7 @@ SECTIONS = ("overview", "leads", "customers", "appointments", "calendar", "daily
             "revenue", "invoices", "expenses", "dayclose", "pnl", "services", "products",
             "packages", "catalogue", "inventory", "integrations", "reports", "settings",
             "console", "posts", "billing", "team", "whatsapp", "inbox", "needshuman",
-            "marketing", "attendance", "hr", "hermes", "ai", "bizagent", "orders")
+            "marketing", "attendance", "hr", "hermes", "ai", "bizagent", "orders", "calls")
 
 # What needs a "yes" first.
 CONFIRM = {"add_expense", "cancel_appointment", "schedule_post", "record_order_payment", "cancel_order"}

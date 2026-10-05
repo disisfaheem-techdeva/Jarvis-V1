@@ -112,6 +112,9 @@ app.include_router(make_categories_router())
 # Orders: products sold (bookings stay appointments); money through invoices/payments
 from .orders import make_orders_router
 app.include_router(make_orders_router())
+# Voice: the AI phone agent's call log and number settings (calls answered by app/voice_bridge.py)
+from .voice import make_voice_router
+app.include_router(make_voice_router())
 trial.install(app)
 
 # The two client-facing pages. The API image is built from ./app, so web/ is

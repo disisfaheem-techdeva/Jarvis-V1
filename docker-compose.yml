@@ -109,6 +109,26 @@ services:
       - mediadata:/srv/media
     depends_on: [db, redis]
 
+  # The AI phone agent's bridge (app/voice_bridge.py): Asterisk (ops/voice,
+  # host network) hands it each call's audio. OFF unless started with
+  # `docker compose --profile voice up -d voice`; ports on localhost only.
+  voice:
+    profiles: ["voice"]
+    restart: unless-stopped
+    build: ./app
+    command: ["python","-m","app.voice_bridge"]
+    environment:
+      DATABASE_URL: postgresql://techdeva_app@db:5432/techdeva
+      PGPASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      VOICE_MODEL: ${VOICE_MODEL:-}
+      VOICE_MAX_CALLS: ${VOICE_MAX_CALLS:-3}
+    # /etc/techdeva/voice (root-only, outside the repo): bridge.token, shared
+    # with Asterisk. Only read when this service is started.
+    volumes: ["/etc/techdeva/voice:/run/voice:ro"]
+    ports: ["127.0.0.1:9092:9092", "127.0.0.1:9093:9093"]
+    depends_on: [db]
+
   worker:
     restart: unless-stopped
     build: ./app

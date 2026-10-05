@@ -181,7 +181,8 @@ closing), pnl (profit and loss), services, products, packages, catalogue,
 inventory (stock), integrations, reports, settings, console (Jarvis), posts
 (social posts), billing (plan and billing), team (staff logins and PINs),
 whatsapp, inbox, needshuman (chats needing a human), orders (products sold:
-new, confirmed, delivered, payments), marketing, attendance,
+new, confirmed, delivered, payments), calls (phone calls answered by the AI
+phone assistant), marketing, attendance,
 hr, hermes (AI agents), ai, bizagent (Business & agent: business type, what the
 WhatsApp agent knows, and "set up my business": the owner pastes a menu, price
 list, hours or rules there and Jarvis fills the dashboard).
@@ -394,6 +395,14 @@ def _facts_fresh(tid, role):
                            "rule": "a sale counts only when an order is delivered AND fully paid"}
             if os_.get("money"):
                 f["orders"]["money_pkr"] = os_["money"]
+            cur.execute("""SELECT count(*) FILTER (WHERE started_at >= date_trunc('day', now())) AS today,
+                                  count(*) FILTER (WHERE started_at >= date_trunc('month', now())) AS this_month,
+                                  count(*) FILTER (WHERE NOT reviewed AND outcome IN ('interested','callback')) AS to_follow_up
+                             FROM calls""")
+            f["phone_calls"] = dict(cur.fetchone())
+            cur.execute("""SELECT caller_name, from_number, outcome, summary, follow_up, started_at::text AS at
+                             FROM calls WHERE status = 'completed' ORDER BY started_at DESC LIMIT 10""")
+            f["phone_calls"]["recent"] = [dict(r) for r in cur.fetchall()]
             cur.execute("SELECT id::text FROM orders WHERE status IN ('new','confirmed','out_for_delivery') "
                         "OR created_at >= now() - interval '30 days' OR (status = 'delivered' AND recognised_at IS NULL) "
                         "ORDER BY created_at DESC LIMIT 40")

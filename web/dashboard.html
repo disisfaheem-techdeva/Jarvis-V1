@@ -7800,6 +7800,126 @@ function ordWire(){
 })();
 window.addEventListener('hashchange', function(){ if (typeof ORD !== 'undefined') { ORD.list = undefined; ORD.detail = undefined; ORD.did = null; ORD.msg = (location.hash.indexOf('?id=') > 0) ? ORD.msg : null; } });
 
+/* ======================================================== Part 32: Calls (AI phone agent)
+   (5 Oct 2026) Calls to the business's own number are answered by the AI phone
+   agent (app/voice_bridge.py). Here: the call log with transcripts and
+   outcomes, interested callers to follow up, and the owner's settings for each
+   number (on/off, assistant name, greeting, minute limits). */
+var CL = { data: undefined, detail: undefined, did: null, msg: null, edit: {} };
+var CL_OUT = { interested: 'Interested', booked: 'Wants to book', ordered: 'Wants to order', callback: 'Call back', not_interested: 'Not interested',
+               wrong_number: 'Wrong number', question_answered: 'Question answered', unknown: 'Not logged' };
+function clDur(s){ s = Number(s) || 0; return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2); }
+function clPill(o){ return '<span class="pill ' + ((o === 'interested' || o === 'callback' || o === 'booked' || o === 'ordered') ? 'attn' : 'count') + '">' + esc(CL_OUT[o] || o) + '</span>'; }
+(function(){
+  NAV.forEach(function(g){
+    if (g.label === 'CRM' && !g.items.some(function(it){ return it.id === 'calls'; })) {
+      var i = g.items.length; g.items.forEach(function(it, k){ if (it.id === 'orders') i = k + 1; });
+      g.items.splice(i, 0, { id: 'calls', icon: '📞', name: 'Calls', sub: false });
+    }
+  });
+})();
+VIEWS.calls = function(){
+  var id = hq('id');
+  if (id) return clDetail(id);
+  if (CL.data === undefined) {
+    CL.data = null;
+    api('/calls?limit=200').then(function(r){ CL.data = r.ok ? r.data : { error: (r.data && r.data.detail) || 'Could not read your calls.' }; renderShell(); });
+  }
+  var out = '<h1>Calls</h1><p class="sub">Calls to your business number are answered by your AI phone assistant. It says it is an AI assistant, answers from your own services and prices, and never confirms a booking or order: your team does.</p>';
+  var d = CL.data;
+  if (d === null) return out + panel('Calls', loading('Loading calls...'));
+  if (d.error) return out + panel('Calls', errState(d.error));
+  var s = d.summary;
+  out += '<div class="grid" style="margin-bottom:12px">' + metric('Calls today', s.today, clDur(s.seconds_today) + ' minutes') + metric('This month', s.month) +
+    metric('Interested this month', s.month_interested, 'interested, call back, booking or order') + metric('To follow up', s.to_follow_up, 'interested callers not reviewed yet') + '</div>';
+  if (CL.msg) out += '<div class="card-note" style="margin:6px 0;color:' + (CL.msg.bad ? 'var(--danger)' : 'var(--growth)') + '">' + esc(CL.msg.text) + '</div>';
+  var nums = d.numbers || [];
+  out += panel('Your phone number' + (nums.length > 1 ? 's' : ''), !nums.length ? empty('No phone number connected yet', 'TechDeva connects your business number to the AI assistant. Ask your TechDeva contact to set it up.')
+    : nums.map(function(n){
+        var e = CL.edit[n.id], own = isOwner();
+        var head = '<div style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><b>+' + esc(n.did) + '</b>' + (n.label ? ' · ' + esc(n.label) : '') +
+          '<div class="card-note">' + (n.enabled ? '✅ ' + esc(n.assistant_name) + ' answers calls to this number' : '⏸ Switched off: callers hear a busy tone') + ' · up to ' + esc(n.max_call_minutes) + ' min a call, ' + esc(n.max_minutes_per_day) + ' min a day</div></div>' +
+          (own ? '<div style="display:flex;gap:6px"><button class="btn' + (n.enabled ? '' : ' primary') + '" data-cltog="' + esc(n.id) + '">' + (n.enabled ? 'Switch off' : 'Switch on') + '</button><button class="btn" data-cledit="' + esc(n.id) + '">Settings</button></div>' : '') + '</div>';
+        if (!e) return '<div style="padding:8px 0;border-bottom:1px solid var(--line)">' + head + '</div>';
+        return '<div style="padding:8px 0;border-bottom:1px solid var(--line)">' + head + '<div style="display:grid;gap:8px;margin-top:8px">' +
+          '<label class="card-note">Assistant name<input class="fld" data-clid="' + esc(n.id) + '" data-clf="assistant_name" value="' + esc(e.assistant_name) + '" maxlength="40"></label>' +
+          '<label class="card-note">Greeting (leave empty for the standard one: "Assalam o Alaikum, &lt;business&gt;. Main &lt;name&gt; hoon, AI assistant...")<input class="fld" data-clid="' + esc(n.id) + '" data-clf="greeting" value="' + esc(e.greeting) + '" maxlength="400"></label>' +
+          '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px"><label class="card-note">Longest call (minutes)<input class="fld" type="number" min="1" max="30" data-clid="' + esc(n.id) + '" data-clf="max_call_minutes" value="' + esc(e.max_call_minutes) + '"></label>' +
+          '<label class="card-note">Minutes per day (budget)<input class="fld" type="number" min="0" max="2000" data-clid="' + esc(n.id) + '" data-clf="max_minutes_per_day" value="' + esc(e.max_minutes_per_day) + '"></label></div>' +
+          '<div style="display:flex;gap:6px"><button class="btn primary" data-clsave="' + esc(n.id) + '">Save</button><button class="btn" data-clx="' + esc(n.id) + '">Close</button></div></div></div>';
+      }).join(''));
+  var L = d.calls || [];
+  out += panel('Recent calls', !L.length ? empty('No calls yet', 'Calls answered by your AI assistant appear here with what was said and what to do next.')
+    : '<div class="tbl-wrap"><table><thead><tr><th>When</th><th>Caller</th><th>Outcome</th><th>What they wanted</th><th>Next step</th><th>Length</th></tr></thead><tbody>' +
+      L.map(function(c){
+        return '<tr data-call="' + esc(c.id) + '" style="cursor:pointer' + (c.reviewed ? ';opacity:.7' : '') + '"><td>' + when(c.started_at) + '</td><td>' + esc(c.caller_name || '') +
+          '<div class="card-note">' + (c.from_number ? '+' + esc(c.from_number) : 'hidden number') + '</div></td><td>' + (c.status === 'completed' ? clPill(c.outcome) : '<span class="pill soon">' + esc({ refused: 'Not answered', failed: 'Failed', no_answer: 'Hung up', in_progress: 'On the call now' }[c.status] || c.status) + '</span>') +
+          (c.reviewed ? ' <span class="card-note">✓ reviewed</span>' : '') + '</td><td>' + esc(c.summary || '') + '</td><td>' + esc(c.follow_up || '') + '</td><td>' + clDur(c.duration_s) + '</td></tr>';
+      }).join('') + '</tbody></table></div>');
+  setTimeout(clWire, 0);
+  return out;
+};
+function clDetail(id){
+  if (CL.did !== id) { CL.did = id; CL.detail = undefined; }
+  if (CL.detail === undefined) {
+    CL.detail = null;
+    api('/calls/' + encodeURIComponent(id)).then(function(r){ CL.detail = r.ok ? r.data : { error: (r.data && r.data.detail) || 'Could not read this call.' }; renderShell(); });
+  }
+  var out = '<p><a href="#/calls">← All calls</a></p>', c = CL.detail;
+  if (c === null) return out + panel('Call', loading('Loading the call...'));
+  if (c.error && !c.id) return out + panel('Call', errState(c.error));
+  out += '<h1>' + esc(c.caller_name || (c.from_number ? '+' + c.from_number : 'Caller')) + ' ' + clPill(c.outcome) + '</h1><p class="sub">' + when(c.started_at) + ' · ' + clDur(c.duration_s) +
+    (c.from_number ? ' · <a href="tel:+' + esc(c.from_number) + '">Call back +' + esc(c.from_number) + '</a>' : '') + (c.lead_id ? ' · <a href="#/leads">Added to your leads</a>' : '') + '</p>';
+  if (CL.msg) out += '<div class="card-note" style="margin:6px 0;color:' + (CL.msg.bad ? 'var(--danger)' : 'var(--growth)') + '">' + esc(CL.msg.text) + '</div>';
+  out += panel('Summary', '<div style="display:grid;gap:6px"><div>' + esc(c.summary || 'No summary was logged.') + '</div>' + (c.follow_up ? '<div><b>Next step:</b> ' + esc(c.follow_up) + '</div>' : '') +
+    (c.error ? '<div class="card-note" style="color:var(--danger)">' + esc(c.error) + '</div>' : '') +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px"><select class="fld" id="cl_out" style="max-width:220px">' + Object.keys(CL_OUT).map(function(k){ return '<option value="' + k + '"' + (c.outcome === k ? ' selected' : '') + '>' + esc(CL_OUT[k]) + '</option>'; }).join('') + '</select>' +
+    '<input class="fld" id="cl_fu" placeholder="Next step" value="' + esc(c.follow_up || '') + '" style="flex:1;min-width:180px"><button class="btn primary" id="cl_rev">' + (c.reviewed ? 'Save' : 'Save and mark reviewed') + '</button></div></div>');
+  var t = c.transcript || [];
+  out += panel('What was said', !t.length ? empty('No transcript', 'Nothing was said on this call.') : '<div style="display:grid;gap:8px">' + t.map(function(x){
+    var me = x.who === 'agent';
+    return '<div style="display:flex;justify-content:' + (me ? 'flex-start' : 'flex-end') + '"><div style="max-width:80%;padding:8px 12px;border-radius:12px;border:1px solid var(--line);' + (me ? '' : 'background:rgba(108,140,255,.12)') + '">' +
+      '<div class="card-note">' + (me ? 'AI assistant' : 'Caller') + '</div>' + esc(x.text) + '</div></div>';
+  }).join('') + '</div>');
+  setTimeout(clWire, 0);
+  return out;
+}
+function clWire(){
+  var g = function(id){ return document.getElementById(id); };
+  document.querySelectorAll('[data-call]').forEach(function(tr){ tr.onclick = function(){ CL.msg = null; location.hash = '#/calls?id=' + tr.getAttribute('data-call'); }; });
+  var nums = (CL.data && CL.data.numbers) || [];
+  var byId = function(id){ return nums.filter(function(n){ return n.id === id; })[0]; };
+  var put = function(id, body, ok){
+    api('/calls/numbers/' + id, { method: 'PUT', body: body }).then(function(r){
+      CL.msg = r.ok ? { text: ok } : { text: (r.data && r.data.detail) || 'That did not save.', bad: true };
+      if (r.ok) { delete CL.edit[id]; CL.data = undefined; }
+      renderShell();
+    });
+  };
+  document.querySelectorAll('[data-cltog]').forEach(function(b){ b.onclick = function(){
+    var n = byId(b.getAttribute('data-cltog')); if (!n) return;
+    if (!n.enabled && !confirm('Switch on the AI assistant for +' + n.did + '? From now on it answers calls to this number (up to ' + n.max_minutes_per_day + ' minutes a day).')) return;
+    b.disabled = true; put(n.id, { enabled: !n.enabled }, n.enabled ? 'Switched off: callers now hear a busy tone.' : 'Switched on: the AI assistant answers calls now.');
+  }; });
+  document.querySelectorAll('[data-cledit]').forEach(function(b){ b.onclick = function(){ var n = byId(b.getAttribute('data-cledit')); CL.edit[n.id] = { assistant_name: n.assistant_name, greeting: n.greeting, max_call_minutes: n.max_call_minutes, max_minutes_per_day: n.max_minutes_per_day }; renderShell(); }; });
+  document.querySelectorAll('[data-clx]').forEach(function(b){ b.onclick = function(){ delete CL.edit[b.getAttribute('data-clx')]; renderShell(); }; });
+  document.querySelectorAll('[data-clf]').forEach(function(inp){
+    inp.oninput = function(){ var e = CL.edit[inp.getAttribute('data-clid')]; if (e) e[inp.getAttribute('data-clf')] = inp.value; };
+  });
+  document.querySelectorAll('[data-clsave]').forEach(function(b){ b.onclick = function(){
+    var id = b.getAttribute('data-clsave'), e = CL.edit[id];
+    put(id, { assistant_name: e.assistant_name, greeting: e.greeting, max_call_minutes: Number(e.max_call_minutes), max_minutes_per_day: Number(e.max_minutes_per_day) }, 'Saved. The next call uses these settings.');
+  }; });
+  if (g('cl_rev')) g('cl_rev').onclick = function(){
+    g('cl_rev').disabled = true;
+    api('/calls/' + CL.did + '/review', { method: 'POST', body: { outcome: g('cl_out').value, follow_up: g('cl_fu').value, reviewed: true } }).then(function(r){
+      CL.msg = r.ok ? { text: 'Saved and marked reviewed.' } : { text: (r.data && r.data.detail) || 'That did not save.', bad: true };
+      CL.detail = undefined; CL.data = undefined; renderShell();
+    });
+  };
+}
+window.addEventListener('hashchange', function(){ if (typeof CL !== 'undefined') { CL.data = undefined; CL.detail = undefined; CL.did = null; if (location.hash.indexOf('?id=') < 0) CL.msg = null; } });
+
 window.addEventListener('hashchange', function(){
   // Every section reads fresh data when it is opened, so something added in
   // one section (a staff member, a product, a booking) shows up in the others.

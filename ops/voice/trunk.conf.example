@@ -1,0 +1,41 @@
+; The provider's line. setup.sh copies this to /etc/techdeva/voice/trunk.conf
+; (root-only). Replace every CHANGE_ME there, on the server, never in the repo.
+; Values come from the provider's welcome email: SIP server, username,
+; password, and the number. Most Pakistani SIP lines use registration like this.
+[trunk-auth]
+type = auth
+auth_type = userpass
+username = CHANGE_ME_USERNAME
+password = CHANGE_ME_PASSWORD
+
+[trunk-aor]
+type = aor
+contact = sip:CHANGE_ME_SIP_SERVER
+qualify_frequency = 60
+
+[trunk]
+type = endpoint
+context = from-trunk
+disallow = all
+allow = alaw,ulaw
+outbound_auth = trunk-auth
+aors = trunk-aor
+from_user = CHANGE_ME_USERNAME
+from_domain = CHANGE_ME_SIP_SERVER
+direct_media = no
+rtp_symmetric = yes
+force_rport = yes
+rewrite_contact = yes
+
+[trunk-identify]
+type = identify
+endpoint = trunk
+match = CHANGE_ME_SIP_SERVER
+
+[trunk-reg]
+type = registration
+outbound_auth = trunk-auth
+server_uri = sip:CHANGE_ME_SIP_SERVER
+client_uri = sip:CHANGE_ME_USERNAME@CHANGE_ME_SIP_SERVER
+contact_user = CHANGE_ME_USERNAME
+retry_interval = 60
