@@ -12,8 +12,10 @@ readable 400 rather than silently dropped -- a typo that vanishes is how a
 price quietly fails to save.
 """
 
+import datetime as _dt
 import re
 import uuid
+from zoneinfo import ZoneInfo
 from contextlib import contextmanager
 
 import psycopg
@@ -215,6 +217,7 @@ _DEACTIVATE = {"services", "products", "packages", "staff", "locations"}
 # sells and at what price, its people, places and rules is the owner's call,
 # as is removing or rewriting a record of money that already went out.
 OWNER_ROLES = ("owner", "techdeva_admin")
+_KHI = ZoneInfo("Asia/Karachi")
 OWNER_ONLY = {
     "services": {"POST", "PATCH", "DELETE"},
     "products": {"POST", "PATCH", "DELETE"},
@@ -485,6 +488,12 @@ def make_business_router(P=None):
         _refuse_generic(resource, "POST")
         _allowed(resource, "POST", role)
         data = _clean(spec, body, True)
+        if resource == "expenses" and role not in OWNER_ROLES:
+            # staff record today's spending; an earlier date is the owner's call
+            # (it changes a day that may already be closed)
+            today = _dt.datetime.now(_KHI).date().isoformat()
+            if str(data.get("spent_on") or today)[:10] != today:
+                raise HTTPException(403, "Staff can record today's expenses only. Ask the owner to add one for an earlier date.")
         cols = ["tenant_id"] + list(data.keys())
         vals = [tid] + list(data.values())
         sql = "INSERT INTO {0} ({1}) VALUES ({2}) RETURNING {3}".format(
@@ -559,6 +568,8 @@ def make_business_router(P=None):
                      authorization: str | None = Header(None),
                      td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        if role not in OWNER_ROLES:
+            raise HTTPException(403, "Revenue figures are for the business owner.")
         if days < 1 or days > 1095:
             raise HTTPException(400, "days must be between 1 and 1095")
         with tenant_session(tid, role) as cur:

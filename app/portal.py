@@ -156,9 +156,13 @@ def make_portal_router(P) -> APIRouter:
                 "name": user["name"], "expires_in": SESSION_TTL_SECONDS}
 
     @router.post("/auth/logout")
-    def logout(response: Response):
+    def logout(response: Response, authorization: str | None = Header(None),
+               td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Sign out: the cookie goes, and this login stops working on the server too."""
+        from .auth import sign_out, token_from
+        ended = sign_out(token_from(authorization, td_session))
         response.delete_cookie(SESSION_COOKIE)
-        return {"ok": True}
+        return {"ok": True, "ended": ended}
 
     @router.get("/me")
     def me(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),

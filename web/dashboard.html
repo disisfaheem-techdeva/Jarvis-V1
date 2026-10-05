@@ -2783,14 +2783,15 @@ function aptBill(){
   var tax = Math.round((sub - disc) * gst) / 100;
   var total = Math.round((sub - disc + tax) * 100) / 100;
   var rec = numv('ap_recv') || 0;
-  return { sub: sub, disc: disc, tax: tax, total: total, rec: rec, bal: Math.round((total - rec) * 100) / 100 };
+  var cr = Math.min(numv('ap_credit') || 0, APT.credit || 0);           // the customer's credit used (db/63)
+  return { sub: sub, disc: disc, tax: tax, total: total, rec: rec, cr: cr, bal: Math.round((total - rec - cr) * 100) / 100 };
 }
 function aptCur(){ return (val('ap_cur') || 'PKR').toUpperCase(); }
 function aptBillHTML(){
   if (!APT.lines.length) return 'Add a service to see the bill.';
   var b = aptBill(), c = aptCur();
   return 'Subtotal <b>' + aptMoney(b.sub, c) + '</b><br>Discount <b>- ' + aptMoney(b.disc, c) + '</b><br>GST <b>' + aptMoney(b.tax, c) +
-         '</b><br><span style="font-size:15px">Total <b>' + aptMoney(b.total, c) + '</b></span><br>Received now <b>' + aptMoney(b.rec, c) +
+         '</b><br><span style="font-size:15px">Total <b>' + aptMoney(b.total, c) + '</b></span>' + (b.cr > 0 ? '<br>Credit used <b>- ' + aptMoney(b.cr, c) + '</b>' : '') + '<br>Received now <b>' + aptMoney(b.rec, c) +
          '</b><br>Remaining balance <b class="' + (b.bal > 0.004 ? 'bal-due' : 'bal-ok') + '">' + aptMoney(Math.max(b.bal, 0), c) + '</b>';
 }
 function aptRefreshBill(){
@@ -2877,7 +2878,8 @@ function aptFormHTML(){
     body += '<div class="fgrid"><div><label>Amount received now</label><input class="fld" id="ap_recv" type="number" min="0" placeholder="0"></div>' +
             '<div><label>Payment method</label><select class="fld" id="ap_pay"><option value="">-</option>' +
             APT_METHODS.map(function(m){ return '<option value="' + m[0] + '">' + m[1] + '</option>'; }).join('') + '</select></div>' +
-            '<div><label>Remaining balance</label><input class="fld" id="ap_balance" readonly style="color:var(--accent,#c9a84c);font-weight:700"></div></div>';
+            '<div><label>Remaining balance</label><input class="fld" id="ap_balance" readonly style="color:var(--accent,#c9a84c);font-weight:700"></div></div>' +
+            '<div class="fgrid" id="ap_creditrow" style="display:none"><div><label id="ap_creditlab">Customer credit</label><input class="fld" id="ap_credit" type="number" min="0" placeholder="0"></div></div>';
   } else if (a.invoice_id && a.balance > 0.004) {
     body += '<div class="fgrid"><div><label>Take a payment (balance ' + aptMoney(a.balance, a.currency) + ')</label><input class="fld" id="ap_payamt" type="number" min="0" placeholder="Amount"></div>' +
             '<div><label>Payment method</label><select class="fld" id="ap_paym">' +
@@ -2967,6 +2969,7 @@ function aptTableHTML(rows, opts){
     rows.map(function(a){
       var c = a.currency;
       var bal = a.balance == null ? '—' : '<span class="' + (a.balance > 0.004 ? 'bal-due' : 'bal-ok') + '">' + aptMoney(a.balance, c) + '</span>';
+      if (a.status === 'cancelled' && a.credit > 0) bal = '<span class="bal-ok" title="Advance kept as the customer\'s credit">Credit ' + aptMoney(a.credit, c) + '</span>';
       return '<tr>' + (opts.noClient ? '' : '<td>' + (a.customer_id ? '<a href="#/customers?c=' + esc(a.customer_id) + '">' + esc(a.customer_name || '—') + '</a>' : esc(a.customer_name || '—')) +
         '</td><td>' + esc(a.customer_phone || '') + '</td>') +
         '<td>' + esc(a.service || '—') + '</td><td>' + esc(a.package_names || '') + '</td><td>' + esc(a.day) + '</td><td>' + esc(a.time) + '</td><td>' + esc(a.end_time || '') +
@@ -3018,7 +3021,23 @@ function aptWireForm(){
   if (!g('ap_save')) return;
   if (g('ap_bg')) g('ap_bg').onclick = function(e){ if (e.target === g('ap_bg')) { APT.form = null; renderShell(); } };
   g('ap_cancel').onclick = function(){ APT.form = null; renderShell(); };
-  ['ap_dtype','ap_dval','ap_gst','ap_recv','ap_cur'].forEach(function(id){ if (g(id)) g(id).oninput = aptRefreshBill; });
+  ['ap_dtype','ap_dval','ap_gst','ap_recv','ap_cur','ap_credit'].forEach(function(id){ if (g(id)) g(id).oninput = aptRefreshBill; });
+  // An advance on a cancelled visit is the customer's credit: offer it on a new booking.
+  var showCredit = function(q){
+    if (!g('ap_creditrow')) return;
+    api('/appointments/credit?' + q).then(function(r){
+      APT.credit = r.ok ? (r.data.credit || 0) : 0;
+      if (!g('ap_creditrow')) return;
+      g('ap_creditrow').style.display = APT.credit > 0 ? '' : 'none';
+      if (APT.credit > 0) g('ap_creditlab').textContent = 'Use customer credit (available ' + aptMoney(APT.credit, aptCur()) + ')';
+      aptRefreshBill();
+    });
+  };
+  if (!f.edit) {
+    APT.credit = 0;
+    if (pre.customer && pre.customer.id) showCredit('customer_id=' + encodeURIComponent(pre.customer.id));
+    if (g('ap_phone')) g('ap_phone').onchange = function(){ showCredit('phone=' + encodeURIComponent(g('ap_phone').value)); };
+  }
   if (g('ap_dtype')) g('ap_dtype').onchange = aptRefreshBill;
   aptRefreshBill();
   aptWireLines();
@@ -3053,12 +3072,12 @@ function aptWireForm(){
       if (!/^[A-Za-z]{3}$/.test(aptCur())) { aptSay('Currency must be a 3-letter code like PKR.', true); return; }
       var b = aptBill();
       if (b.rec > 0 && !val('ap_pay')) { aptSay('Pick how they paid.', true); return; }
-      if (b.rec - b.total > 0.009) { aptSay('Amount received is more than the bill.', true); return; }
+      if (b.rec + b.cr - b.total > 0.009) { aptSay('Amount received plus credit is more than the bill.', true); return; }
       path = '/appointments/book'; method = 'POST';
       body = Object.assign({}, common, {
         services: APT.lines.map(function(l){ return { service_id: l.service_id, package_id: l.package_id, name: String(l.name).trim(), price: Number(l.price) || 0, qty: Number(l.qty) || 1, discount: Number(l.discount) || 0 }; }),
         discount_type: val('ap_dtype'), discount_value: numv('ap_dval') || 0, gst_percent: numv('ap_gst') || 0, currency: aptCur(),
-        received: b.rec, payment_method: val('ap_pay') });
+        received: b.rec, payment_method: val('ap_pay'), use_credit: b.cr || 0 });
       if (cust) body.customer_id = cust.id;
       else { body.name = val('ap_name'); body.phone = val('ap_phone'); body.source = val('ap_src'); }
       if (!body.staff_id) delete body.staff_id;
@@ -3904,7 +3923,7 @@ VIEWS.products = function(){ return VIEWS.catalogue(); };
 
 /* #18. Only sections that exist are listed. OWNER_ONLY_NAV are pages whose data
    the API refuses to an operator (P&L, HR), so they are not offered. */
-var OWNER_ONLY_NAV = { pnl: 1, hr: 1, revenue: 1, reports: 1, advisor: 1 };
+var OWNER_ONLY_NAV = { pnl: 1, hr: 1, revenue: 1, reports: 1, advisor: 1, dayclose: 1 };
 // Opened anyway (a link, the address bar): say plainly it is the owner's page,
 // instead of letting the refused data show up as "the service did not respond".
 function ownerOnlyPage(id){

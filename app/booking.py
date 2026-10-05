@@ -21,6 +21,18 @@ from .db import tenant_session
 from .operations import _next_invoice_number, _paid_so_far, _settle
 
 TZ = "Asia/Karachi"
+
+
+def credit_available(cur, customer_id):
+    """Advances paid on this customer's cancelled visits, minus credit already used (db/63)."""
+    if not customer_id:
+        return 0.0
+    cur.execute("""SELECT COALESCE((SELECT sum(p.amount) FROM payments p
+                                      JOIN appointments a ON a.invoice_id = p.invoice_id
+                                     WHERE a.customer_id = %s AND a.status = 'cancelled'), 0)
+                        - COALESCE((SELECT sum(amount) FROM customer_credit_uses WHERE customer_id = %s), 0) AS c""",
+                (customer_id, customer_id))
+    return max(0.0, round(float(cur.fetchone()["c"] or 0), 2))
 STATUSES = ("booked", "completed", "cancelled", "no_show")
 METHODS = {"cash": ("cash", None), "card": ("card", None), "bank": ("bank", None),
            "online": ("online", None), "jazzcash": ("online", "JazzCash"),
@@ -221,6 +233,9 @@ def make_booking_router():
             r["total"] = round(total, 2)
             r["paid"] = round(paid, 2)
             r["balance"] = round(max(total - paid, 0), 2) if r["invoice_id"] else None
+            if r.get("status") == "cancelled":
+                r["balance"] = 0 if r["invoice_id"] else None
+                r["credit"] = round(paid, 2)          # an advance on a cancelled visit is the customer's credit
         out = {"count": len(rows), "appointments": rows}
         if unlinked is not None:
             out["unlinked_bills"] = unlinked
@@ -284,6 +299,11 @@ def make_booking_router():
         lines, subtotal, discount, tax, total = (pb["lines"], pb["subtotal"], pb["discount"],
                                                  pb["tax"], pb["total"])
         received = _num(body.get("received"), "Amount received")
+        use_credit = round(_num(body.get("use_credit"), "Credit") or 0, 2)
+        if use_credit < 0 or use_credit - total > 0.009:
+            raise HTTPException(400, "The credit used cannot be more than the bill.")
+        if received + use_credit - total > 0.009:
+            raise HTTPException(400, "Amount received (%s) plus credit (%s) is more than the bill (%s)." % (received, use_credit, total))
         if received - total > 0.009:
             raise HTTPException(400, "Amount received (%s) is more than the bill (%s)." % (received, total))
         mkey = (body.get("payment_method") or "").strip().lower().replace(" ", "")
@@ -324,6 +344,11 @@ def make_booking_router():
                                 "RETURNING id, name", (name, phone or None, csource))
                     c = cur.fetchone()
                 customer_id = c["id"]
+            if use_credit > 0:
+                if not lines:
+                    raise HTTPException(400, "Credit can only be used on a visit with a bill.")
+                if use_credit - credit_available(cur, customer_id) > 0.009:
+                    raise HTTPException(409, "This customer has only Rs {:,.0f} of credit.".format(credit_available(cur, customer_id)))
             if staff_id:
                 cur.execute("SELECT name FROM staff WHERE id = %s", (staff_id,))
                 st = cur.fetchone()
@@ -352,9 +377,12 @@ def make_booking_router():
                     "INSERT INTO invoices (tenant_id, customer_id, location_id, number, issued_on, "
                     "currency, discount, tax, notes) VALUES (current_tenant(), %s, %s, %s, %s, %s, "
                     "%s, %s, %s) RETURNING id",
-                    (customer_id, location_id, number, day, currency, discount, tax,
-                     "Appointment %s %s" % (day, tm)))
+                    (customer_id, location_id, number, day, currency, round(discount + use_credit, 2), tax,
+                     "Appointment %s %s" % (day, tm) + (" (credit used: %s)" % use_credit if use_credit else "")))
                 inv_id = cur.fetchone()["id"]
+                if use_credit > 0:          # paid earlier, on a cancelled visit: never counted twice
+                    cur.execute("INSERT INTO customer_credit_uses (tenant_id, customer_id, invoice_id, amount, created_by) "
+                                "VALUES (current_tenant(), %s, %s, %s, %s)", (customer_id, inv_id, use_credit, str(uid)))
                 for l in lines:
                     cur.execute(
                         "INSERT INTO invoice_items (tenant_id, invoice_id, service_id, package_id, "
@@ -375,10 +403,28 @@ def make_booking_router():
                 money["invoice_number"] = number
             record(cur, action="appointment.book", resource="appointments",
                    resource_id=str(appt_id), actor=str(uid), actor_type="human", status="ok",
-                   detail={"services": len(lines), "total": total, "received": received},
+                   detail={"services": len(lines), "total": total, "received": received, "credit_used": use_credit},
                    error=None)
         return {"ok": True, "appointment_id": str(appt_id), "customer_id": str(customer_id),
                 "total": total, "money": money}
+
+    @router.get("/appointments/credit")
+    def credit(phone: str = "", customer_id: str = "",
+               x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+               authorization: str | None = Header(None),
+               td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """A customer's credit from advances on cancelled visits (by customer or phone)."""
+        tid, role, uid = _who(x_tenant_id, x_role, authorization, td_session)
+        with tenant_session(tid, role) as cur:
+            cid = customer_id.strip() or None
+            if cid and not re.match(r"^[0-9a-f-]{36}$", cid):
+                cid = None
+            if not cid and len(_digits(phone)) >= 7:
+                cur.execute("SELECT id FROM customers WHERE right(regexp_replace(coalesce(phone, ''), '\\D', '', 'g'), 10) "
+                            "= right(%s, 10) ORDER BY created_at LIMIT 1", (_digits(phone),))
+                r = cur.fetchone()
+                cid = r["id"] if r else None
+            return {"customer_id": str(cid) if cid else None, "credit": credit_available(cur, cid) if cid else 0.0}
 
     @router.patch("/appointments/{appt_id}")
     def update(appt_id: str, body: dict = Body(...),
@@ -439,10 +485,43 @@ def make_booking_router():
                 if not (body.get("procedure_by") or "").strip():
                     sets.append("procedure_by = %s")
                     vals.append(st["name"])
+            cur.execute("SELECT status, invoice_id FROM appointments WHERE id = %s", (appt_id,))
+            before = cur.fetchone()
+            if not before:
+                raise HTTPException(404, "Appointment not found.")
+            new_status = (body.get("status") or "").strip().lower() if "status" in body else before["status"]
+            if before["status"] == "cancelled" and new_status != "cancelled" and before["invoice_id"]:
+                cur.execute("SELECT voided_at, notes FROM invoices WHERE id = %s", (before["invoice_id"],))
+                iv = cur.fetchone() or {}
+                if iv.get("voided_at") or "advance kept as credit" in (iv.get("notes") or ""):
+                    raise HTTPException(409, "This visit was cancelled and its bill closed. Book a new appointment instead.")
             cur.execute("UPDATE appointments SET " + ", ".join(sets) +
                         " WHERE id = %s RETURNING id", (*vals, appt_id))
             if not cur.fetchone():
                 raise HTTPException(404, "Appointment not found.")
+            if new_status == "cancelled" and before["status"] != "cancelled" and before["invoice_id"]:
+                # Nothing is owed for a visit that will not happen. No money taken:
+                # the bill is voided. An advance taken: the bill is settled at the
+                # advance (the business keeps it) and it becomes the customer's credit.
+                inv = before["invoice_id"]
+                cur.execute("SELECT total, discount, voided_at FROM invoices WHERE id = %s", (inv,))
+                iv = cur.fetchone()
+                paid = _paid_so_far(cur, inv)
+                if iv and not iv["voided_at"]:
+                    if paid <= 0:
+                        cur.execute("UPDATE invoices SET voided_at = now(), void_reason = 'Appointment cancelled', "
+                                    "status = 'void', updated_at = now() WHERE id = %s", (inv,))
+                    elif paid + 0.009 < float(iv["total"]):
+                        cur.execute("UPDATE invoices SET discount = discount + %s, notes = trim(coalesce(notes, '') || "
+                                    "' | Appointment cancelled: advance kept as credit'), updated_at = now() WHERE id = %s",
+                                    (round(float(iv["total"]) - paid, 2), inv))
+                        _settle(cur, inv, uid)
+                    else:
+                        cur.execute("UPDATE invoices SET notes = trim(coalesce(notes, '') || "
+                                    "' | Appointment cancelled: advance kept as credit') WHERE id = %s", (inv,))
+                    record(cur, action="appointment.cancel_bill", resource="invoices", resource_id=str(inv),
+                           actor=str(uid), actor_type="human", status="ok",
+                           detail={"paid": paid, "outcome": "voided" if paid <= 0 else "advance kept as credit"}, error=None)
             record(cur, action="appointment.update", resource="appointments",
                    resource_id=appt_id, actor=str(uid), actor_type="human", status="ok",
                    detail={"fields": [s.split(" ")[0] for s in sets]}, error=None)
