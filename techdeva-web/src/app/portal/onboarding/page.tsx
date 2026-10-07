@@ -97,12 +97,13 @@ export default function OnboardingPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    const entries = await Promise.all(
-      STEPS.map(async (s) => [s.key, (await listResource(s.resource)) ?? []] as const),
-    );
-    setRows(Object.fromEntries(entries));
-  }, []);
+  const refresh = useCallback(
+    () =>
+      Promise.all(
+        STEPS.map(async (s) => [s.key, (await listResource(s.resource)) ?? []] as const),
+      ).then((entries) => setRows(Object.fromEntries(entries))),
+    [],
+  );
 
   useEffect(() => {
     if (session) void refresh();

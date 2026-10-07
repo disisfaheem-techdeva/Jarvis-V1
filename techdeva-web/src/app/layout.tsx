@@ -1,5 +1,8 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Bricolage_Grotesque, Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
+
+import { themeScript } from "@/components/ui/theme";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -12,18 +15,45 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Display face: headlines and headline metrics only.
+const display = Bricolage_Grotesque({
+  variable: "--font-display-face",
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+});
+
 export const metadata: Metadata = {
-  title: "TechDeva — AI Business Operating System",
+  title: {
+    default: "TechDeva — AI Business Operating System",
+    template: "%s · TechDeva",
+  },
   description: "One platform, one AI workforce, every business function on autopilot.",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#050408",
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
+      className={`${geistSans.variable} ${geistMono.variable} ${display.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="td-grain flex min-h-full flex-col">
+        <a
+          href="#main"
+          className="sr-only z-[70] rounded-[var(--btn-radius)] bg-accent px-4 py-3 text-sm font-medium text-on-accent focus:not-sr-only focus:fixed focus:left-4 focus:top-4"
+        >
+          Skip to content
+        </a>
+        {children}
+        <Script id="td-theme" strategy="beforeInteractive">
+          {themeScript}
+        </Script>
+      </body>
     </html>
   );
 }
