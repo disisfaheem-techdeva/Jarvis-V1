@@ -1,13 +1,11 @@
-import { SidebarLayout } from "@/components/SidebarLayout";
+import type { Metadata } from "next";
 
-const NAV = [
-  { href: "/founder", label: "Overview" },
-  { href: "/founder/tenants", label: "Tenants" },
-  { href: "/founder/orchestrator", label: "Orchestrator" },
-  { href: "/founder/incidents", label: "Incidents" },
-  { href: "/founder/ai-health", label: "AI Health" },
-];
+import { FounderShell } from "@/components/FounderShell";
+
+export const metadata: Metadata = {
+  title: { default: "Founder console", template: "%s · TechDeva founder" },
+};
 
 export default function FounderLayout({ children }: { children: React.ReactNode }) {
-  return <SidebarLayout title="Founder Console" nav={NAV}>{children}</SidebarLayout>;
+  return <FounderShell>{children}</FounderShell>;
 }
