@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef } from "react";
+import { useRef } from "react";
 
 import { cn } from "@/lib/cn";
 
@@ -15,19 +15,21 @@ export interface TabItem {
  * between tabs, Home/End jump to the ends. Pair with <TabPanel>.
  */
 export function Tabs({
+  id: base,
   items,
   value,
   onChange,
   label,
   className,
 }: {
+  /** Shared with <TabPanel tabsId> so tabs and panels reference each other. */
+  id: string;
   items: TabItem[];
   value: string;
   onChange: (value: string) => void;
   label: string;
   className?: string;
 }) {
-  const base = useId();
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
 
   function onKeyDown(e: React.KeyboardEvent, index: number) {
@@ -60,7 +62,7 @@ export function Tabs({
             type="button"
             id={`${base}-tab-${t.value}`}
             aria-selected={selected}
-            aria-controls={`${base}-panel-${t.value}`}
+            aria-controls={selected ? `${base}-panel-${t.value}` : undefined}
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(t.value)}
             onKeyDown={(e) => onKeyDown(e, i)}
@@ -80,11 +82,21 @@ export function Tabs({
   );
 }
 
-/** Tab panels share the base id via a data attribute set by the page. */
+/** The panel for one tab. Render only the selected one. */
 export function TabPanel({
-  labelledBy,
+  tabsId,
+  value,
   className,
   ...props
-}: React.HTMLAttributes<HTMLDivElement> & { labelledBy?: string }) {
-  return <div role="tabpanel" aria-labelledby={labelledBy} tabIndex={0} className={cn("focus-visible:outline-none", className)} {...props} />;
+}: React.HTMLAttributes<HTMLDivElement> & { tabsId: string; value: string }) {
+  return (
+    <div
+      role="tabpanel"
+      id={`${tabsId}-panel-${value}`}
+      aria-labelledby={`${tabsId}-tab-${value}`}
+      tabIndex={0}
+      className={cn("rounded-[var(--p-radius-sm)] focus-visible:outline-none focus-visible:[box-shadow:var(--focus-ring)]", className)}
+      {...props}
+    />
+  );
 }
