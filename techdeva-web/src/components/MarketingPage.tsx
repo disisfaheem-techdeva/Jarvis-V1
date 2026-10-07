@@ -11,6 +11,7 @@ export function MarketingPage({
   body,
   children,
   cta = true,
+  ctaSecondary,
 }: {
   eyebrow: string;
   title: string;
@@ -18,6 +19,7 @@ export function MarketingPage({
   children?: React.ReactNode;
   /** Show the closing "Book a demo" band. */
   cta?: boolean;
+  ctaSecondary?: { href: string; label: string };
 }) {
   return (
     <div className="flex min-h-screen flex-col bg-bg">
@@ -33,7 +35,7 @@ export function MarketingPage({
           </div>
         </section>
         {children ? <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">{children}</div> : null}
-        {cta ? <ClosingCta /> : null}
+        {cta ? <ClosingCta secondary={ctaSecondary} /> : null}
       </main>
       <SiteFooter />
     </div>
@@ -43,9 +45,11 @@ export function MarketingPage({
 export function ClosingCta({
   title = "See it run on a real business",
   body = "A 30-minute walkthrough on a live clinic: what your AI team does on its own, and what it brings to you for approval.",
+  secondary = { href: "/pricing", label: "How pricing works" },
 }: {
   title?: string;
   body?: string;
+  secondary?: { href: string; label: string };
 }) {
   return (
     <section className="mx-auto w-full max-w-6xl px-4 pb-20 sm:px-6">
@@ -60,8 +64,8 @@ export function ClosingCta({
             <ButtonLink href="/demo" size="lg">
               Book a demo <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </ButtonLink>
-            <ButtonLink href="/pricing" size="lg" variant="secondary">
-              How pricing works
+            <ButtonLink href={secondary.href} size="lg" variant="secondary">
+              {secondary.label}
             </ButtonLink>
           </div>
         </div>
