@@ -1,9 +1,14 @@
 "use client";
 
-import Link from "next/link";
-import { Suspense, useState } from "react";
+import { CircleCheck, LinkIcon } from "lucide-react";
 import { useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 
+import { AuthShell, PasswordInput } from "@/components/AuthShell";
+import { Button, ButtonLink } from "@/components/ui/Button";
+import { Field } from "@/components/ui/Input";
+import { Notice } from "@/components/ui/Notice";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { API_BASE } from "@/lib/api";
 
 /** Choose a first password from a one-time setup link. */
@@ -37,67 +42,76 @@ function Form() {
   }
 
   if (!token) {
-    return <p className="text-sm text-[var(--muted)]">This link is missing its token.</p>;
-  }
-
-  if (done) {
     return (
       <div>
-        <h1 className="text-xl font-semibold text-white">Password set</h1>
-        <p className="mt-3 text-sm text-[var(--muted)]">
-          You can now{" "}
-          <Link className="underline" href="/login">
-            sign in
-          </Link>
-          . This link will not work again.
+        <LinkIcon className="h-6 w-6 text-fg-subtle" aria-hidden="true" />
+        <h1 className="mt-4 font-display text-2xl font-semibold tracking-tight text-fg">This link is incomplete</h1>
+        <p className="mt-2 text-[15px] text-fg-muted">
+          The setup link is missing its token. Open the link from your message again, or ask your TechDeva contact for a new one.
         </p>
       </div>
     );
   }
 
+  if (done) {
+    return (
+      <div role="status">
+        <CircleCheck className="h-7 w-7 text-success" aria-hidden="true" />
+        <h1 className="mt-4 font-display text-2xl font-semibold tracking-tight text-fg">Password set</h1>
+        <p className="mt-2 text-[15px] text-fg-muted">You can sign in now. This link will not work again.</p>
+        <ButtonLink href="/login" size="lg" className="mt-6 w-full">
+          Log in
+        </ButtonLink>
+      </div>
+    );
+  }
+
+  const tooShort = pw.length > 0 && pw.length < 10;
+
   return (
     <div>
-      <h1 className="text-xl font-semibold text-white">Choose your password</h1>
-      <p className="mt-2 text-sm text-[var(--muted)]">
-        At least 10 characters. Only you ever see it.
-      </p>
-      <div className="mt-6 space-y-3">
-        <input
-          type="password"
-          autoComplete="new-password"
-          placeholder="New password"
-          value={pw}
-          onChange={(e) => setPw(e.target.value)}
-          className="w-full rounded border border-white/10 bg-black/30 px-3 py-2 text-sm text-white focus:border-white/30 focus:outline-none"
-        />
-        <input
-          type="password"
-          autoComplete="new-password"
-          placeholder="Repeat password"
-          value={again}
-          onChange={(e) => setAgain(e.target.value)}
-          className="w-full rounded border border-white/10 bg-black/30 px-3 py-2 text-sm text-white focus:border-white/30 focus:outline-none"
-        />
-      </div>
-      {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => void submit()}
-        className="mt-5 rounded bg-white/90 px-4 py-2 text-sm font-medium text-black disabled:opacity-50"
+      <h1 className="font-display text-2xl font-semibold tracking-tight text-fg">Choose your password</h1>
+      <p className="mt-2 text-[15px] text-fg-muted">At least 10 characters. Only you ever see it.</p>
+      <form
+        className="mt-7 flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
       >
-        {busy ? "Saving…" : "Set password"}
-      </button>
+        <Field label="New password" required hint={tooShort ? `${10 - pw.length} more characters needed` : "At least 10 characters"}>
+          {(p) => <PasswordInput {...p} autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} />}
+        </Field>
+        <Field label="Repeat password" required>
+          {(p) => <PasswordInput {...p} autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)} />}
+        </Field>
+        {error ? (
+          <Notice tone="danger" title="Password not set" live>
+            {error}
+          </Notice>
+        ) : null}
+        <Button type="submit" size="lg" disabled={busy} className="mt-2 w-full">
+          {busy ? "Saving…" : "Set password"}
+        </Button>
+      </form>
     </div>
   );
 }
 
 export default function SetPasswordPage() {
   return (
-    <main className="mx-auto max-w-md px-6 py-20">
-      <Suspense fallback={<p className="text-sm text-[var(--muted)]">Loading…</p>}>
+    <AuthShell>
+      <Suspense
+        fallback={
+          <div className="space-y-4" aria-busy="true">
+            <Skeleton className="h-8 w-56" />
+            <Skeleton className="h-11" />
+            <Skeleton className="h-11" />
+          </div>
+        }
+      >
         <Form />
       </Suspense>
-    </main>
+    </AuthShell>
   );
 }

@@ -1,8 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
+
+import { AuthShell, PasswordInput } from "@/components/AuthShell";
+import { Button } from "@/components/ui/Button";
+import { Field, Input } from "@/components/ui/Input";
+import { Notice } from "@/components/ui/Notice";
 import { API_BASE } from "@/lib/api";
 
 export default function LoginPage() {
@@ -37,38 +41,32 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--background)] px-6">
-      <div className="w-full max-w-sm td-card p-8">
-        <Link href="/" className="flex items-center gap-2 text-base font-semibold text-white">
-          <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
-          TechDeva
-        </Link>
-        <h1 className="mt-5 text-xl font-semibold text-white">Log in</h1>
-        <form onSubmit={onSubmit} className="mt-6 grid gap-3">
-          <input
-            name="email"
-            type="email"
-            required
-            placeholder="Email"
-            className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white placeholder:text-[var(--muted)] focus:border-[var(--accent)] focus:outline-none"
-          />
-          <input
-            name="password"
-            type="password"
-            required
-            placeholder="Password"
-            className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white placeholder:text-[var(--muted)] focus:border-[var(--accent)] focus:outline-none"
-          />
-          {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
-          <button
-            type="submit"
-            disabled={loading}
-            className="td-btn-primary mt-2 px-4 py-2 text-sm disabled:opacity-50"
-          >
-            {loading ? "Signing in…" : "Log in"}
-          </button>
-        </form>
-      </div>
-    </div>
+    <AuthShell>
+      <h1 className="font-display text-2xl font-semibold tracking-tight text-fg">Log in to your portal</h1>
+      <p className="mt-2 text-[15px] text-fg-muted">See your leads, approvals and results.</p>
+
+      <form onSubmit={onSubmit} className="mt-7 flex flex-col gap-4">
+        <Field label="Email" required>
+          {(p) => <Input {...p} name="email" type="email" autoComplete="email" placeholder="you@yourbusiness.com" />}
+        </Field>
+        <Field label="Password" required>
+          {(p) => <PasswordInput {...p} name="password" autoComplete="current-password" />}
+        </Field>
+
+        {error ? (
+          <Notice tone="danger" title="Not signed in" live>
+            {error}
+          </Notice>
+        ) : null}
+
+        <Button type="submit" size="lg" disabled={loading} className="mt-2 w-full">
+          {loading ? "Signing in…" : "Log in"}
+        </Button>
+      </form>
+
+      <p className="mt-6 text-sm text-fg-subtle">
+        Forgot your password or never set one? Ask your TechDeva contact for a new setup link.
+      </p>
+    </AuthShell>
   );
 }
