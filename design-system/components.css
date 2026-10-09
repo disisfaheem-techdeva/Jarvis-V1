@@ -123,3 +123,20 @@ body.td {
 .td-nav-item { display: flex; align-items: center; gap: 12px; min-height: var(--nav-item-h); padding: 0 12px; border-radius: var(--p-radius-sm); color: var(--fg-muted); text-decoration: none; font-size: 14px; }
 .td-nav-item:hover { background: var(--surface-2); color: var(--fg); }
 .td-nav-item[aria-current="page"], .td-nav-item.is-active { background: var(--accent-tint); color: var(--fg); font-weight: 500; }
+
+/* Light/dark switch (markup from TD.toggleHTML() in theme.js). Shows the sun
+   in the dark theme and the moon in the light one, like the Next.js toggle. */
+.td-theme-btn {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 44px; height: 44px; padding: 0; cursor: pointer;
+  border: 1px solid var(--line); border-radius: var(--btn-radius);
+  background: transparent; color: var(--fg-muted);
+  transition: background-color var(--p-dur-fast), color var(--p-dur-fast);
+}
+.td-theme-btn:hover { background: var(--surface-2); color: var(--fg); }
+.td-theme-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.td-theme-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.td-theme-btn .td-i-moon, [data-theme="light"] .td-theme-btn .td-i-sun { display: none; }
+[data-theme="light"] .td-theme-btn .td-i-moon { display: block; }
+/* for pages with no header to hold it */
+.td-theme-float { position: fixed; top: 12px; right: 12px; z-index: 60; background: var(--card-glass-bg, var(--surface)); backdrop-filter: blur(12px); }

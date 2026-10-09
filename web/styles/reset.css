@@ -8,7 +8,7 @@
   & .sub { @apply mt-0 mb-5 text-[15px] text-fg-muted; }
   & label { @apply mt-3 mb-1.5 block text-sm font-medium text-fg; }
   & input { @apply h-[var(--input-h)] w-full rounded-[var(--input-radius)] border border-[var(--input-border)] bg-[var(--input-bg)] px-3.5 text-[15px] text-fg hover:border-accent-line focus:border-[var(--ring)] focus:[box-shadow:0_0_0_3px_var(--accent-tint)] focus:outline-none; }
-  & button { @apply mt-5 inline-flex h-12 w-full cursor-pointer items-center justify-center rounded-[var(--btn-radius)] border-0 bg-accent text-[15px] font-medium text-on-accent hover:bg-accent-hover disabled:cursor-default disabled:opacity-60; }
+  & button:not(.td-theme-btn) { @apply mt-5 inline-flex h-12 w-full cursor-pointer items-center justify-center rounded-[var(--btn-radius)] border-0 bg-accent text-[15px] font-medium text-on-accent hover:bg-accent-hover disabled:cursor-default disabled:opacity-60; }
   & .msg { @apply mt-3 min-h-5 text-sm; }
   & .msg.bad { @apply text-danger; }
   & .msg.ok { @apply text-success; }

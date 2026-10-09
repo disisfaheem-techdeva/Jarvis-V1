@@ -3,19 +3,20 @@
    follows the business. The default (no brand colour set) and the dark text
    on the accent are production's choices for the light brand colours
    businesses use. */
-html:has(body.page-pin) { --accent: #c9a64a; }
+:root:has(body.page-pin) { --accent: #c9a64a; --accent-ink: #c9a64a; --fg-on-accent: #141005; }
+:root[data-theme="light"]:has(body.page-pin) { --accent-ink: #7a611f; }
 .page-pin {
   @apply flex min-h-screen items-center justify-center overflow-hidden p-4;
   /* the business's own logo, very large and faint, behind everything */
   & #bgmark { @apply pointer-events-none fixed -inset-[10%] z-0 bg-contain bg-center bg-no-repeat opacity-[0.13] blur-[1px] grayscale-[0.2]; }
   & .card { @apply relative z-[1] w-full max-w-sm rounded-[var(--p-radius-xl)] border border-line-strong px-7 pt-8 pb-6 text-center backdrop-blur-xl; background: var(--card-glass-bg); box-shadow: var(--shadow-lg); }
-  & .logo { @apply mx-auto mb-4 flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border-2 border-[var(--accent)] bg-black bg-cover bg-center font-display text-2xl font-bold text-[var(--accent)]; }
-  & h1 { @apply m-0 font-display text-xl font-semibold text-[var(--accent)]; }
+  & .logo { @apply mx-auto mb-4 flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border-2 border-[var(--accent)] bg-black bg-cover bg-center font-display text-2xl font-bold text-accent-ink; }
+  & h1 { @apply m-0 font-display text-xl font-semibold text-accent-ink; }
   & .tag { @apply mt-1 text-sm text-fg-muted; }
   & label { @apply mt-6 mb-1.5 block text-left text-xs font-medium tracking-[0.08em] text-fg-muted uppercase; }
   & input { @apply h-14 w-full rounded-[var(--input-radius)] border border-[var(--accent)] bg-[var(--input-bg)] px-3 text-center text-xl tracking-[0.5em] text-fg focus:[box-shadow:0_0_0_3px_color-mix(in_srgb,var(--accent)_25%,transparent)] focus:outline-none; }
   & input.code { @apply text-lg tracking-[0.25em] uppercase; }
-  & button { @apply mt-4 h-12 w-full cursor-pointer rounded-[var(--btn-radius)] border-0 bg-[var(--accent)] text-[15px] font-semibold text-[#141005] disabled:cursor-default disabled:opacity-60; }
+  & button:not(.td-theme-btn) { @apply mt-4 h-12 w-full cursor-pointer rounded-[var(--btn-radius)] border-0 bg-[var(--accent)] text-[15px] font-semibold text-on-accent disabled:cursor-default disabled:opacity-60; }
   & .msg { @apply mt-2.5 min-h-5 text-sm text-danger; }
   & .foot { @apply mt-3.5 text-xs text-fg-subtle; }
   & .links { @apply mt-2.5 text-xs; }

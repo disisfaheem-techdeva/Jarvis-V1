@@ -19,6 +19,7 @@ static and fast. Approve and reject are instant and unmistakable.
 | `effects.css` | The cinematic layer: grain, ambient light, glass, rim, glow edge, reveals, skeletons, route transitions, reduced motion |
 | `components.css` | `.td-*` classes (button, card, metric, badge, form, table, notice, empty state, nav item) for any page |
 | `tailwind.css` | The token → Tailwind 4 utility bridge (`bg-surface`, `text-fg-muted`, `font-display`, `text-metric`, …), shared by every Tailwind build |
+| `theme.js` | Light/dark switch and business brand colour for FastAPI pages (`window.TD`), inlined into each page's `<head>` by `sync.py` |
 | `web.css` | Tailwind entry for the FastAPI-served pages; compiles to `web/assets/td.css` |
 | `package.json` | Pins the Tailwind CLI used for that build |
 | `sync.py` | Copies, builds and inlines all of the above; `--check` fails if anything is stale |
@@ -187,3 +188,5 @@ Never animate tables, lead rows, approval cards or form fields. Under
 - [ ] Loading, empty, error, signed-out and unreachable states are designed
 - [ ] Missing numbers show "—" with a reason and an as-of time
 - [ ] Works with reduced motion
+- [ ] Has the light/dark switch: `TD.toggleHTML()` in a script-rendered header, or `<span data-td-theme-slot></span>` in static markup (Next.js: `<ThemeToggle />`)
+- [ ] A business's own colour goes through `TD.brand(hex)`, never straight into `--accent`, so text on it and links in it stay readable in both themes

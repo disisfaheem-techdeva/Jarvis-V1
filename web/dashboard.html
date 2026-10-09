@@ -4,13 +4,116 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dashboard — TechDeva</title>
+
+<!-- @td-theme:start -->
+<script>
+/* TechDeva theme + brand colour, for pages served by FastAPI (web/*.html).
+   sync.py inlines this into each page's <head>, so the saved theme applies
+   before the first paint. Next.js has its own copy of the theme part
+   (techdeva-web/src/components/ui/theme.ts); both use the "td-theme" key.
+
+   TD.toggleHTML()  markup for the light/dark switch, for script-rendered
+                    headers. In static markup, <span data-td-theme-slot></span>
+                    is replaced with it. Any [data-td-theme-toggle] works,
+                    even if rendered later.
+   TD.brand(hex)    a business's own accent colour. Works out readable text
+                    on it and a readable text shade of it for the current
+                    theme, so a light brand colour never gives white-on-white
+                    buttons and a dark one never vanishes on the dark canvas. */
+(function () {
+  var KEY = "td-theme", doc = document.documentElement, brandHex = null;
+
+  function theme() { return doc.dataset.theme === "light" ? "light" : "dark"; }
+
+  function rgb(hex) {
+    var h = hex.replace("#", "");
+    if (h.length === 3 || h.length === 4) h = h.replace(/./g, "$&$&");
+    return [0, 2, 4].map(function (i) { return parseInt(h.substr(i, 2), 16); });
+  }
+  function lum(c) {
+    var v = c.map(function (x) { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); });
+    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+  }
+  function contrast(a, b) { var x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  function mix(c, to, t) { return c.map(function (x, i) { return Math.round(x + (to[i] - x) * t); }); }
+  function hex(c) { return "#" + c.map(function (x) { return ("0" + x.toString(16)).slice(-2); }).join(""); }
+
+  function applyBrand() {
+    var props = ["--accent", "--accent-hover", "--accent-ink", "--accent-tint", "--accent-line", "--fg-on-accent", "--ring"];
+    if (!brandHex) { props.forEach(function (p) { doc.style.removeProperty(p); }); return; }
+    var c = rgb(brandHex), white = [255, 255, 255], black = [0, 0, 0];
+    var light = theme() === "light";
+    var bg = light ? white : [10, 10, 15];
+    // text on the accent fill: whichever of white or near-black reads better
+    var on = contrast(c, white) >= contrast(c, [20, 16, 5]) ? white : [20, 16, 5];
+    // the accent as text on the page: step it toward white (dark theme) or
+    // black (light theme) until it reaches 4.5:1
+    var ink = c, t = 0;
+    while (contrast(ink, bg) < 4.5 && t < 1) { t += 0.05; ink = mix(c, light ? black : white, t); }
+    var s = doc.style;
+    s.setProperty("--accent", hex(c));
+    s.setProperty("--accent-hover", hex(mix(c, on === white ? black : white, 0.12)));
+    s.setProperty("--fg-on-accent", hex(on));
+    s.setProperty("--accent-ink", hex(ink));
+    s.setProperty("--ring", hex(ink));
+    s.setProperty("--accent-tint", "rgb(" + c.join(" ") + " / " + (light ? 0.1 : 0.16) + ")");
+    s.setProperty("--accent-line", "rgb(" + c.join(" ") + " / 0.4)");
+  }
+
+  function sync() {
+    var light = theme() === "light";
+    var btns = document.querySelectorAll("[data-td-theme-toggle]");
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].setAttribute("aria-label", light ? "Switch to dark theme" : "Switch to light theme");
+      btns[i].setAttribute("title", light ? "Dark theme" : "Light theme");
+    }
+    var meta = document.querySelector('meta[name="color-scheme"]');
+    if (meta) meta.content = light ? "light" : "dark";
+  }
+
+  function set(next) {
+    if (next === "light") doc.dataset.theme = "light"; else delete doc.dataset.theme;
+    try { localStorage.setItem(KEY, next); } catch (e) { /* storage blocked: lasts this page view */ }
+    applyBrand();
+    sync();
+  }
+
+  try { if (localStorage.getItem(KEY) === "light") doc.dataset.theme = "light"; } catch (e) { /* default dark */ }
+
+  var SUN = '<svg class="td-i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
+  var MOON = '<svg class="td-i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>';
+
+  window.TD = {
+    theme: theme,
+    setTheme: set,
+    brand: function (h) { brandHex = h && /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(h) ? h.slice(0, h.length === 9 ? 7 : h.length) : null; applyBrand(); },
+    toggleHTML: function (cls) {
+      var light = theme() === "light";
+      return '<button type="button" class="td-theme-btn' + (cls ? " " + cls : "") + '" data-td-theme-toggle aria-label="' +
+        (light ? "Switch to dark theme" : "Switch to light theme") + '" title="' + (light ? "Dark theme" : "Light theme") + '">' + SUN + MOON + "</button>";
+    }
+  };
+
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-td-theme-toggle]");
+    if (b) set(theme() === "light" ? "dark" : "light");
+  });
+  document.addEventListener("DOMContentLoaded", function () {
+    // static pages: <span data-td-theme-slot="extra classes"></span> becomes the switch
+    var slots = document.querySelectorAll("[data-td-theme-slot]");
+    for (var i = 0; i < slots.length; i++) slots[i].outerHTML = window.TD.toggleHTML(slots[i].getAttribute("data-td-theme-slot"));
+    sync();
+  });
+})();
+</script>
+<!-- @td-theme:end -->
 <!-- @td-fonts:start -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=6c667f0080">
+<link rel="stylesheet" href="/assets/td.css?v=478ad6e7cf">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -290,8 +393,9 @@ function applyBrand(){
   var root = document.documentElement;
   var accent = PREFS.accent || BRAND.accent;
   if (accent && /^#[0-9a-fA-F]{3,8}$/.test(accent)) {
-    root.style.setProperty('--accent', accent);
-    root.style.setProperty('--tech', accent);
+    /* TD.brand also sets readable text on the colour and a readable shade of
+       it for text, so a light brand colour never gives white-on-white buttons */
+    if (window.TD) TD.brand(accent); else root.style.setProperty('--accent', accent);
   }
   var wanted = PREFS.show_logo_background !== false;
   var el = document.getElementById('brandbg');
@@ -2112,7 +2216,7 @@ function nameOf(list, id){
   return '';
 }
 function statTile(label, value){
-  return '<div class="panel" style="flex:1;min-width:140px;margin:0"><div class="card-note">' + esc(label) +
+  return '<div class="panel" style="flex:1;min-width:140px;margin:0;padding:12px 14px"><div class="card-note">' + esc(label) +
          '</div><div style="font-size:22px;font-weight:700;margin-top:4px">' + value + '</div></div>';
 }
 function tiles(list){ return '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0">' + list.join('') + '</div>'; }
@@ -2268,7 +2372,7 @@ VIEWS.marketing = function(){
   out += panel('Campaigns', (m.campaigns || []).length
     ? '<div class="tbl-wrap"><table><thead><tr><th>Campaign</th><th>Platform</th><th>Status</th><th>Spend</th><th>Leads</th><th>Cost per lead</th></tr></thead><tbody>' +
       m.campaigns.map(function(c){
-        var cpl = (Number(c.leads) > 0) ? money(Number(c.spend || 0) / Number(c.leads)) : '—';
+        var cpl = (Number(c.leads) > 0) ? money(Math.round(Number(c.spend || 0) / Number(c.leads))) : '—';
         return '<tr><td>' + esc(c.name || c.objective || '—') + '</td><td>' + esc(c.platform || '') + '</td><td><span class="tag">' +
                esc(c.status || '') + '</span></td><td>' + money(c.spend) + '</td><td>' + esc(c.leads || 0) + '</td><td>' + cpl + '</td></tr>';
       }).join('') + '</tbody></table></div>'
@@ -3817,6 +3921,16 @@ function ownerOnlyPage(id){
 /* The menu: a fixed icon column so every row lines up, sub-pages indented
    under their parent, owner-only pages hidden from operators (the API refuses
    them anyway), and sections the business hid (dashboard prefs) left out. */
+var NAV_OPEN = (function(){ try { return JSON.parse(localStorage.getItem('td-nav-open') || '{}') || {}; } catch (e) { return {}; } })();
+document.addEventListener('click', function(e){
+  var b = e.target.closest && e.target.closest('[data-navgrp]');
+  if (!b) return;
+  var open = b.getAttribute('aria-expanded') !== 'true';
+  NAV_OPEN[b.getAttribute('data-navgrp')] = open;
+  try { localStorage.setItem('td-nav-open', JSON.stringify(NAV_OPEN)); } catch (err) { /* lasts this visit */ }
+  b.setAttribute('aria-expanded', String(open));
+  b.parentNode.classList.toggle('collapsed', !open);
+});
 navHTML = function(active){
   if (active === 'catalogue') active = 'services';
   var hidden = (PREFS && PREFS.hidden_sections) || [], own = isOwner();
@@ -3827,19 +3941,30 @@ navHTML = function(active){
       return it.id === 'console' || hidden.indexOf(it.id) === -1;
     });
     if (!rows.length) return;
-    out += '<div class="nav-group">' + (g.label ? '<div class="nav-label">' + esc(g.label) + '</div>' : '');
+    /* Each section folds open and shut. The section holding the open page is
+       always open; the rest remember what the person last chose (closed
+       until they open them, so the menu stays short). */
+    var gid = 'nvg-' + String(g.label || 'main').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    var here = rows.some(function(it){ return it.id === active; });
+    var open = !g.label || here || NAV_OPEN[gid] === true;
+    var items = '', attn = 0;
     rows.forEach(function(it){
       var badge = '';
       if (it.id === 'needshuman') {
         var n = S.summary && S.summary.work_by_status ? S.summary.work_by_status.needs_human : null;
-        if (n) badge = '<span class="pill attn">' + esc(n) + '</span>';
+        if (n) { badge = '<span class="pill attn">' + esc(n) + '</span>'; attn += Number(n) || 0; }
       } else if (it.id === 'leads' && S.leads && S.leads.length) {
         badge = '<span class="pill count">' + esc(S.leads.length) + '</span>';
       }
-      out += '<a href="#/' + it.id + '" class="nav-item' + (active === it.id ? ' active' : '') + (it.sub ? ' sub' : '') + '">' +
+      items += '<a href="#/' + it.id + '" class="nav-item' + (active === it.id ? ' active' : '') + (it.sub ? ' sub' : '') + '">' +
         '<span class="ni">' + (it.sub ? '' : esc(it.icon)) + '</span><span class="nt">' + esc(it.name) + '</span>' + badge + '</a>';
     });
-    out += '</div>';
+    // a closed section still shows that something inside is waiting
+    out += '<div class="nav-group' + (open ? '' : ' collapsed') + '">' + (g.label
+      ? '<button type="button" class="nav-label nav-toggle" data-navgrp="' + gid + '" aria-expanded="' + open + '" aria-controls="' + gid + '">' +
+        '<span>' + esc(g.label) + '</span><span class="nav-end">' + (attn ? '<span class="pill attn nav-sum">' + esc(attn) + ' waiting</span>' : '') +
+        '<svg class="nav-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span></button>'
+      : '') + '<div class="nav-items" id="' + gid + '">' + items + '</div></div>';
   });
   return out + '</nav>';
 };
@@ -4041,7 +4166,7 @@ VIEWS.console = function(){
     '.jv-orb.error{background:radial-gradient(circle at 35% 35%,var(--warning-ink),var(--warn))}' +
     '@keyframes jvpulse{0%{box-shadow:0 0 0 0 color-mix(in oklab,var(--danger-ink) 45%,transparent)}70%{box-shadow:0 0 0 14px var(--danger-tint)}100%{box-shadow:0 0 0 0 var(--danger-tint)}}' +
     '@keyframes jvspin{to{transform:rotate(360deg)}}' +
-    '.jv-state{font-weight:600;font-size:15px}.jv-mic{min-width:110px;letter-spacing:.06em}.jv-mic.stop{background:var(--danger);border-color:var(--danger);color:#fff}' +
+    '.jv-state{font-weight:600;font-size:15px}.jv-mic{min-width:110px;letter-spacing:.06em}.jv-mic.stop{background:var(--danger-fill);border-color:var(--danger-fill);color:#fff}' +
     '.jv-reply{padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);white-space:pre-wrap}' +
     '.pin-card{display:block;color:var(--text)}.pin-card:hover{border-color:var(--accent)}';
   document.head.appendChild(st);
@@ -4155,7 +4280,7 @@ VIEWS.settings = function(){
   st.textContent =
     /* sidebar brand */
     '.brand{padding:16px 14px;gap:12px;min-height:72px}' +
-    '.brand-logo{width:44px;height:44px;object-fit:contain;flex:0 0 44px;border-radius:10px;background:rgba(255,255,255,.04)}' +
+    '.brand-logo{width:44px;height:44px;object-fit:contain;flex:0 0 44px;border-radius:10px;background:var(--surface-2)}' +
     '.brand-initials{width:40px;height:40px;flex:0 0 40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:700;background:var(--accent);color:var(--bg)}' +
     '.brand-text{min-width:0}.brand-name{font-weight:700;font-size:14px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}' +
     '.brand-by{font-size:11px;color:var(--muted);margin-top:2px}' +
@@ -4177,7 +4302,7 @@ VIEWS.settings = function(){
     '.top-logo{width:34px;height:34px;object-fit:contain;flex:0 0 34px;border-radius:8px}' +
     /* settings brand editor */
     '.brand-edit{display:flex;gap:18px;align-items:center;padding:16px;flex-wrap:wrap}' +
-    '.brand-preview{width:120px;height:120px;border:1px dashed var(--line);border-radius:12px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.03)}' +
+    '.brand-preview{width:120px;height:120px;border:1px dashed var(--line);border-radius:12px;display:flex;align-items:center;justify-content:center;background:var(--surface-2)}' +
     '.brand-preview img{max-width:108px;max-height:108px;object-fit:contain}' +
     '@media(max-width:900px){.top-logo{width:30px;height:30px;flex-basis:30px}}' +
     /* the logo sits BEHIND the page, not over the cards */
@@ -4477,6 +4602,7 @@ function renderShell(){
           '<button class="burger" id="burger" aria-label="Menu">&#9776;</button>' +
           topbarLogoHTML() + '<div class="biz"><div class="biz-name">' + esc(id.name) + '</div>' +
           '<div class="biz-sub">' + esc(id.sub) + '</div></div>' +
+          (window.TD ? TD.toggleHTML() : '') +
           '<button class="btn" id="chgpw" title="My account: name and password" aria-label="My account">👤</button>' +
           '<button class="btn" id="logout">Sign out</button>' +
         '</header>' +
@@ -5020,7 +5146,7 @@ boot = function(){
 };
 (function(){
   var st = document.createElement('style');
-  st.textContent = '.lock-box{max-width:460px}.lock-sec{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.02)}' +
+  st.textContent = '.lock-box{max-width:460px}.lock-sec{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}' +
     '.lock-fee{font-size:22px;font-weight:700;margin-top:2px}.lock-box .bil-pay .fld{max-width:none;flex:1 1 130px}';
   document.head.appendChild(st);
 })();
@@ -5215,7 +5341,7 @@ VIEWS.overview = function(){
 };
 (function(){
   var st = document.createElement('style');
-  st.textContent = '.plan-bar{height:8px;border-radius:6px;background:rgba(255,255,255,.08);margin-top:6px;overflow:hidden}.plan-bar div{height:100%}' +
+  st.textContent = '.plan-bar{height:8px;border-radius:6px;background:var(--surface-3);margin-top:6px;overflow:hidden}.plan-bar div{height:100%}' +
     '.plan-warn{margin-top:10px;padding:8px 12px;border-radius:8px;background:var(--warning-tint);border:1px solid color-mix(in oklab,var(--warning-ink) 35%,transparent)}' +
     '.plan-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;padding:0 16px 12px}' +
     '.plan-card{border:1px solid var(--line);border-radius:10px;padding:12px}.plan-card.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}' +
@@ -5597,16 +5723,16 @@ VIEWS.console = function(){
   st.textContent =
     '.jv-chat{display:flex;flex-direction:column;gap:8px}' +
     '.jv-b{max-width:88%;padding:9px 12px;border-radius:14px;line-height:1.45;font-size:14px;white-space:pre-wrap;word-wrap:break-word}' +
-    '.jv-b.me{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px}' +
+    '.jv-b.me{align-self:flex-end;background:var(--accent);color:var(--fg-on-accent);border-bottom-right-radius:4px}' +
     '.jv-b.ai{align-self:flex-start;background:var(--panel2,rgba(127,127,127,.12));border:1px solid var(--line);border-bottom-left-radius:4px}' +
     '.jv-x{margin-top:8px;font-size:13px;white-space:normal}.jv-x a{color:inherit;font-weight:600}' +
     '.jv-typing span{display:inline-block;width:6px;height:6px;margin:0 2px;border-radius:50%;background:currentColor;opacity:.4;animation:jvdot 1s infinite}' +
     '.jv-typing span:nth-child(2){animation-delay:.15s}.jv-typing span:nth-child(3){animation-delay:.3s}' +
     '@keyframes jvdot{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:.9;transform:translateY(-3px)}}' +
     '#jv-dock{position:fixed;right:18px;bottom:18px;z-index:60}' +
-    '.jv-fab{display:flex;align-items:center;gap:8px;padding:10px 16px 10px 10px;border-radius:999px;border:1px solid var(--line);background:var(--panel,#fff);color:inherit;font-weight:700;cursor:pointer;box-shadow:0 6px 24px rgba(0,0,0,.18)}' +
+    '.jv-fab{display:flex;align-items:center;gap:8px;padding:10px 16px 10px 10px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:inherit;font-weight:700;cursor:pointer;box-shadow:0 6px 24px rgba(0,0,0,.18)}' +
     '.jv-fab-orb{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 35%,var(--accent-ink),var(--accent))}' +
-    '.jv-dockp{width:360px;max-width:calc(100vw - 32px);max-height:min(560px,calc(100vh - 36px));display:flex;flex-direction:column;background:var(--panel,#fff);border:1px solid var(--line);border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,.25);overflow:hidden}' +
+    '.jv-dockp{width:360px;max-width:calc(100vw - 32px);max-height:min(560px,calc(100vh - 36px));display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,.25);overflow:hidden}' +
     '.jv-dock-out{flex:1;overflow-y:auto;padding:4px 14px;min-height:80px}' +
     '@media(max-width:560px){#jv-dock{right:16px;left:16px;bottom:16px}#jv-dock .jv-fab{margin-left:auto}.jv-dockp{width:auto;max-width:none}}';
   document.head.appendChild(st);

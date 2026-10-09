@@ -2,7 +2,7 @@
    rendered by the page's JavaScript; static markup uses Tailwind utilities. */
 .page-techdeva {
   /* base controls the JS creates without classes */
-  & button { @apply inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-[var(--btn-radius)] border border-line-strong bg-surface-2 px-3.5 text-sm text-fg transition-colors hover:bg-surface-3; }
+  & button:not(.td-theme-btn) { @apply inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-[var(--btn-radius)] border border-line-strong bg-surface-2 px-3.5 text-sm text-fg transition-colors hover:bg-surface-3; }
   & button.primary { @apply border-accent bg-accent font-medium text-on-accent hover:bg-accent-hover; }
   & button.tiny { @apply h-8 px-2.5 text-xs; }
   & a { @apply text-accent-ink; }
@@ -24,7 +24,13 @@
   & nav a { @apply flex min-h-10 items-center justify-between gap-2 rounded-[var(--p-radius-sm)] px-3 text-sm text-fg-muted no-underline hover:bg-surface-2 hover:text-fg; }
   & nav a.on { @apply bg-accent-tint font-medium text-fg; }
   & nav a .tag { @apply text-xs text-warning; }
-  & .navgrp { @apply px-3 pt-4 pb-1.5 text-label font-medium text-fg-subtle uppercase; }
+  & button.navgrp { @apply mt-1 flex h-auto min-h-9 w-full items-center justify-between rounded-[var(--p-radius-sm)] border-0 bg-transparent px-3 pt-3 pb-1.5 text-left text-label font-medium text-fg-subtle uppercase hover:bg-transparent hover:text-fg; }
+  & .navend { @apply flex items-center gap-2; }
+  & .navchev { @apply h-4 w-4 flex-none fill-none stroke-current stroke-2 transition-transform motion-reduce:transition-none; stroke-linecap: round; stroke-linejoin: round; }
+  & .navsec.collapsed .navchev { @apply -rotate-90; }
+  & .navsec.collapsed .navitems { @apply hidden; }
+  & .navsum { @apply hidden normal-case; }
+  & .navsec.collapsed .navsum { @apply inline; }
   & .sidefoot a { @apply text-accent-ink no-underline hover:underline; }
 
   /* founder identity */

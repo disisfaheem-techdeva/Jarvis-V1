@@ -6,6 +6,7 @@
  */
 @import "tailwindcss" source(none);
 @source "../web/*.html";
+@source "./theme.js";
 
 @import "./tokens.css";
 @import "./effects.css";
