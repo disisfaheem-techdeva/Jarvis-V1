@@ -8,8 +8,8 @@ import { SessionGate } from "@/components/SessionGate";
 import { Badge } from "@/components/ui/Badge";
 import { ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { MetricCard } from "@/components/MetricCard";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { CountUp } from "@/components/ui/motion";
 import { Notice } from "@/components/ui/Notice";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { API_BASE, getAttributionReport, getLeads, type AttributionReport, type Lead } from "@/lib/api";
@@ -87,9 +87,9 @@ function Overview({ session }: { session: Session }) {
           Your numbers
         </h2>
         <ul className="td-stagger grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
-          <Metric i={0} label="Open leads" value={openLeads} help="People who haven't been marked lost" loading={!loadedAt} />
-          <Metric i={1} label="New in the last 24 hours" value={newLeads} help="Leads your AI team captured today" loading={!loadedAt} />
-          <Metric
+          <MetricCard i={0} label="Open leads" value={openLeads} help="People who haven't been marked lost" loading={!loadedAt} />
+          <MetricCard i={1} label="New in the last 24 hours" value={newLeads} help="Leads your AI team captured today" loading={!loadedAt} />
+          <MetricCard
             i={2}
             label="Cost per lead"
             value={report?.cpl ?? null}
@@ -97,7 +97,7 @@ function Overview({ session }: { session: Session }) {
             empty="No ad spend recorded yet"
             loading={!loadedAt}
           />
-          <Metric
+          <MetricCard
             i={3}
             label="Return on ad spend"
             value={report?.roas ?? null}
@@ -196,52 +196,6 @@ function Hero({
         ) : null}
       </div>
     </section>
-  );
-}
-
-function Metric({
-  i,
-  label,
-  value,
-  suffix,
-  decimals = 0,
-  help,
-  empty = "No data recorded yet",
-  loading,
-}: {
-  i: number;
-  label: string;
-  value: number | null;
-  suffix?: string;
-  decimals?: number;
-  help: string;
-  empty?: string;
-  loading: boolean;
-}) {
-  return (
-    <li style={{ "--i": i } as React.CSSProperties}>
-      <Card className="flex h-full flex-col p-4 sm:p-6">
-        <p className="text-[13px] font-medium text-fg-muted sm:text-sm">{label}</p>
-        {loading ? (
-          <Skeleton className="mt-4 h-12 w-24" />
-        ) : value == null ? (
-          <p className="mt-3 font-display text-metric font-semibold text-fg-subtle">
-            <span aria-hidden="true">—</span>
-            <span className="sr-only">No data</span>
-          </p>
-        ) : (
-          <p className="mt-3 font-display text-metric font-semibold text-fg">
-            <CountUp
-              value={value}
-              delay={i * 90}
-              format={(n) => n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}
-            />
-            {suffix ? <span className="ml-1 text-2xl text-fg-muted">{suffix}</span> : null}
-          </p>
-        )}
-        <p className="mt-auto pt-3 text-xs text-fg-subtle">{value == null && !loading ? empty : help}</p>
-      </Card>
-    </li>
   );
 }
 

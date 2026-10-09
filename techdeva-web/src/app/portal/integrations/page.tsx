@@ -1,10 +1,17 @@
 "use client";
 
-import Link from "next/link";
+import { AlertTriangle, CircleCheck, CircleDashed, Clock, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { SessionGate } from "@/components/SessionGate";
+import { Badge } from "@/components/ui/Badge";
+import { Button, buttonClass } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Notice } from "@/components/ui/Notice";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { API_BASE } from "@/lib/api";
-import { useSession } from "@/lib/useTenant";
+import { relativeTime } from "@/lib/labels";
 
 /**
  * What this business can actually prove about each integration.
@@ -47,29 +54,68 @@ const BLURB: Record<string, string> = {
 /** Providers that cannot be self-connected yet — say so rather than show a dead button. */
 const NOT_SELF_SERVICE = new Set(["whatsapp", "instagram"]);
 
+/** Plain-language explanations for provider error codes. Unknown codes are shown as-is. */
+const ERROR_TEXT: Record<string, string> = {
+  invalid_grant: "The provider stopped accepting our access, usually after a password change or a removed permission.",
+  expired_token: "The access expired.",
+  access_denied: "Permission was declined on the provider's screen.",
+};
+
 function expired(i: Integration): boolean {
   return !!i.expires_at && new Date(i.expires_at).getTime() < Date.now();
 }
 
+function fmtDate(iso: string) {
+  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
 function State({ i }: { i: Integration }) {
   if (i.last_error) {
-    return <span className="text-sm text-red-400">Problem — {i.last_error}</span>;
+    return (
+      <div className="flex items-start gap-2 text-sm">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
+        <p>
+          <span className="font-medium text-danger">Problem.</span>{" "}
+          <span className="text-fg-muted">{ERROR_TEXT[i.last_error] ?? i.last_error} Reconnect to fix it.</span>
+        </p>
+      </div>
+    );
   }
   if (i.connected && expired(i)) {
-    return <span className="text-sm text-amber-300">Expired — needs reconnecting</span>;
+    return (
+      <p className="flex items-center gap-2 text-sm">
+        <Clock className="h-4 w-4 text-warning" aria-hidden="true" />
+        <span className="font-medium text-warning">Expired</span>
+        <span className="text-fg-muted">· needs reconnecting</span>
+      </p>
+    );
   }
   if (i.connected) {
     return (
-      <span className="text-sm text-emerald-400">
-        Connected{i.external_account ? ` · ${i.external_account}` : ""}
-      </span>
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+        <CircleCheck className="h-4 w-4 text-success" aria-hidden="true" />
+        <span className="font-medium text-success">Connected</span>
+        {i.external_account ? <span className="text-fg-muted">· {i.external_account}</span> : null}
+      </p>
     );
   }
-  return <span className="text-sm text-[var(--muted)]">Not connected</span>;
+  return (
+    <p className="flex items-center gap-2 text-sm text-fg-muted">
+      <CircleDashed className="h-4 w-4" aria-hidden="true" />
+      Not connected
+    </p>
+  );
 }
 
 export default function IntegrationsPage() {
-  const { session, loading } = useSession();
+  return (
+    <SessionGate title="Connections" purpose="manage your connections">
+      {() => <Connections />}
+    </SessionGate>
+  );
+}
+
+function Connections() {
   const [items, setItems] = useState<Integration[] | null | undefined>(undefined);
 
   const load = useCallback(() => {
@@ -80,79 +126,101 @@ export default function IntegrationsPage() {
   }, []);
 
   useEffect(() => {
-    if (session) load();
-  }, [session, load]);
+    load();
+  }, [load]);
 
-  if (loading) return <p className="text-sm text-[var(--muted)]">Loading…</p>;
+  const header = (
+    <PageHeader
+      title="Connections"
+      description="Your AI team can only work with what is connected here. A connection shows as live only when a working credential is actually stored."
+    />
+  );
 
-  if (!session) {
+  if (items === undefined) {
     return (
-      <p className="text-sm text-[var(--muted)]">
-        You are signed out.{" "}
-        <Link className="underline" href="/login">
-          Sign in
-        </Link>{" "}
-        to manage your connections.
-      </p>
+      <div className="flex max-w-3xl flex-col gap-4">
+        {header}
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-32 rounded-[var(--card-radius)]" />
+        ))}
+      </div>
     );
   }
 
-  if (items === undefined) return <p className="text-sm text-[var(--muted)]">Loading connections…</p>;
-  if (items === null) return <p className="text-sm text-red-400">Could not load your connections.</p>;
+  if (items === null) {
+    return (
+      <div className="max-w-3xl">
+        {header}
+        <Notice
+          tone="offline"
+          title="Couldn't load your connections"
+          className="mt-6"
+          action={
+            <Button variant="secondary" size="sm" onClick={load}>
+              Try again
+            </Button>
+          }
+        >
+          Nothing was changed.
+        </Notice>
+      </div>
+    );
+  }
+
+  const live = items.filter((i) => i.connected && !expired(i) && !i.last_error).length;
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-xl font-semibold text-white">Connections</h1>
-      <p className="mt-2 text-sm text-[var(--muted)]">
-        Your AI team can only work with what is connected here. A connection is shown as live
-        only when a working credential is actually stored.
+      {header}
+      <p className="mt-4 text-sm text-fg-subtle">
+        {live} of {items.length} connected
       </p>
 
-      <div className="mt-8 space-y-3">
+      <ul className="mt-4 flex flex-col gap-3">
         {items.map((i) => {
           const needsAction = !i.connected || expired(i) || !!i.last_error;
           const selfService = !NOT_SELF_SERVICE.has(i.provider);
+          const evidence: string[] = [];
+          if (i.connected && i.last_checked_at) evidence.push(`Last checked ${relativeTime(i.last_checked_at)}`);
+          if (i.connected && i.expires_at && !expired(i)) evidence.push(`renews by ${fmtDate(i.expires_at)}`);
           return (
-            <section
-              key={i.provider}
-              className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-white/10 bg-white/[0.02] px-5 py-4"
-            >
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-white">
-                  {LABEL[i.provider] ?? i.provider}
-                </p>
-                <p className="mt-1 text-xs text-[var(--muted)]">{BLURB[i.provider] ?? ""}</p>
-                <p className="mt-2">
-                  <State i={i} />
-                </p>
-                {i.scopes.length > 0 && (
-                  <p className="mt-1 text-xs text-[var(--muted)]">
-                    Permissions: {i.scopes.join(", ")}
-                  </p>
-                )}
-              </div>
+            <li key={i.provider}>
+              <Card as="article" aria-labelledby={`c-${i.provider}`} className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between sm:p-6">
+                <div className="min-w-0">
+                  <h2 id={`c-${i.provider}`} className="text-base font-semibold text-fg">
+                    {LABEL[i.provider] ?? i.provider}
+                  </h2>
+                  <p className="mt-1 text-sm text-fg-muted">{BLURB[i.provider] ?? ""}</p>
+                  <div className="mt-3">
+                    <State i={i} />
+                  </div>
+                  {evidence.length > 0 ? (
+                    <p className="mt-2 flex items-center gap-1.5 text-xs text-fg-subtle">
+                      <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                      {evidence.join(" · ")}
+                    </p>
+                  ) : null}
+                  {i.scopes.length > 0 ? (
+                    <p className="mt-1 text-xs text-fg-subtle">Permissions: {i.scopes.join(", ")}</p>
+                  ) : null}
+                </div>
 
-              {needsAction && selfService && (
-                <a
-                  href={`${API_BASE}/connect/${i.provider}`}
-                  className="shrink-0 rounded bg-white/90 px-4 py-2 text-sm font-medium text-black"
-                >
-                  {i.connected ? "Reconnect" : "Connect"}
-                </a>
-              )}
-              {needsAction && !selfService && (
-                <span className="shrink-0 text-xs uppercase tracking-wide text-[var(--muted)]">
-                  {i.provider === "instagram" ? "Via Facebook" : "Set up for you"}
-                </span>
-              )}
-            </section>
+                {needsAction && selfService ? (
+                  <a href={`${API_BASE}/connect/${i.provider}`} className={buttonClass(i.connected || i.last_error ? "secondary" : "primary", "md", "shrink-0")}>
+                    {i.connected || i.last_error ? "Reconnect" : "Connect"}
+                  </a>
+                ) : null}
+                {needsAction && !selfService ? (
+                  <Badge className="shrink-0 self-start">{i.provider === "instagram" ? "Connects through Facebook" : "We set this up for you"}</Badge>
+                ) : null}
+              </Card>
+            </li>
           );
         })}
-      </div>
+      </ul>
 
-      <p className="mt-8 text-xs text-[var(--muted)]">
-        Connecting opens the provider&apos;s own permission screen. TechDeva never sees or stores
-        your password.
+      <p className="mt-8 text-sm text-fg-subtle">
+        Connecting opens the provider&apos;s own permission screen. TechDeva never sees or stores your password.
       </p>
     </div>
   );
