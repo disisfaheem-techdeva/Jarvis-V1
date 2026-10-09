@@ -1,0 +1,41 @@
+/* /onboarding — set up your business. Classes below are rendered by the page's
+   JavaScript; static markup uses Tailwind utilities directly. */
+.page-onboarding {
+  & .err { @apply mb-4 hidden rounded-[var(--p-radius-md)] border border-danger/30 bg-danger-tint px-4 py-3 text-sm text-danger; }
+
+  /* step chips */
+  & .chip { @apply inline-flex h-9 cursor-pointer items-center rounded-full border border-line-strong bg-transparent px-3.5 text-[13px] font-medium text-fg-muted transition-colors hover:text-fg; }
+  & .chip.done { @apply border-success/40 bg-success-tint text-success; }
+  & .chip.on { @apply border-accent bg-accent text-on-accent; }
+
+  /* the step card and its form */
+  & .card { @apply rounded-[var(--card-radius)] border border-line bg-surface p-5 sm:p-7; }
+  & .card h2 { @apply m-0 mb-1 font-display text-2xl font-semibold tracking-tight text-fg; }
+  & .card .hint { @apply mt-1 mb-6 max-w-prose text-[15px] text-fg-muted; }
+  & label { @apply mb-1.5 block text-sm font-medium text-fg; }
+  & input, & textarea, & select {
+    @apply w-full rounded-[var(--input-radius)] border border-[var(--input-border)] bg-[var(--input-bg)] px-3.5 text-[15px] text-fg transition-[border-color,box-shadow] placeholder:text-fg-subtle hover:border-accent-line focus:border-[var(--ring)] focus:[box-shadow:0_0_0_3px_var(--accent-tint)] focus:outline-none;
+  }
+  & input, & select { @apply h-[var(--input-h)]; }
+  & textarea { @apply min-h-28 resize-y py-2.5 leading-relaxed; }
+  & .row { @apply mb-4 grid gap-4; }
+  & .row2 { @apply sm:grid-cols-2; }
+  & .row3 { @apply sm:grid-cols-[1.6fr_1fr_auto]; }
+  & .items { @apply mb-3 grid gap-3; }
+  & .item { @apply grid items-center gap-3; }
+  @media (max-width: 640px) {
+    /* pairing fields two-across reads as nonsense on a phone - one card per row instead */
+    & .item { @apply grid-cols-1! gap-2 rounded-[var(--p-radius-md)] border border-line bg-bg-elevated p-3; }
+    & .item .del { @apply justify-self-start; }
+  }
+  & .del { @apply inline-flex h-11 cursor-pointer items-center justify-center rounded-[var(--btn-radius)] border border-line-strong bg-transparent px-3 text-sm text-fg-muted hover:border-danger hover:bg-danger-tint hover:text-danger; }
+  & .add { @apply mb-5 inline-flex h-11 cursor-pointer items-center rounded-[var(--btn-radius)] border border-dashed border-line-strong bg-transparent px-4 text-sm font-medium text-accent-ink hover:border-accent-line hover:bg-accent-tint; }
+  & .foot { @apply mt-6 flex flex-wrap items-center gap-2.5 border-t border-line pt-5; }
+  & .primary { @apply inline-flex h-11 cursor-pointer items-center justify-center rounded-[var(--btn-radius)] border-0 bg-accent px-5 text-sm font-medium text-on-accent hover:bg-accent-hover disabled:cursor-default disabled:opacity-55; }
+  & .ghost { @apply inline-flex h-11 cursor-pointer items-center justify-center rounded-[var(--btn-radius)] border border-line-strong bg-surface-2 px-4 text-sm text-fg hover:bg-surface-3; }
+  & .saved { @apply text-sm font-medium text-success opacity-0 transition-opacity; }
+  & .saved.show { @apply opacity-100; }
+  & .done-panel { @apply px-6 py-10 text-center; }
+  & .done-panel .big { @apply mb-3 font-display text-5xl leading-none text-success; }
+  & .note { @apply mt-2.5 text-sm text-fg-subtle; }
+}

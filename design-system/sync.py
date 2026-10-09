@@ -55,11 +55,11 @@ TAILWIND_ENTRY = DS / "web.css"
 TAILWIND_OUT = ROOT / "web/assets/td.css"
 TAILWIND_PAGES = [
     ROOT / "web/portal.html",
+    ROOT / "web/onboarding.html",
 ]
 # Pages still on the inlined system until they are moved to Tailwind.
 INLINE_WEB_PAGES = [
     ROOT / "web/dashboard.html",
-    ROOT / "web/onboarding.html",
     ROOT / "web/signup.html",
     ROOT / "web/techdeva.html",
 ]
