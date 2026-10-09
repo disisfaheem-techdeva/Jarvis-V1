@@ -57,11 +57,11 @@ TAILWIND_PAGES = [
     ROOT / "web/portal.html",
     ROOT / "web/onboarding.html",
     ROOT / "web/signup.html",
+    ROOT / "web/techdeva.html",
 ]
 # Pages still on the inlined system until they are moved to Tailwind.
 INLINE_WEB_PAGES = [
     ROOT / "web/dashboard.html",
-    ROOT / "web/techdeva.html",
 ]
 
 FONTS = (

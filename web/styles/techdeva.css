@@ -1,0 +1,63 @@
+/* /techdeva — the founder console ("mission control"). Classes below are
+   rendered by the page's JavaScript; static markup uses Tailwind utilities. */
+.page-techdeva {
+  /* base controls the JS creates without classes */
+  & button { @apply inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-[var(--btn-radius)] border border-line-strong bg-surface-2 px-3.5 text-sm text-fg transition-colors hover:bg-surface-3; }
+  & button.primary { @apply border-accent bg-accent font-medium text-on-accent hover:bg-accent-hover; }
+  & button.tiny { @apply h-8 px-2.5 text-xs; }
+  & a { @apply text-accent-ink; }
+
+  /* navigation (rendered into #nav) */
+  & nav a { @apply flex min-h-10 items-center justify-between gap-2 rounded-[var(--p-radius-sm)] px-3 text-sm text-fg-muted no-underline hover:bg-surface-2 hover:text-fg; }
+  & nav a.on { @apply bg-accent-tint font-medium text-fg; }
+  & nav a .tag { @apply text-xs text-warning; }
+  & .navgrp { @apply px-3 pt-4 pb-1.5 text-label font-medium text-fg-subtle uppercase; }
+  @media (max-width: 900px) {
+    /* phones: the sidebar becomes a scrolling row of tabs at the top */
+    & nav { @apply flex gap-1 overflow-x-auto pb-1; }
+    & nav a { @apply shrink-0 whitespace-nowrap; }
+    & .navgrp { @apply hidden; }
+  }
+
+  /* views */
+  & .sub { @apply mt-1 text-sm text-fg-muted; }
+  & .grid { @apply mt-5 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-[repeat(auto-fit,minmax(160px,1fr))]; }
+  & .card { @apply rounded-[var(--card-radius)] border border-line bg-surface p-4 sm:p-5; }
+  /* wide tables scroll inside their card, never the page */
+  & .card:has(table) { @apply overflow-x-auto; }
+  & .card table { @apply min-w-[720px]; }
+  & .k-label { @apply text-[13px] font-medium text-fg-muted; }
+  & .k-value { @apply mt-2.5 font-display text-[2rem] leading-none font-semibold tracking-tight tabular-nums text-fg; }
+  & .k-note { @apply mt-2 text-xs text-fg-subtle; }
+  & .good { @apply text-success; }
+  & .warn { @apply text-warning; }
+  & .bad { @apply text-danger; }
+  & .dim { @apply text-fg-subtle; }
+  & section { @apply mt-8; }
+  & section h2 { @apply m-0 mb-3 text-label font-semibold text-fg-subtle uppercase; }
+  & table { @apply w-full border-collapse text-sm; }
+  & th { @apply bg-surface-2 px-3 py-2.5 text-left text-xs font-medium tracking-[0.06em] whitespace-nowrap text-fg-subtle uppercase first:rounded-tl-[var(--p-radius-sm)] last:rounded-tr-[var(--p-radius-sm)]; }
+  & td { @apply border-t border-line px-3 py-3 text-fg; }
+  & tr:hover td { @apply bg-surface-2; }
+  & td.num, & th.num { @apply text-right tabular-nums; }
+  & .name { @apply font-medium; }
+  & .pill { @apply inline-flex h-6 items-center rounded-full bg-surface-3 px-2.5 text-xs font-medium whitespace-nowrap text-fg-muted; }
+  & .pill.active { @apply bg-success-tint text-success; }
+  & .pill.trial { @apply bg-info-tint text-info; }
+  & .fee, & .pay input { @apply h-9 w-28 rounded-[var(--p-radius-sm)] border border-[var(--input-border)] bg-[var(--input-bg)] px-2.5 text-right text-sm text-fg focus:border-[var(--ring)] focus:outline-none; }
+  & .bars { @apply flex h-32 items-end gap-2.5 pt-2.5; }
+  & .bar { @apply flex h-full flex-1 flex-col items-center justify-end gap-1.5; }
+  & .bar i { @apply block min-h-0.5 w-full rounded-t-[var(--p-radius-xs)] bg-[var(--chart-1)]; }
+  & .bar span { @apply text-[11px] text-fg-subtle; }
+  & .empty { @apply rounded-[var(--card-radius)] border border-dashed border-line-strong p-6 text-center text-fg-muted; }
+  & .row { @apply flex flex-nowrap items-center gap-2; }
+  & .row button { @apply whitespace-nowrap; }
+  & .health { @apply flex flex-wrap gap-5; }
+  & .health div { @apply flex items-center gap-2; }
+  & .dot { @apply h-2.5 w-2.5 rounded-full bg-fg-subtle; }
+  & .dot.ok { @apply bg-success; }
+  & .dot.bad { @apply bg-danger; }
+  & .dot.warn { @apply bg-warning; }
+  & .pay { @apply mt-2 hidden gap-2; }
+  & .err { @apply min-h-5 text-sm text-danger; }
+}
