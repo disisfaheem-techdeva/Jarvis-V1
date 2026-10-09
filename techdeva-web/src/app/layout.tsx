@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
-import { Bricolage_Grotesque, Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import Script from "next/script";
 
 import { themeScript } from "@/components/ui/theme";
@@ -15,11 +16,13 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// Display face: headlines and headline metrics only.
-const display = Bricolage_Grotesque({
+// Display face: headlines and headline metrics only. Self-hosted (OFL) so the
+// build doesn't depend on fetching it; one variable file covers 500–700.
+const display = localFont({
+  src: "./fonts/BricolageGrotesque-latin.woff2",
   variable: "--font-display-face",
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  weight: "500 700",
+  display: "swap",
 });
 
 export const metadata: Metadata = {

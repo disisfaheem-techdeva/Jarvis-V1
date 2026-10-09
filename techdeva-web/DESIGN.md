@@ -81,7 +81,7 @@ Tailwind exposes these as utilities through `@theme inline`: `bg-bg`,
 
 | Role | Face | Where |
 | --- | --- | --- |
-| Display | Bricolage Grotesque 500–700 (`font-display`) | Page titles, hero headline, headline metrics |
+| Display | Bricolage Grotesque 500–700, self-hosted in `src/app/fonts` (`font-display`) | Page titles, hero headline, headline metrics |
 | Body / UI | Geist (`font-sans`) | Everything else |
 | Data / labels | Geist Mono (`font-mono`) | Step numbers, technical identifiers, timestamps |
 
