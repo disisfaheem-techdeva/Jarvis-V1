@@ -28,14 +28,52 @@ import os
 import time
 import re
 
+import threading
+
 import requests
+
+# Set while generate_json runs, so providers that can be asked for strict JSON are.
+_JSON_MODE = threading.local()
+_FAST = threading.local()
+_LAST = threading.local()     # set by fast(): short, low-thinking replies for a person waiting
 
 DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-5",
     "gemini": "gemini-2.5-flash",
     "openai": "gpt-4o",
 }
-AI_TIMEOUT = float(os.environ.get("AI_TIMEOUT", "60"))
+# A model that hangs must not hold a person in front of Jarvis for a minute:
+# fail fast and let the chain try the next model.
+AI_TIMEOUT = float(os.environ.get("AI_TIMEOUT", "12"))
+# Hard wall-clock cap per model call (a slowly trickling reply defeats a read
+# timeout), and for the whole chain, so Jarvis always answers or fails fast.
+AI_TOTAL_BUDGET = float(os.environ.get("AI_TOTAL_BUDGET", "30"))
+_POOL = None
+
+
+def _run_capped(fn, *a):
+    global _POOL
+    import concurrent.futures as cf
+    if _POOL is None:
+        _POOL = cf.ThreadPoolExecutor(max_workers=16, thread_name_prefix="ai")
+    json_on = getattr(_JSON_MODE, "on", False)
+
+    fast_on = getattr(_FAST, "on", False)
+
+    def call():
+        _JSON_MODE.on = json_on   # thread-local: carry the caller's modes across
+        _FAST.on = fast_on
+        try:
+            return fn(*a)
+        finally:
+            _JSON_MODE.on = False
+            _FAST.on = False
+
+    fut = _POOL.submit(call)
+    try:
+        return fut.result(timeout=AI_TIMEOUT + 3)
+    except cf.TimeoutError:
+        raise requests.Timeout("no complete reply within %ss" % (AI_TIMEOUT + 3))
 AI_MAX_TOKENS = int(os.environ.get("AI_MAX_TOKENS", "4000"))
 
 # Base URLs are overridable so the platform can be pointed at a gateway, a proxy,
@@ -112,14 +150,37 @@ def _call_anthropic(system: str, prompt: str) -> str:
     return "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
 
 
+def _gemini_fast_thinking(model: str):
+    """Least thinking the model allows. Gemini 2.5/3 Flash models reason before
+    answering by default, which adds seconds a person waiting on Jarvis can hear.
+    Only used in fast mode (the console); other AI work is unchanged."""
+    m = (model or "").lower()
+    if m.startswith("gemini-2.5") and "pro" not in m:
+        return {"thinkingBudget": 0}
+    if m.startswith("gemini-3"):
+        return {"thinkingLevel": "low"}
+    return None
+
+
 def _call_gemini(system: str, prompt: str) -> str:
+    model = model_name()
     url = (f'{base_url("gemini")}/v1beta/models/'
-           f"{model_name()}:generateContent")
-    r = requests.post(url, params={"key": _key()},
-                      json={"system_instruction": {"parts": [{"text": system}]},
-                            "contents": [{"parts": [{"text": prompt}]}],
-                            "generationConfig": {"maxOutputTokens": AI_MAX_TOKENS}},
-                      timeout=AI_TIMEOUT)
+           f"{model}:generateContent")
+    fast = getattr(_FAST, "on", False)
+    cfg = {"maxOutputTokens": 800 if fast else AI_MAX_TOKENS}
+    if getattr(_JSON_MODE, "on", False):
+        cfg["responseMimeType"] = "application/json"
+    think = _gemini_fast_thinking(model) if fast else None
+    if think:
+        cfg["thinkingConfig"] = think
+    body = {"system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": cfg}
+    r = requests.post(url, params={"key": _key()}, json=body, timeout=AI_TIMEOUT)
+    if r.status_code == 400 and think and "thinking" in r.text.lower():
+        # this model does not take that setting: ask again without it
+        cfg.pop("thinkingConfig", None)
+        r = requests.post(url, params={"key": _key()}, json=body, timeout=AI_TIMEOUT)
     if r.status_code >= 400:
         raise AIUnavailable(f"gemini_{r.status_code}: {r.text[:200]}")
     cands = r.json().get("candidates", [])
@@ -155,7 +216,7 @@ _KEY_ENV = {"anthropic": "ANTHROPIC_API_KEY",
 # How long to stop asking a provider that just told us no. An exhausted account
 # will still be exhausted in a second; hammering it wastes the whole task's time
 # budget on a question already answered.
-_COOLDOWN = {"credit": 900, "auth": 900, "rate": 60, "unreachable": 30, "bad_response": 10}
+_COOLDOWN = {"credit": 900, "auth": 900, "rate": 60, "unreachable": 60, "bad_response": 10}
 
 _DOWN = {}          # provider -> {"until": ts, "why": str, "reason": str}
 
@@ -308,7 +369,11 @@ def generate(system: str, prompt: str) -> str:
         raise AIUnavailable("no AI provider has an API key configured")
 
     tried, skipped = [], []
+    started = time.time()
     for p, m in chain:
+        if time.time() - started > AI_TOTAL_BUDGET:
+            skipped.append("out of time after %ds" % AI_TOTAL_BUDGET)
+            break
         key = "%s:%s" % (p, m or "default")
         rest = _resting(key)
         if rest:
@@ -316,11 +381,12 @@ def generate(system: str, prompt: str) -> str:
             continue
         _ACTIVE, _ACTIVE_MODEL = p, m
         try:
-            text = _TRANSPORT[p](system, prompt)
+            text = _run_capped(_TRANSPORT[p], system, prompt)
             if not (text or "").strip():
                 raise AIUnavailable(f"{key} returned an empty response")
             if (p, m) != chain[0]:
                 print(f"[ai] served by fallback {key}", flush=True)
+            _LAST.key = "%s:%s" % (p, m or DEFAULT_MODELS.get(p))
             return text
         except requests.RequestException as e:
             why = f"{key} unreachable: {type(e).__name__}"
@@ -358,13 +424,33 @@ def _extract_json(text: str):
     raise AIUnavailable("model did not return parseable JSON")
 
 
+class fast:
+    """with ai.fast(): ... -- a person is waiting (Jarvis): least thinking, short output."""
+    def __enter__(self):
+        _FAST.on = True
+        return self
+
+    def __exit__(self, *exc):
+        _FAST.on = False
+        return False
+
+
+def last_model():
+    """Which provider:model answered the last call on this thread (for timing)."""
+    return getattr(_LAST, "key", None)
+
+
 def generate_json(system: str, prompt: str, required_keys: tuple = (), _retry=True) -> dict:
     """Generation that must come back as a JSON object with the expected shape.
 
     One corrective retry, then give up honestly. Half-understood output is never
     passed on to a client — the agent parks it for a human instead.
     """
-    text = generate(system, prompt)
+    _JSON_MODE.on = True
+    try:
+        text = generate(system, prompt)
+    finally:
+        _JSON_MODE.on = False
     try:
         data = _extract_json(text)
         if not isinstance(data, dict):

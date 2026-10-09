@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { AuthShell, PasswordInput } from "@/components/AuthShell";
@@ -8,9 +7,9 @@ import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Input";
 import { Notice } from "@/components/ui/Notice";
 import { API_BASE } from "@/lib/api";
+import { SIGNUP_URL } from "@/lib/links";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -20,9 +19,10 @@ export default function LoginPage() {
     setError(null);
     const form = new FormData(e.currentTarget);
     try {
-      const res = await fetch(`${API_BASE}/login`, {
+      const res = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           email: form.get("email"),
           password: form.get("password"),
@@ -33,7 +33,10 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
-      router.push("/portal");
+      // the founder works in the founder console, a business in its dashboard
+      const who = await res.json().catch(() => null);
+      window.location.href =
+        who && who.role === "techdeva_admin" ? "https://api.techdeva.net/techdeva" : "https://api.techdeva.net/dashboard";
     } catch {
       setError("Could not reach the server.");
       setLoading(false);
@@ -42,8 +45,8 @@ export default function LoginPage() {
 
   return (
     <AuthShell>
-      <h1 className="font-display text-2xl font-semibold tracking-tight text-fg">Log in to your portal</h1>
-      <p className="mt-2 text-[15px] text-fg-muted">See your leads, approvals and results.</p>
+      <h1 className="font-display text-2xl font-semibold tracking-tight text-fg">Log in</h1>
+      <p className="mt-2 text-[15px] text-fg-muted">Open your TechDeva dashboard.</p>
 
       <form onSubmit={onSubmit} className="mt-7 flex flex-col gap-4">
         <Field label="Email" required>
@@ -64,9 +67,17 @@ export default function LoginPage() {
         </Button>
       </form>
 
-      <p className="mt-6 text-sm text-fg-subtle">
-        Forgot your password or never set one? Ask your TechDeva contact for a new setup link.
-      </p>
+      <div className="mt-6 flex flex-col gap-2 text-sm text-fg-muted">
+        <a className="inline-flex min-h-9 items-center font-medium text-accent-ink hover:underline" href={`${API_BASE}/reset`}>
+          Forgot your password?
+        </a>
+        <p>
+          New to TechDeva?{" "}
+          <a className="font-medium text-accent-ink hover:underline" href={SIGNUP_URL}>
+            Start a free trial
+          </a>
+        </p>
+      </div>
     </AuthShell>
   );
 }

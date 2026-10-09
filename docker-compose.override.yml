@@ -6,6 +6,17 @@ services:
       - traefik.http.routers.techdeva-api.entrypoints=websecure
       - traefik.http.routers.techdeva-api.tls.certresolver=letsencrypt
       - traefik.http.services.techdeva-api.loadbalancer.server.port=8000
+      # clients' own addresses (ops/setup/add_subdomain.sh)
+      - "traefik.http.routers.techdeva-tenants.rule=Host(`drirfan.techdeva.net`)"
+      - traefik.http.routers.techdeva-tenants.entrypoints=websecure
+      - traefik.http.routers.techdeva-tenants.tls.certresolver=letsencrypt
+      - traefik.http.routers.techdeva-tenants.service=techdeva-api
+      - "traefik.http.routers.techdeva-tenants-http.rule=Host(`drirfan.techdeva.net`)"
+      - traefik.http.routers.techdeva-tenants-http.entrypoints=web
+      - traefik.http.routers.techdeva-tenants-http.middlewares=techdeva-to-https
+      - traefik.http.routers.techdeva-tenants-http.service=techdeva-api
+      - traefik.http.middlewares.techdeva-to-https.redirectscheme.scheme=https
+      - traefik.http.middlewares.techdeva-to-https.redirectscheme.permanent=true
     networks:
       - default
       - hermes_net

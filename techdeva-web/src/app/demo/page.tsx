@@ -3,39 +3,58 @@
 import { CalendarCheck, CircleCheck, Clock, Hand, MonitorPlay } from "lucide-react";
 import { useState } from "react";
 
-import { SiteFooter } from "@/components/site/SiteFooter";
-import { SiteHeader } from "@/components/site/SiteHeader";
-import { Button, ButtonLink } from "@/components/ui/Button";
-import { Field, Input } from "@/components/ui/Input";
+import { SiteFooter } from "@/components/SiteFooter";
+import { SiteHeader } from "@/components/SiteHeader";
+import { Button } from "@/components/ui/Button";
+import { Field, Input, Textarea } from "@/components/ui/Input";
 import { Notice } from "@/components/ui/Notice";
 import { API_BASE } from "@/lib/api";
+import { SIGNUP_URL, TRIAL_DAYS } from "@/lib/links";
 
 const EXPECT = [
   { Icon: MonitorPlay, text: "The platform running on a real clinic, not a slide deck" },
   { Icon: Hand, text: "What your AI team does on its own, and what waits for you" },
-  { Icon: Clock, text: "About 30 minutes, at a time that suits you" },
+  { Icon: Clock, text: "We call or message you at a time that suits you" },
 ];
 
 export default function DemoPage() {
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [error, setError] = useState("");
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
+    const phone = String(form.get("phone") || "").trim();
+    const email = String(form.get("email") || "").trim();
+    if (!phone && !email) {
+      setStatus("error");
+      setError("Please leave a phone number or an email so we can reach you.");
+      return;
+    }
     setStatus("sending");
+    setError("");
     try {
-      const res = await fetch(`${API_BASE}/client-request`, {
+      const res = await fetch(`${API_BASE}/public/demo-request`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: form.get("name"),
           business: form.get("business"),
-          phone: form.get("phone"),
-          email: form.get("email"),
+          phone,
+          email,
+          message: form.get("message"),
+          website: form.get("website"),
         }),
       });
-      setStatus(res.ok ? "sent" : "error");
+      if (res.ok) {
+        setStatus("sent");
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      setError((data && data.detail) || `Something went wrong (${res.status}). Please try again.`);
+      setStatus("error");
     } catch {
+      setError("We could not reach our server. Check your connection and try again.");
       setStatus("error");
     }
   }
@@ -50,7 +69,7 @@ export default function DemoPage() {
             <p className="text-label font-medium uppercase text-accent-ink">Demo</p>
             <h1 className="mt-4 font-display text-4xl font-semibold tracking-[-0.03em] text-fg sm:text-6xl">Book a demo</h1>
             <p className="mt-6 max-w-lg text-lg leading-relaxed text-fg-muted">
-              Tell us about your business and we&apos;ll reach out to schedule a walkthrough.
+              Tell us about your business and we&apos;ll call or message you to walk you through it.
             </p>
             <ul className="mt-10 flex flex-col gap-4">
               {EXPECT.map(({ Icon, text }) => (
@@ -72,11 +91,15 @@ export default function DemoPage() {
                 </span>
                 <h2 className="font-display text-2xl font-semibold text-fg">Request received</h2>
                 <p className="text-[15px] leading-relaxed text-fg-muted">
-                  Thanks — we&apos;ve got your request and will be in touch to pick a time for your walkthrough.
+                  Thank you — we have your request and will be in touch soon.
                 </p>
-                <ButtonLink href="/" variant="secondary">
-                  Back to home
-                </ButtonLink>
+                <p className="text-sm text-fg-muted">
+                  Can&apos;t wait? You can{" "}
+                  <a className="font-medium text-accent-ink hover:underline" href={SIGNUP_URL}>
+                    start your {TRIAL_DAYS}-day free trial
+                  </a>{" "}
+                  right now.
+                </p>
               </div>
             ) : (
               <form onSubmit={onSubmit} className="flex flex-col gap-4">
@@ -85,27 +108,39 @@ export default function DemoPage() {
                   Your details
                 </h2>
                 <Field label="Your name" required>
-                  {(p) => <Input {...p} name="name" autoComplete="name" />}
+                  {(p) => <Input {...p} name="name" minLength={2} autoComplete="name" />}
                 </Field>
                 <Field label="Business name" required>
-                  {(p) => <Input {...p} name="business" autoComplete="organization" placeholder="e.g. Your clinic or salon" />}
+                  {(p) => <Input {...p} name="business" minLength={2} autoComplete="organization" />}
                 </Field>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Phone" hint="WhatsApp works best">
+                  <Field label="Phone / WhatsApp" hint="A phone number or an email is enough">
                     {(p) => <Input {...p} name="phone" type="tel" autoComplete="tel" placeholder="+92 300 0000000" />}
                   </Field>
                   <Field label="Email">
                     {(p) => <Input {...p} name="email" type="email" autoComplete="email" />}
                   </Field>
                 </div>
+                <Field label="What would you like help with?">
+                  {(p) => <Textarea {...p} name="message" rows={3} />}
+                </Field>
+                {/* hidden from people; bots fill it and are ignored */}
+                <input name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" className="hidden" />
                 {status === "error" ? (
                   <Notice tone="danger" title="Not sent" live>
-                    Something went wrong — please try again.
+                    {error}
                   </Notice>
                 ) : null}
                 <Button type="submit" size="lg" disabled={status === "sending"} className="mt-2 w-full">
                   {status === "sending" ? "Sending…" : "Request a demo"}
                 </Button>
+                <p className="text-sm text-fg-muted">
+                  Prefer to try it yourself?{" "}
+                  <a className="font-medium text-accent-ink hover:underline" href={SIGNUP_URL}>
+                    Start a free trial
+                  </a>
+                  .
+                </p>
               </form>
             )}
           </div>

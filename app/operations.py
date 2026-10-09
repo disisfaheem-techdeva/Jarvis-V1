@@ -351,6 +351,8 @@ def make_operations_router():
                         authorization=Header(default=None), td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
         """What the system expects in the drawer today. The human still counts it."""
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        if role == "operator":       # the day's takings and the close are the owner's (audit, 5 Oct 2026)
+            raise HTTPException(status_code=403, detail="Closing the day is for the business owner.")
         on_day = on or date.today().isoformat()
         with tenant_session(tid, role) as cur:
             money = _day_money(cur, on_day, location_id)
@@ -367,6 +369,8 @@ def make_operations_router():
                   authorization=Header(default=None), td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
         """Close the day: counted money in, variance recorded, nothing overwritten silently."""
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        if role == "operator":       # the day's takings and the close are the owner's (audit, 5 Oct 2026)
+            raise HTTPException(status_code=403, detail="Closing the day is for the business owner.")
         on_day = (body.get("closing_date") or date.today().isoformat())
         location_id = body.get("location_id") or None
         cash = _num(body.get("cash_counted"), "cash_counted", minimum=0) or 0

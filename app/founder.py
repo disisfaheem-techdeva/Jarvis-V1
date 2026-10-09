@@ -25,7 +25,7 @@ def _admin(x_tenant_id, x_role, authorization, session):
 
 
 CLIENTS_SQL = """
-SELECT t.id, t.name, t.industry, t.status::text AS status, t.plan::text AS plan,
+SELECT t.id, t.name, t.industry, t.status::text AS status, t.plan::text AS plan, t.subdomain,
        t.billing::text AS billing, t.trial_ends_at, t.created_at,
        COALESCE(a.monthly_fee,0)     AS monthly_fee,
        COALESCE(a.setup_fee,0)       AS setup_fee,
@@ -108,6 +108,14 @@ def set_account(tenant_id: str, body: dict = Body(...),
         except (TypeError, ValueError):
             raise HTTPException(400, "%s must be a number" % k)
     with tenant_session(None, "techdeva_admin") as cur:
+        # Only the fields sent change. The console's fee box sends monthly_fee
+        # alone, and used to wipe the setup fee, contact and notes with it.
+        cur.execute("SELECT * FROM client_accounts WHERE tenant_id = %s", (tenant_id,))
+        old = dict(cur.fetchone() or {})
+        for k in ("monthly_fee", "setup_fee", "performance_pct", "started_on",
+                  "next_invoice_on", "contact", "notes"):
+            if k not in body and old.get(k) is not None:
+                body[k] = old[k]
         cur.execute("""INSERT INTO client_accounts (tenant_id,monthly_fee,setup_fee,
                          performance_pct,started_on,next_invoice_on,contact,notes)
                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
@@ -126,7 +134,7 @@ def set_account(tenant_id: str, body: dict = Body(...),
         if not cur.fetchone():
             raise HTTPException(404, "no such client")
         record(cur, action="techdeva.account.set", resource="client_accounts",
-               resource_id=tenant_id, actor=uid)
+               resource_id=tenant_id, actor=uid, tenant_id=tenant_id)
     return {"ok": True}
 
 
@@ -154,7 +162,8 @@ def add_payment(tenant_id: str, body: dict = Body(...),
                      (body.get("notes") or "")[:1000]))
         pid = cur.fetchone()["id"]
         record(cur, action="techdeva.payment.add", resource="client_payments",
-               resource_id=str(pid), actor=uid, detail={"amount": amount})
+               resource_id=str(pid), actor=uid, detail={"amount": amount},
+               tenant_id=tenant_id)
     return {"ok": True, "id": str(pid)}
 
 
@@ -183,7 +192,8 @@ def add_invoice(tenant_id: str, body: dict = Body(...),
             raise HTTPException(404, "no such client")
         iid = row["id"]
         record(cur, action="techdeva.invoice.create", resource="client_invoices",
-               resource_id=str(iid), actor=uid, detail={"amount": amount})
+               resource_id=str(iid), actor=uid, detail={"amount": amount},
+               tenant_id=tenant_id)
     return {"ok": True, "id": str(iid)}
  
  
@@ -197,12 +207,12 @@ def send_invoice(invoice_id: str,
     with tenant_session(None, "techdeva_admin") as cur:
         cur.execute("""UPDATE client_invoices SET status='sent', sent_at=now(), updated_at=now()
                         WHERE id=%s AND status='draft'
-                        RETURNING id""", (invoice_id,))
+                        RETURNING id, tenant_id""", (invoice_id,))
         row = cur.fetchone()
         if not row:
             raise HTTPException(404, "no draft invoice with that id")
         record(cur, action="techdeva.invoice.send", resource="client_invoices",
-               resource_id=invoice_id, actor=uid)
+               resource_id=invoice_id, actor=uid, tenant_id=row["tenant_id"])
     return {"ok": True}
  
  
@@ -225,6 +235,35 @@ def list_invoices(x_tenant_id: str | None = Header(None),
     return {"invoices": rows}
  
 
+@router.put("/techdeva/clients/{tenant_id}/subdomain")
+def set_subdomain(tenant_id: str, body: dict = Body(...),
+                  x_tenant_id: str | None = Header(None),
+                  x_role: str | None = Header(None),
+                  authorization: str | None = Header(None),
+                  td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+    """Give a client its own address: <sub>.techdeva.net/login is its staff PIN
+    login. Empty removes it. DNS + proxy for the name are set up on the server."""
+    import re
+    uid = _admin(x_tenant_id, x_role, authorization, td_session)
+    sub = str(body.get("subdomain") or "").strip().lower() or None
+    if sub and not re.fullmatch(r"[a-z][a-z0-9-]{1,30}[a-z0-9]", sub):
+        raise HTTPException(400, "Use 3-32 lowercase letters, digits or -, starting with a letter (e.g. drirfan).")
+    with tenant_session(None, "techdeva_admin") as cur:
+        if sub:
+            cur.execute("SELECT 1 FROM tenants WHERE subdomain = %s AND id <> %s", (sub, tenant_id))
+            if cur.fetchone():
+                raise HTTPException(409, "Another client already uses that address.")
+        try:
+            cur.execute("UPDATE tenants SET subdomain = %s WHERE id = %s RETURNING id", (sub, tenant_id))
+        except Exception:
+            raise HTTPException(400, "That name is reserved (www, api, crm, portal ...). Choose another.")
+        if not cur.fetchone():
+            raise HTTPException(404, "no such client")
+        record(cur, action="techdeva.client.subdomain", resource="tenants", resource_id=tenant_id,
+               actor=uid, detail={"subdomain": sub}, tenant_id=tenant_id)
+    return {"ok": True, "subdomain": sub}
+
+
 @router.post("/techdeva/clients/{tenant_id}/hide")
 def hide(tenant_id: str, body: dict = Body(default={}),
          x_tenant_id: str | None = Header(None),
@@ -240,7 +279,8 @@ def hide(tenant_id: str, body: dict = Body(default={}),
         if not cur.fetchone():
             raise HTTPException(404, "no such client")
         record(cur, action="techdeva.client.hide", resource="tenants",
-               resource_id=tenant_id, actor=uid, detail={"hidden": hidden})
+               resource_id=tenant_id, actor=uid, detail={"hidden": hidden},
+               tenant_id=tenant_id)
     return {"ok": True, "hidden": hidden}
 
 
@@ -281,8 +321,9 @@ def operations(x_tenant_id: str | None = Header(None),
                         WHERE NOT t.is_test""")
         pay = dict(cur.fetchone())
         cur.execute("""SELECT s.business_name, s.industry, s.status::text AS status,
+                              s.contact_name, s.contact_phone, s.contact_email, s.note,
                               s.created_at
-                         FROM signups s ORDER BY s.created_at DESC LIMIT 10""")
+                         FROM signups s ORDER BY s.created_at DESC LIMIT 25""")
         signups = [dict(r) for r in cur.fetchall()]
     return {"bookings": book, "bookings_by_status": by_status,
             "bookings_by_client": per_client,
@@ -291,3 +332,55 @@ def operations(x_tenant_id: str | None = Header(None),
                                 "collected": float(pay["collected"]),
                                 "payments": pay["payments"]},
             "signups": signups}
+
+
+@router.get("/techdeva/connections")
+def connections(x_tenant_id: str | None = Header(None),
+                x_role: str | None = Header(None),
+                authorization: str | None = Header(None),
+                td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+    """How many clients have connected each channel, and which account.
+
+    Read-only. Clients connect everything themselves from their own dashboard;
+    this only shows the result. Names and numbers only: a stored login is
+    opened just to count its pages and Instagram accounts, and never returned."""
+    _admin(x_tenant_id, x_role, authorization, td_session)
+    from .crypto import decrypt_json
+    with tenant_session(None, "techdeva_admin") as cur:
+        cur.execute("SELECT id, name, status::text AS status FROM tenants WHERE NOT is_test ORDER BY name")
+        clients = {str(r["id"]): {"id": str(r["id"]), "name": r["name"], "status": r["status"],
+                                  "whatsapp": [], "facebook": [], "instagram": [], "google": None,
+                                  "facebook_connected": False, "google_connected": False}
+                   for r in cur.fetchall()}
+        cur.execute("SELECT tenant_id, phone_number, display_name FROM whatsapp_connections "
+                    "WHERE status = 'connected' ORDER BY connected_at")
+        for r in cur.fetchall():
+            c = clients.get(str(r["tenant_id"]))
+            if c:
+                c["whatsapp"].append(r["phone_number"] or r["display_name"] or "connected")
+        cur.execute("SELECT tenant_id, provider, external_account, credentials FROM integrations "
+                    "WHERE provider IN ('meta', 'google') AND status = 'connected'")
+        for r in cur.fetchall():
+            c = clients.get(str(r["tenant_id"]))
+            if not c:
+                continue
+            if r["provider"] == "google":
+                c["google_connected"], c["google"] = True, r["external_account"] or None
+                continue
+            c["facebook_connected"] = True
+            try:
+                creds = decrypt_json(r["credentials"], str(r["tenant_id"]), "meta") or {}
+            except Exception:
+                creds = {}
+            for p in creds.get("pages") or []:
+                c["facebook"].append(p.get("name") or "page")
+                if p.get("ig_username"):
+                    c["instagram"].append("@" + p["ig_username"])
+    rows = list(clients.values())
+    return {"clients": rows, "totals": {
+        "clients": len(rows),
+        "whatsapp": sum(1 for c in rows if c["whatsapp"]),
+        "facebook": sum(1 for c in rows if c["facebook_connected"]),
+        "instagram": sum(1 for c in rows if c["instagram"]),
+        "google": sum(1 for c in rows if c["google_connected"]),
+        "none": sum(1 for c in rows if not (c["whatsapp"] or c["facebook_connected"] or c["google_connected"]))}}

@@ -7,16 +7,37 @@
   & button.tiny { @apply h-8 px-2.5 text-xs; }
   & a { @apply text-accent-ink; }
 
+  /* The script's inline styles still say var(--muted), var(--gold), … :
+     keep those names, pointing at design-system tokens. */
+  --panel: var(--surface);
+  --panel2: var(--surface-2);
+  --text: var(--fg);
+  --muted: var(--fg-muted);
+  --growth: var(--success-ink);
+  --warn: var(--warning-ink);
+  --danger: var(--danger-ink);
+  --tech: var(--info-ink);
+  --gold: var(--accent-ink);
+  --r: var(--card-radius);
+
   /* navigation (rendered into #nav) */
   & nav a { @apply flex min-h-10 items-center justify-between gap-2 rounded-[var(--p-radius-sm)] px-3 text-sm text-fg-muted no-underline hover:bg-surface-2 hover:text-fg; }
   & nav a.on { @apply bg-accent-tint font-medium text-fg; }
   & nav a .tag { @apply text-xs text-warning; }
   & .navgrp { @apply px-3 pt-4 pb-1.5 text-label font-medium text-fg-subtle uppercase; }
+  & .sidefoot a { @apply text-accent-ink no-underline hover:underline; }
+
+  /* founder identity */
+  & .role-badge { @apply inline-flex h-6 items-center rounded-full bg-[linear-gradient(90deg,var(--p-violet-500),var(--p-violet-700))] px-2.5 text-[10.5px] font-bold tracking-[0.12em] text-white uppercase; }
+  & .scope { @apply inline-flex h-8 items-center rounded-full border border-accent-line bg-accent-tint px-3 text-xs whitespace-nowrap text-accent-ink; }
+  & .plan-pick { @apply h-9 rounded-[var(--p-radius-sm)] border border-[var(--input-border)] bg-[var(--input-bg)] px-2 text-sm text-fg focus:border-[var(--ring)] focus:outline-none; }
+
+  /* phones: the sidebar becomes a drawer opened by #menubtn (the script toggles aside.open) */
+  & #menubtn { @apply hidden; }
   @media (max-width: 900px) {
-    /* phones: the sidebar becomes a scrolling row of tabs at the top */
-    & nav { @apply flex gap-1 overflow-x-auto pb-1; }
-    & nav a { @apply shrink-0 whitespace-nowrap; }
-    & .navgrp { @apply hidden; }
+    & #menubtn { @apply inline-flex h-11 w-11 shrink-0 p-0 text-lg; }
+    & aside { @apply fixed inset-y-0 left-0 z-40 w-[268px] -translate-x-[105%] shadow-[0_0_40px_rgb(0_0_0/0.6)] transition-transform duration-200; }
+    & aside.open { @apply translate-x-0; }
   }
 
   /* views */

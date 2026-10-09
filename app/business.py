@@ -12,6 +12,14 @@ readable 400 rather than silently dropped -- a typo that vanishes is how a
 price quietly fails to save.
 """
 
+import datetime as _dt
+import re
+import uuid
+from zoneinfo import ZoneInfo
+from contextlib import contextmanager
+
+import psycopg
+
 from fastapi import APIRouter, Body, Cookie, Header, HTTPException
 
 from .audit import record
@@ -166,6 +174,112 @@ RESOURCES.update({
 })
 
 
+# Tables whose money or ledger rules live elsewhere. Writing them through the
+# generic router would skip those rules (an invoice total not recomputed, a
+# payment that does not move the invoice status, an appointment deleted while
+# its bill stays behind), so the generic verbs are refused with the way to do it.
+DEDICATED = {
+    "appointments": {"POST": "Book through POST /appointments/book.",
+                     "PATCH": "Change a booking through PATCH /appointments/{id}.",
+                     "DELETE": "Delete a booking through DELETE /appointments/{id}."},
+    "invoices": {"POST": "Create a bill through POST /operations/invoices.",
+                 "PATCH": "Bills are not edited. Take a payment or void the bill.",
+                 "DELETE": "Bills are never deleted. Void it with a reason instead."},
+    "payments": {"POST": "Take a payment through POST /operations/invoices/{id}/pay.",
+                 "PATCH": "Payments are not edited once recorded.",
+                 "DELETE": "Payments are never deleted from the books."},
+    "stock_movements": {"PATCH": "Stock history is not edited. Record a correcting adjustment.",
+                        "DELETE": "Stock history is not deleted. Record a correcting adjustment."},
+}
+
+# What still points at a row. Deleting it would silently cascade or orphan
+# those records, so the delete is refused and the owner is told what to do.
+IN_USE = {
+    "customers": [("appointments", "customer_id", "appointment"),
+                  ("invoices", "customer_id", "bill"),
+                  ("payments", "customer_id", "payment")],
+    "services": [("appointments", "service_id", "appointment"),
+                 ("invoice_items", "service_id", "bill line"),
+                 ("package_items", "service_id", "package")],
+    "products": [("stock_movements", "product_id", "stock movement"),
+                 ("invoice_items", "product_id", "bill line"),
+                 ("package_items", "product_id", "package")],
+    "packages": [("invoice_items", "package_id", "bill line")],
+    "staff": [("appointments", "staff_id", "appointment"),
+              ("staff_attendance", "staff_id", "attendance record")],
+    "locations": [("appointments", "location_id", "appointment"),
+                  ("invoices", "location_id", "bill")],
+}
+_DEACTIVATE = {"services", "products", "packages", "staff", "locations"}
+
+# Who may change what. Reading is open to everyone in the business; these are
+# the writes an operator (front desk) is refused. Defining what the business
+# sells and at what price, its people, places and rules is the owner's call,
+# as is removing or rewriting a record of money that already went out.
+OWNER_ROLES = ("owner", "techdeva_admin")
+_KHI = ZoneInfo("Asia/Karachi")
+OWNER_ONLY = {
+    "services": {"POST", "PATCH", "DELETE"},
+    "products": {"POST", "PATCH", "DELETE"},
+    "packages": {"POST", "PATCH", "DELETE"},
+    "package_items": {"POST", "PATCH", "DELETE"},
+    "staff": {"POST", "PATCH", "DELETE"},
+    "staff_services": {"POST", "PATCH", "DELETE"},
+    "locations": {"POST", "PATCH", "DELETE"},
+    "business_hours": {"POST", "PATCH", "DELETE"},
+    "business_policies": {"POST", "PATCH", "DELETE"},
+    "business_goals": {"POST", "PATCH", "DELETE"},
+    "expenses": {"PATCH", "DELETE"},
+    "customers": {"DELETE"},
+}
+
+
+def _allowed(resource, verb, role):
+    if verb in OWNER_ONLY.get(resource, ()) and role not in OWNER_ROLES:
+        raise HTTPException(403, "Only the business owner can do this.")
+
+
+@contextmanager
+def _readable_db_errors(resource):
+    """Turn a database refusal into a sentence the owner can act on, not a 500."""
+    try:
+        yield
+    except psycopg.errors.UniqueViolation:
+        what = "phone number" if resource == "customers" else "name"
+        raise HTTPException(409, "Another {0} entry already has this {1}.".format(
+            resource.rstrip("s"), what))
+    except psycopg.errors.ForeignKeyViolation:
+        raise HTTPException(400, "One of the linked records does not exist in this business.")
+    except psycopg.errors.CheckViolation:
+        raise HTTPException(400, "A value is out of range (for example a negative price or an empty name).")
+    except (psycopg.errors.InvalidTextRepresentation, psycopg.errors.InvalidDatetimeFormat,
+            psycopg.errors.NumericValueOutOfRange, psycopg.errors.DatetimeFieldOverflow):
+        raise HTTPException(400, "A value is not in the right format (a number, date or id).")
+
+
+def _uuid(item_id):
+    try:
+        return str(uuid.UUID(str(item_id)))
+    except (ValueError, TypeError):
+        raise HTTPException(404, "not found")
+
+
+def _refuse_generic(resource, verb):
+    why = DEDICATED.get(resource, {}).get(verb)
+    if why:
+        raise HTTPException(405, why)
+
+
+def _in_use(cur, resource, item_id):
+    used = []
+    for table, col, label in IN_USE.get(resource, []):
+        cur.execute("SELECT count(*) AS n FROM {0} WHERE {1} = %s".format(table, col), (item_id,))
+        n = cur.fetchone()["n"]
+        if n:
+            used.append("{0} {1}{2}".format(n, label, "" if n == 1 else "s"))
+    return used
+
+
 def _identity(x_tenant_id, x_role, authorization, session):
     try:
         tid, role, uid = resolve_scope(x_tenant_id, x_role, authorization, session)
@@ -217,11 +331,19 @@ def _onboarding_fallback(resource, cfg):
             return None
         price_list = cfg.get("price_list") or []
         price_by_name = {}
+        # Stored two ways: [{"service": .., "price": ..}] or {"Service": price}.
+        if isinstance(price_list, dict):
+            price_list = [{"service": k, "price": v} for k, v in price_list.items()]
         for p in price_list:
             if isinstance(p, dict) and p.get("service"):
                 price_by_name[str(p["service"]).strip().lower()] = p
         items = []
         for i, s in enumerate(services):
+            # Onboarding stores services either as {"name": ...} objects or as
+            # plain names ("Rhinoplasty"). Plain names were silently dropped,
+            # so a client who listed ten services saw none.
+            if isinstance(s, str) and s.strip():
+                s = {"name": s.strip()}
             if not isinstance(s, dict) or not s.get("name"):
                 continue
             price_row = price_by_name.get(str(s["name"]).strip().lower(), {})
@@ -230,8 +352,8 @@ def _onboarding_fallback(resource, cfg):
                 "name": s.get("name"),
                 "description": None,
                 "category": s.get("category"),
-                "price": price_row.get("price"),
-                "currency": price_row.get("currency"),
+                "price": price_row.get("price", s.get("price")),
+                "currency": price_row.get("currency", s.get("currency")),
                 "duration_minutes": s.get("duration_min"),
                 "active": True,
                 "sort_order": i,
@@ -256,6 +378,17 @@ def _onboarding_fallback(resource, cfg):
             "source": "onboarding",
         }]
     return None
+
+
+def _unsaved_onboarding(P, tid, saved_rows):
+    """Onboarding services whose name is not in the services table yet."""
+    try:
+        cfg = P.load_config(tid) or {}
+    except Exception:
+        return []
+    items = _onboarding_fallback("services", cfg) or []
+    have = {str(r.get("name") or "").strip().lower() for r in saved_rows}
+    return [i for i in items if str(i["name"]).strip().lower() not in have]
 
 
 def make_business_router(P=None):
@@ -290,7 +423,60 @@ def make_business_router(P=None):
             if fallback:
                 return {"resource": resource, "count": len(fallback), "items": fallback,
                         "note": "from onboarding, not yet saved as editable records"}
-        return {"resource": resource, "count": len(rows), "items": rows}
+        out = {"resource": resource, "count": len(rows), "items": rows}
+        if resource == "services" and rows and P is not None:
+            pend = _unsaved_onboarding(P, tid, rows)
+            if pend:
+                out["pending_onboarding"] = pend
+        return out
+
+    @router.post("/business/services/import-onboarding")
+    def import_onboarding(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                          authorization: str | None = Header(None),
+                          td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Save the services the client listed during onboarding as real, editable
+        rows in the services table -- the one list appointments, bills and the AI
+        read. Idempotent: a name already saved is skipped, never duplicated."""
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        _allowed("services", "POST", role)
+        with tenant_session(tid, role) as cur:
+            cur.execute("SELECT name FROM services")
+            have = cur.fetchall()
+        todo = _unsaved_onboarding(P, tid, have) if P is not None else []
+        saved, seen, clean = [], set(), []
+        for s in todo:
+            # onboarding text is free-form: skip repeats, keep only plain text categories
+            key = str(s.get("name") or "").strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            s = dict(s, name=str(s["name"]).strip()[:200])
+            s["category"] = s["category"].strip()[:80] if isinstance(s.get("category"), str) and s["category"].strip() else None
+            cur_ = s.get("currency")
+            s["currency"] = cur_.strip().upper()[:3] if isinstance(cur_, str) and cur_.strip() else None
+            d = s.get("duration_minutes")
+            s["duration_minutes"] = int(d) if isinstance(d, (int, float)) and d > 0 else None
+            clean.append(s)
+        with _readable_db_errors("services"), tenant_session(tid, role) as cur:
+            for s in clean:
+                price = s.get("price")
+                try:
+                    digits = re.sub(r"[^0-9.]", "", str(price)) if price not in (None, "") else ""
+                    price = float(digits) if digits else None
+                except ValueError:
+                    price = None
+                if price is not None and price < 0:
+                    price = None
+                cur.execute(
+                    "INSERT INTO services (tenant_id, name, category, price, currency, duration_minutes, sort_order) "
+                    "VALUES (current_tenant(), %s, %s, %s, COALESCE(%s, 'PKR'), %s, %s) RETURNING id, name, price",
+                    (s["name"], s.get("category"), price, s.get("currency"),
+                     s["duration_minutes"], s.get("sort_order") or 0))
+                saved.append(cur.fetchone())
+            if saved:
+                record(cur, action="services.import_onboarding", resource="services", resource_id=None,
+                       actor=uid, detail={"saved": [x["name"] for x in saved]})
+        return {"saved": saved, "count": len(saved)}
 
     @router.post("/business/{resource}")
     def create_item(resource: str, body: dict = Body(...),
@@ -299,12 +485,20 @@ def make_business_router(P=None):
                     td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
         spec = _spec(resource)
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        _refuse_generic(resource, "POST")
+        _allowed(resource, "POST", role)
         data = _clean(spec, body, True)
+        if resource == "expenses" and role not in OWNER_ROLES:
+            # staff record today's spending; an earlier date is the owner's call
+            # (it changes a day that may already be closed)
+            today = _dt.datetime.now(_KHI).date().isoformat()
+            if str(data.get("spent_on") or today)[:10] != today:
+                raise HTTPException(403, "Staff can record today's expenses only. Ask the owner to add one for an earlier date.")
         cols = ["tenant_id"] + list(data.keys())
         vals = [tid] + list(data.values())
         sql = "INSERT INTO {0} ({1}) VALUES ({2}) RETURNING {3}".format(
             spec.table, ", ".join(cols), ", ".join(["%s"] * len(cols)), spec.read)
-        with tenant_session(tid, role) as cur:
+        with _readable_db_errors(resource), tenant_session(tid, role) as cur:
             cur.execute(sql, vals)
             row = cur.fetchone()
             record(cur, action="create", resource=resource, resource_id=row.get("id"),
@@ -318,6 +512,9 @@ def make_business_router(P=None):
                     td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
         spec = _spec(resource)
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        _refuse_generic(resource, "PATCH")
+        _allowed(resource, "PATCH", role)
+        item_id = _uuid(item_id)
         data = _clean(spec, body, False)
         sets = ", ".join("{0} = %s".format(k) for k in data)
         if "updated_at" not in spec.read:
@@ -325,7 +522,7 @@ def make_business_router(P=None):
         else:
             sql = "UPDATE {0} SET {1}, updated_at = now() WHERE id = %s RETURNING {2}"
         sql = sql.format(spec.table, sets, spec.read)
-        with tenant_session(tid, role) as cur:
+        with _readable_db_errors(resource), tenant_session(tid, role) as cur:
             cur.execute(sql, list(data.values()) + [item_id])
             row = cur.fetchone()
             if row:
@@ -344,7 +541,15 @@ def make_business_router(P=None):
                     td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
         spec = _spec(resource)
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        _refuse_generic(resource, "DELETE")
+        _allowed(resource, "DELETE", role)
+        item_id = _uuid(item_id)
         with tenant_session(tid, role) as cur:
+            used = _in_use(cur, resource, item_id)
+            if used:
+                raise HTTPException(409, "This is still used by {0}, so deleting it would break "
+                                         "those records.{1}".format(", ".join(used),
+                    " Mark it inactive instead." if resource in _DEACTIVATE else ""))
             cur.execute("DELETE FROM {0} WHERE id = %s RETURNING id".format(spec.table), (item_id,))
             row = cur.fetchone()
             if row:
@@ -363,6 +568,8 @@ def make_business_router(P=None):
                      authorization: str | None = Header(None),
                      td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        if role not in OWNER_ROLES:
+            raise HTTPException(403, "Revenue figures are for the business owner.")
         if days < 1 or days > 1095:
             raise HTTPException(400, "days must be between 1 and 1095")
         with tenant_session(tid, role) as cur:

@@ -4,7 +4,13 @@ import { BarChart3, Brain, Lock, Megaphone, MessageCircle, Palette, Share2, Targ
 import { MarketingPage } from "@/components/MarketingPage";
 import { Badge } from "@/components/ui/Badge";
 
-export const metadata: Metadata = { title: "AI Workforce" };
+export const metadata: Metadata = {
+  title: "AI workforce: AI employees for your business",
+  description:
+    "TechDeva's AI employees: a WhatsApp sales agent, analyst, designer, marketing expert, campaign manager, social media " +
+    "expert and reporting, each with clear permissions, and never spending money without your approval.",
+  alternates: { canonical: "/ai-workforce" },
+};
 
 const AGENTS = [
   { name: "Hermes", role: "WhatsApp, CRM, leads, appointments, customer communication", Icon: MessageCircle, gated: false, first: true },

@@ -1,83 +1,51 @@
+import type { Metadata } from "next";
 import {
   ArrowRight,
   BadgeCheck,
-  Bot,
-  CircleSlash,
-  Cog,
-  GraduationCap,
-  Hand,
+  BarChart3,
+  CalendarCheck,
+  Mic,
   MessageCircle,
-  PlugZap,
-  Scissors,
-  Sparkles,
-  Stethoscope,
+  Rocket,
+  Share2,
+  Users,
+  UsersRound,
+  Wallet,
 } from "lucide-react";
 import Link from "next/link";
 
-import { ClosingCta } from "@/components/MarketingPage";
-import { SiteFooter } from "@/components/site/SiteFooter";
-import { SiteHeader } from "@/components/site/SiteHeader";
+import { CtaBand, SiteFooter } from "@/components/SiteFooter";
+import { SiteHeader } from "@/components/SiteHeader";
 import { Badge } from "@/components/ui/Badge";
-import { ButtonLink } from "@/components/ui/Button";
+import { buttonClass, ButtonLink } from "@/components/ui/Button";
 import { GlowCard } from "@/components/ui/motion";
+import { SIGNUP_URL, TRIAL_DAYS } from "@/lib/links";
+
+const FEATURES = [
+  { title: "Appointments & bills", body: "Book clients with services, discounts, GST and part payments. Every balance comes from the real bill.", Icon: CalendarCheck },
+  { title: "Customers & history", body: "Every visit, payment, package, note and WhatsApp chat for each customer, in one place.", Icon: Users },
+  { title: "WhatsApp AI agent", body: "Your own agent answers customers on your business number in their language, and you can reply from the dashboard.", Icon: MessageCircle },
+  { title: "Jarvis, your voice assistant", body: "Ask about your figures, change prices or hours, or attach a photo and have a post drafted, just by talking.", Icon: Mic },
+  { title: "Money & stock", body: "Expenses, daily closing, profit and loss, and stock that adds up from every movement.", Icon: Wallet },
+  { title: "Team & permissions", body: "Staff, attendance and HR. Each person logs in with their own PIN; front desk can book and take payments, prices and deletions stay with the owner.", Icon: UsersRound },
+  { title: "Facebook & Instagram posting", body: "Write or dictate a post, add your photo and publish or schedule it to your Page and Instagram from the dashboard.", Icon: Share2 },
+  { title: "Live ad results", body: "Spend, leads, WhatsApp chats and cost per result from your Meta and Google ads, next to the bookings they brought.", Icon: BarChart3 },
+  { title: "Growth advisor & ad autopilot", body: "Every week it reads your numbers and says what to fix and what to do next. It can pause ads that cost too much and write new campaigns, within limits you set.", Icon: Rocket },
+];
 
 const STEPS = [
-  {
-    title: "Tell it about your business",
-    body: "Services, prices, opening hours and your rules. Your AI team quotes only what's on your list and refuses bookings outside your hours.",
-    Icon: Cog,
-  },
-  {
-    title: "Your AI team gets to work",
-    body: "Hermes answers WhatsApp and books clients. The analyst studies your market. The campaign manager drafts ads. All of it lands in one portal.",
-    Icon: Bot,
-  },
-  {
-    title: "You approve what matters",
-    body: "Anything that spends money, goes public or changes a price stops and waits for you. One tap to approve, one to reject with a reason.",
-    Icon: Hand,
-  },
-];
+  ["Sign up", "Your business and your owner login are created straight away."],
+  ["Tell it about your business", "Services, prices, hours and your logo. Your dashboard uses them immediately."],
+  ["Connect WhatsApp & Facebook", "Scan a QR code for WhatsApp, and connect your Page to post from the dashboard."],
+] as const;
 
-const PRINCIPLES = [
-  {
-    title: "Not a chatbot",
-    body: "Hermes is Employee #1, not the product. The platform is the operating system your whole business runs on.",
-    Icon: Sparkles,
-    span: "md:col-span-3",
-  },
-  {
-    title: "Human in the loop",
-    body: "Money, publishing, pricing and permissions always require your sign-off. Everything else runs on its own.",
-    Icon: Hand,
-    span: "md:col-span-3",
-  },
-  {
-    title: "One engine, any industry",
-    body: "Salon, clinic, academy: the same engine, configured per business. Onboarding is a config row, not new code.",
-    Icon: Cog,
-    span: "md:col-span-2",
-  },
-  {
-    title: "Null, never zero",
-    body: "A number with no data behind it shows as missing. You'll never see a made-up 0 dressed up as a result.",
-    Icon: CircleSlash,
-    span: "md:col-span-2",
-  },
-  {
-    title: "Connections you can verify",
-    body: "A connection only shows as live when a working credential is stored, with the last time it was checked.",
-    Icon: PlugZap,
-    span: "md:col-span-2",
-  },
-];
-
-const INDUSTRIES = [
-  { label: "Aesthetic clinics", Icon: Stethoscope },
-  { label: "Salons", Icon: Scissors },
-  { label: "Academies", Icon: GraduationCap },
-  { label: "Any appointment business", Icon: MessageCircle },
-];
+export const metadata: Metadata = {
+  title: { absolute: "TechDeva: clinic & salon software with a WhatsApp AI agent" },
+  description:
+    "The AI business operating system for clinics, salons, gyms and academies in Pakistan and abroad: bookings, bills, customers, " +
+    "stock, team, a WhatsApp AI agent that answers and books 24/7, social posting, ad results and a growth advisor. 7-day free trial.",
+  alternates: { canonical: "/" },
+};
 
 export default function Home() {
   return (
@@ -101,97 +69,80 @@ export default function Home() {
                 <Badge tone="success" dot className="h-5 px-2">
                   Live
                 </Badge>
-                <span className="truncate">In production at The Beauty Aesthetic &amp; Lounge, Lahore</span>
+                <span className="truncate">In production — The Beauty Aesthetic &amp; Lounge</span>
                 <ArrowRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               </Link>
-              <h1
-                style={{ "--i": 1 } as React.CSSProperties}
-                className="mt-7 font-display text-display font-semibold text-fg"
-              >
+              <h1 style={{ "--i": 1 } as React.CSSProperties} className="mt-7 font-display text-display font-semibold text-fg">
                 The AI Business{" "}
                 <span className="bg-[linear-gradient(100deg,var(--fg)_20%,var(--accent-ink)_75%)] bg-clip-text text-transparent">
                   Operating System
                 </span>
               </h1>
               <p style={{ "--i": 2 } as React.CSSProperties} className="mt-6 max-w-xl text-lg leading-relaxed text-fg-muted">
-                One AI workforce for your leads, bookings, campaigns and reports. It runs on its own and
-                stops for your approval before anything costs money or goes public.
+                One dashboard for your clinic, salon or academy: bookings, bills, customers, stock, your team, a WhatsApp AI
+                agent, social posting, ad results and a growth advisor. The AI does the routine work; you set the limits and
+                approve what matters.
               </p>
               <div style={{ "--i": 3 } as React.CSSProperties} className="mt-9 flex flex-wrap gap-3">
-                <ButtonLink href="/demo" size="lg">
-                  Book a demo <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                </ButtonLink>
-                <ButtonLink href="#how" size="lg" variant="secondary">
-                  See how it works
+                <a href={SIGNUP_URL} className={buttonClass("primary", "lg")}>
+                  Start your {TRIAL_DAYS}-day free trial <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </a>
+                <ButtonLink href="/demo" size="lg" variant="secondary">
+                  Book a demo
                 </ButtonLink>
               </div>
+              <p style={{ "--i": 4 } as React.CSSProperties} className="mt-3 text-sm text-fg-subtle">
+                No card needed. Set up takes a few minutes.
+              </p>
             </div>
 
             <ProductPreview />
           </div>
         </section>
 
-        {/* Built for */}
-        <section aria-labelledby="built-for" className="border-b border-line">
-          <div className="mx-auto flex max-w-6xl flex-col gap-5 px-4 py-8 sm:px-6 md:flex-row md:items-center md:justify-between">
-            <h2 id="built-for" className="text-label font-medium uppercase text-fg-subtle">
-              Built for service businesses
-            </h2>
-            <ul className="flex flex-wrap gap-x-8 gap-y-3">
-              {INDUSTRIES.map(({ label, Icon }) => (
-                <li key={label} className="flex items-center gap-2 text-sm text-fg-muted">
-                  <Icon className="h-4 w-4 text-accent-ink" aria-hidden="true" />
-                  {label}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </section>
-
-        {/* How it works */}
-        <section id="how" aria-labelledby="how-title" className="scroll-mt-20">
+        {/* Features */}
+        <section aria-labelledby="features-title">
           <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
             <div className="max-w-2xl">
-              <p className="text-label font-medium uppercase text-accent-ink">How it works</p>
-              <h2 id="how-title" className="mt-3 font-display text-3xl font-semibold tracking-[-0.02em] text-fg sm:text-5xl">
-                Your business, run by an AI team that asks first
+              <p className="text-label font-medium uppercase text-accent-ink">One dashboard</p>
+              <h2 id="features-title" className="mt-3 font-display text-3xl font-semibold tracking-[-0.02em] text-fg sm:text-5xl">
+                Everything your front desk, your books and your marketing need
               </h2>
             </div>
-            <ol className="mt-14 grid gap-px overflow-hidden rounded-[var(--p-radius-xl)] border border-line bg-line md:grid-cols-3">
-              {STEPS.map(({ title, body, Icon }, i) => (
-                <li key={title} className="flex flex-col gap-4 bg-surface p-7 sm:p-8">
-                  <div className="flex items-center justify-between">
-                    <span className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--p-radius-md)] bg-accent-tint text-accent-ink">
-                      <Icon className="h-5 w-5" aria-hidden="true" />
-                    </span>
-                    <span className="font-mono text-xs text-fg-subtle">Step {i + 1}</span>
-                  </div>
-                  <h3 className="text-lg font-semibold text-fg">{title}</h3>
-                  <p className="text-[15px] leading-relaxed text-fg-muted">{body}</p>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </section>
-
-        {/* Principles */}
-        <section aria-labelledby="principles-title" className="border-y border-line bg-bg-elevated">
-          <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
-            <div className="max-w-2xl">
-              <p className="text-label font-medium uppercase text-accent-ink">What you can count on</p>
-              <h2 id="principles-title" className="mt-3 font-display text-3xl font-semibold tracking-[-0.02em] text-fg sm:text-5xl">
-                We show what can be proven, not a green tick
-              </h2>
-            </div>
-            <ul className="mt-14 grid gap-4 md:grid-cols-6">
-              {PRINCIPLES.map(({ title, body, Icon, span }) => (
-                <GlowCard as="li" key={title} className={`rounded-[var(--card-radius)] border border-line bg-surface p-7 ${span}`}>
-                  <Icon className="h-5 w-5 text-accent-ink" aria-hidden="true" />
+            <ul className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {FEATURES.map(({ title, body, Icon }) => (
+                <GlowCard as="li" key={title} className="rounded-[var(--card-radius)] border border-line bg-surface p-7">
+                  <span className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--p-radius-md)] bg-accent-tint text-accent-ink">
+                    <Icon className="h-5 w-5" aria-hidden="true" />
+                  </span>
                   <h3 className="mt-5 text-lg font-semibold text-fg">{title}</h3>
                   <p className="mt-2 text-[15px] leading-relaxed text-fg-muted">{body}</p>
                 </GlowCard>
               ))}
             </ul>
+          </div>
+        </section>
+
+        {/* How it starts */}
+        <section aria-labelledby="how-title" className="border-y border-line bg-bg-elevated">
+          <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
+            <div className="max-w-2xl">
+              <p className="text-label font-medium uppercase text-accent-ink">How it starts</p>
+              <h2 id="how-title" className="mt-3 font-display text-3xl font-semibold tracking-[-0.02em] text-fg sm:text-5xl">
+                Running on your business in minutes
+              </h2>
+            </div>
+            <ol className="mt-14 grid gap-px overflow-hidden rounded-[var(--p-radius-xl)] border border-line bg-line md:grid-cols-3">
+              {STEPS.map(([title, body], i) => (
+                <li key={title} className="flex flex-col gap-4 bg-surface p-7 sm:p-8">
+                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-line-strong font-mono text-sm text-fg-muted">
+                    {i + 1}
+                  </span>
+                  <h3 className="text-lg font-semibold text-fg">{title}</h3>
+                  <p className="text-[15px] leading-relaxed text-fg-muted">{body}</p>
+                </li>
+              ))}
+            </ol>
           </div>
         </section>
 
@@ -204,8 +155,8 @@ export default function Home() {
                 Running a real clinic before it runs yours
               </h2>
               <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-fg-muted">
-                TechDeva runs in production at The Beauty Aesthetic &amp; Lounge in Gulberg, Lahore. We publish
-                results once they are real and measured, never as a projection dressed up as a result.
+                TechDeva runs in production at The Beauty Aesthetic &amp; Lounge in Lahore. We publish results once they are
+                real and measured, never as a projection dressed up as a result.
               </p>
               <Link
                 href="/case-studies"
@@ -218,8 +169,8 @@ export default function Home() {
               {[
                 ["Status", "Live in production"],
                 ["Business", "Aesthetic clinic, salon and academy"],
-                ["AI employee #1", "Hermes on WhatsApp"],
-                ["Approval gate", "On for money, publishing and pricing"],
+                ["AI employee #1", "WhatsApp sales agent"],
+                ["You stay in control", "Prices, deletions and spend limits stay with the owner"],
               ].map(([k, v]) => (
                 <div key={k} className="rounded-[var(--card-radius)] border border-line bg-surface p-5">
                   <dt className="text-label font-medium uppercase text-fg-subtle">{k}</dt>
@@ -233,14 +184,14 @@ export default function Home() {
           </div>
         </section>
 
-        <ClosingCta />
+        <CtaBand />
       </main>
       <SiteFooter />
     </div>
   );
 }
 
-/** An illustration of the portal's approval gate built from real UI primitives. */
+/** An illustration of the dashboard built from real UI primitives, clearly marked as example figures. */
 function ProductPreview() {
   return (
     <figure className="relative mx-auto w-full max-w-lg lg:max-w-none" aria-labelledby="preview-caption">
@@ -251,50 +202,37 @@ function ProductPreview() {
             <span className="h-2.5 w-2.5 rounded-full bg-surface-3" />
             <span className="h-2.5 w-2.5 rounded-full bg-surface-3" />
           </div>
-          <span className="text-xs text-fg-subtle">Client portal · Approvals</span>
+          <span className="text-xs text-fg-subtle">Your dashboard · Today</span>
         </div>
 
-        <div className="rounded-[var(--card-radius)] border border-line bg-surface p-5">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-[var(--card-radius)] border border-line bg-surface p-4">
+            <p className="text-xs text-fg-subtle">Bookings today</p>
+            <p className="mt-1 font-display text-3xl font-semibold tabular-nums text-fg">12</p>
+          </div>
+          <div className="rounded-[var(--card-radius)] border border-line bg-surface p-4">
+            <p className="text-xs text-fg-subtle">WhatsApp chats answered</p>
+            <p className="mt-1 font-display text-3xl font-semibold tabular-nums text-fg">38</p>
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-[var(--card-radius)] border border-line bg-surface p-5">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-xs text-fg-subtle">Campaign manager asks</p>
-              <p className="mt-1 font-medium text-fg">Launch a WhatsApp ad for Hair PRP in Gulberg</p>
+              <p className="text-xs text-fg-subtle">Your AI agent drafted a post</p>
+              <p className="mt-1 font-medium text-fg">HydraFacial: glow in an hour. Book on WhatsApp.</p>
             </div>
             <Badge tone="warning" dot>
               Waiting
             </Badge>
           </div>
-          <dl className="mt-5 grid grid-cols-3 gap-3 border-y border-line py-4">
-            {[
-              ["Budget", "15,000"],
-              ["Runs", "7 days"],
-              ["Reach", "8 km"],
-            ].map(([k, v]) => (
-              <div key={k}>
-                <dt className="text-xs text-fg-subtle">{k}</dt>
-                <dd className="mt-1 font-display text-xl font-semibold tabular-nums text-fg">{v}</dd>
-              </div>
-            ))}
-          </dl>
           <div className="mt-4 flex gap-2" aria-hidden="true">
             <span className="inline-flex h-10 flex-1 items-center justify-center rounded-[var(--btn-radius)] bg-success-fill text-sm font-medium text-white">
               Approve
             </span>
             <span className="inline-flex h-10 flex-1 items-center justify-center rounded-[var(--btn-radius)] border border-line-strong text-sm font-medium text-fg-muted">
-              Reject
+              Edit
             </span>
-          </div>
-        </div>
-
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <div className="rounded-[var(--card-radius)] border border-line bg-surface p-4">
-            <p className="text-xs text-fg-subtle">New leads today</p>
-            <p className="mt-1 font-display text-3xl font-semibold tabular-nums text-fg">4</p>
-          </div>
-          <div className="rounded-[var(--card-radius)] border border-line bg-surface p-4">
-            <p className="text-xs text-fg-subtle">Return on ad spend</p>
-            <p className="mt-1 font-display text-3xl font-semibold text-fg-subtle">—</p>
-            <p className="text-xs text-fg-subtle">No spend yet</p>
           </div>
         </div>
       </div>

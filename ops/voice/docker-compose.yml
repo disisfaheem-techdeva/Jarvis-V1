@@ -1,0 +1,23 @@
+# The AI phone agent's phone exchange (Asterisk). Separate from the platform's
+# compose file and from the clinic and Hermes: its own container, started only
+# on purpose:  cd ops/voice && docker compose up -d --build
+#
+# Host network, because phone audio (RTP) does not survive Docker's NAT well.
+# It listens on 5060/udp (SIP) and 10000-10100/udp (audio): open those ONLY to
+# your phone provider's addresses (docs/VOICE.md). The line's username and
+# password, and the bridge token, live in /etc/techdeva/voice (root-only),
+# never in this repo.
+services:
+  asterisk:
+    build: .
+    container_name: techdeva-voice-asterisk
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./asterisk/asterisk.conf:/etc/asterisk/asterisk.conf:ro
+      - ./asterisk/modules.conf:/etc/asterisk/modules.conf:ro
+      - ./asterisk/pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - ./asterisk/extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ./asterisk/rtp.conf:/etc/asterisk/rtp.conf:ro
+      - ./asterisk/logger.conf:/etc/asterisk/logger.conf:ro
+      - /etc/techdeva/voice:/etc/asterisk/techdeva:ro

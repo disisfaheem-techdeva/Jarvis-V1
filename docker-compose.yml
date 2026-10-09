@@ -58,6 +58,12 @@ services:
       META_APP_SECRET: ${META_APP_SECRET:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_SECRET: ${GOOGLE_SECRET:-}
+      # Google Ads reporting: TechDeva's developer token (Google Ads API
+      # Center) and, when client accounts are reached through TechDeva's
+      # manager account, that manager's customer id. ops/setup/ads_setup.py
+      GOOGLE_ADS_DEVELOPER_TOKEN: ${GOOGLE_ADS_DEVELOPER_TOKEN:-}
+      GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${GOOGLE_ADS_LOGIN_CUSTOMER_ID:-}
+      GOOGLE_ADS_API_VERSION: ${GOOGLE_ADS_API_VERSION:-v21}
       OAUTH_REDIRECT_BASE: ${OAUTH_REDIRECT_BASE:-http://localhost:8000}
       META_AD_LIBRARY_TOKEN: ${META_AD_LIBRARY_TOKEN:-}
       # --- client portal / auth (Build 2) ---
@@ -73,8 +79,12 @@ services:
       # Ordered fallback. One model being rate limited upstream is normal,
       # so the workforce walks the list rather than stopping.
       AI_MODEL_CHAIN: ${AI_MODEL_CHAIN:-}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # AI pictures for posts (app/aidesign.py): image models in order, daily limit per business
+      GEMINI_IMAGE_MODELS: ${GEMINI_IMAGE_MODELS:-gemini-2.5-flash-image,gemini-3-pro-image-preview}
+      AI_PICTURES_PER_DAY: ${AI_PICTURES_PER_DAY:-20}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
@@ -85,15 +95,46 @@ services:
       # --- WhatsApp self-service (Part 4) ---
       # The shared secret the API presents to a tenant's pairing sidecar.
       HERMES_INTERNAL_KEY: ${HERMES_INTERNAL_KEY:-}
+      # --- email for "Forgot password?" (optional; without it the request
+      # waits in the founder console and is sent by WhatsApp) ---
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
     volumes:
       # the signup page + client dashboard (the API image is built from ./app)
       - ./web:/srv/web:ro
+      # post videos (app/videos.py); shared with the worker, which publishes them
+      - mediadata:/srv/media
     depends_on: [db, redis]
+
+  # The AI phone agent's bridge (app/voice_bridge.py): Asterisk (ops/voice,
+  # host network) hands it each call's audio. OFF unless started with
+  # `docker compose --profile voice up -d voice`; ports on localhost only.
+  voice:
+    profiles: ["voice"]
+    restart: unless-stopped
+    build: ./app
+    command: ["python","-m","app.voice_bridge"]
+    environment:
+      DATABASE_URL: postgresql://techdeva_app@db:5432/techdeva
+      PGPASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      VOICE_MODEL: ${VOICE_MODEL:-}
+      VOICE_MAX_CALLS: ${VOICE_MAX_CALLS:-3}
+    # /etc/techdeva/voice (root-only, outside the repo): bridge.token, shared
+    # with Asterisk. Only read when this service is started.
+    volumes: ["/etc/techdeva/voice:/run/voice:ro"]
+    ports: ["127.0.0.1:9092:9092", "127.0.0.1:9093:9093"]
+    depends_on: [db]
 
   worker:
     restart: unless-stopped
     build: ./app
     command: ["python","-m","app.worker"]
+    volumes:
+      - mediadata:/srv/media
     environment:
       # password via PGPASSWORD, never in the DSN: a URL mangles + / = 
       DATABASE_URL: postgresql://techdeva_app@db:5432/techdeva
@@ -105,12 +146,28 @@ services:
       HERMES_TIMEOUT: ${HERMES_TIMEOUT:-8}
       HERMES_RETRIES: ${HERMES_RETRIES:-2}
       META_AD_LIBRARY_TOKEN: ${META_AD_LIBRARY_TOKEN:-}
+      # --- ad autopilot (growth planner): pauses and launches on its schedule ---
+      META_APP_ID: ${META_APP_ID:-}
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_SECRET: ${GOOGLE_SECRET:-}
+      GOOGLE_ADS_DEVELOPER_TOKEN: ${GOOGLE_ADS_DEVELOPER_TOKEN:-}
+      GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${GOOGLE_ADS_LOGIN_CUSTOMER_ID:-}
+      GOOGLE_ADS_API_VERSION: ${GOOGLE_ADS_API_VERSION:-v21}
+      OAUTH_REDIRECT_BASE: ${OAUTH_REDIRECT_BASE:-http://localhost:8000}
+      # --- trial data deletion: the 3-day warning email (only when set) ---
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
       # --- generation (Build 3): provider is configurable, never hard-coded ---
       AI_PROVIDER: ${AI_PROVIDER:-anthropic}
       AI_MODEL: ${AI_MODEL:-}
       # Ordered fallback. One model being rate limited upstream is normal,
       # so the workforce walks the list rather than stopping.
       AI_MODEL_CHAIN: ${AI_MODEL_CHAIN:-}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -128,3 +185,4 @@ services:
 volumes:
   dbdata:
   redisdata:
+  mediadata:

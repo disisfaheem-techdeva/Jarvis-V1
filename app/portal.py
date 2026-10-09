@@ -31,8 +31,10 @@ from fastapi import APIRouter, Header, Cookie, HTTPException, Response
 from pydantic import BaseModel
 
 from .auth import (AuthError, SESSION_COOKIE, SESSION_TTL_SECONDS, auth_required,
-                   issue_token, resolve_scope, verify_password,
+                   issue_token, resolve_scope, verify_password, revoke_sessions,
                    hash_password, verify_setup_token, _unb64u)
+from .audit import record
+from .db import tenant_session
 
 # Per-process brute-force throttle on login. Not a substitute for a WAF/fail2ban
 # at the edge, but it stops a trivially scripted password guess against /auth/login.
@@ -60,6 +62,16 @@ class LoginIn(BaseModel):
 class SetPasswordIn(BaseModel):
     token: str
     password: str
+
+
+class ChangePasswordIn(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class AccountIn(BaseModel):
+    name: str | None = None
+    business_name: str | None = None
 
 
 class RejectIn(BaseModel):
@@ -144,17 +156,23 @@ def make_portal_router(P) -> APIRouter:
                 "name": user["name"], "expires_in": SESSION_TTL_SECONDS}
 
     @router.post("/auth/logout")
-    def logout(response: Response):
+    def logout(response: Response, authorization: str | None = Header(None),
+               td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Sign out: the cookie goes, and this login stops working on the server too."""
+        from .auth import sign_out, token_from
+        ended = sign_out(token_from(authorization, td_session))
         response.delete_cookie(SESSION_COOKIE)
-        return {"ok": True}
+        return {"ok": True, "ended": ended}
 
     @router.get("/me")
     def me(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
            authorization: str | None = Header(None),
            td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
         tid, role, uid = identity(x_tenant_id, x_role, authorization, td_session)
+        from .trial import locked
         return {"tenant_id": tid, "role": role, "user_id": uid,
-                "authenticated": uid is not None, "auth_enforced": auth_required()}
+                "authenticated": uid is not None, "auth_enforced": auth_required(),
+                "locked": role != "techdeva_admin" and locked(tid)}
 
     # ------------------------------------------------------------- trial + report
     @router.get("/portal/summary")
@@ -236,9 +254,149 @@ def make_portal_router(P) -> APIRouter:
             raise HTTPException(e.status or 400, e.message)
         if not P.set_user_password(email, hash_password(pw)):
             raise HTTPException(400, "this link is not valid")
-        record(user.get("tenant_id"), "auth.password_set",
-               {"user_id": str(user.get("id"))})
+        # record() takes a cursor; the old positional call raised after the
+        # password was already saved, so every reset answered 500.
+        with tenant_session(None, "techdeva_admin") as cur:
+            record(cur, action="auth.password_set", resource="users",
+                   resource_id=str(user.get("id")), actor=str(user.get("id")),
+                   status="ok", detail={}, tenant_id=user.get("tenant_id"))
         return {"ok": True}
+
+    # --------------------------------------------------- change own password
+    def _fresh_session(response, user):
+        """After revoking, keep THIS device signed in with a new login."""
+        token = issue_token(tenant_id=user["tenant_id"], user_id=user["id"], role=user["role"])
+        response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax", max_age=SESSION_TTL_SECONDS,
+                            secure=os.environ.get("COOKIE_SECURE", "true").lower() == "true")
+        return token
+
+    @router.post("/auth/sign-out-everywhere")
+    def sign_out_everywhere(response: Response, x_tenant_id: str | None = Header(None),
+                            x_role: str | None = Header(None), authorization: str | None = Header(None),
+                            td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Every other device where this person is signed in is signed out now;
+        this one stays signed in."""
+        _tid, _role, uid = identity(x_tenant_id, x_role, authorization, td_session)
+        if not uid:
+            raise HTTPException(401, "Sign in again first.")
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("SELECT id, tenant_id, role FROM users WHERE id::text = %s", (str(uid),))
+            user = cur.fetchone()
+            if not user:
+                raise HTTPException(404, "Your account was not found.")
+            revoke_sessions(cur, user["id"])
+            record(cur, action="auth.sign_out_everywhere", resource="users", resource_id=str(user["id"]),
+                   actor=str(user["id"]), actor_type="human", status="ok", detail={},
+                   tenant_id=_audit_tenant(cur, user["tenant_id"]))
+        time.sleep(1.1)       # the new login must be newer than the cut-off (whole seconds)
+        return {"ok": True, "token": _fresh_session(response, user)}
+
+    @router.post("/auth/change-password")
+    def change_password(body: ChangePasswordIn, response: Response, x_tenant_id: str | None = Header(None),
+                        x_role: str | None = Header(None), authorization: str | None = Header(None),
+                        td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """A signed-in person changes their own password (founder, owner or staff
+        with an email login). The current password is required, so a session
+        left open on a shared computer cannot be used to take the account."""
+        _tid, _role, uid = identity(x_tenant_id, x_role, authorization, td_session)
+        if not uid:
+            raise HTTPException(401, "Sign in again first.")
+        key = "chg:%s" % uid
+        if _throttled(key):
+            raise HTTPException(429, "Too many wrong tries. Wait a few minutes and try again.")
+        new = body.new_password or ""
+        if len(new) < 10:
+            raise HTTPException(400, "The new password must be at least 10 characters.")
+        if new == body.current_password:
+            raise HTTPException(400, "The new password must be different from the current one.")
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("SELECT id, tenant_id, email, role, password_hash FROM users WHERE id::text = %s", (str(uid),))
+            user = cur.fetchone()
+        if not user or not user["email"]:
+            raise HTTPException(400, "This login has no password (it signs in with a PIN).")
+        if not verify_password(body.current_password or "", user["password_hash"]):
+            _record_fail(key)
+            raise HTTPException(400, "The current password is not right.")
+        _LOGIN_FAILS.pop(key, None)
+        if not P.set_user_password(user["email"], hash_password(new)):
+            raise HTTPException(500, "The password was not changed. Try again.")
+        with tenant_session(None, "techdeva_admin") as cur:
+            revoke_sessions(cur, user["id"])       # a new password signs out every other device
+            record(cur, action="auth.password_change", resource="users", resource_id=str(user["id"]),
+                   actor=str(user["id"]), actor_type="human", status="ok", detail={"signed_out_elsewhere": True},
+                   tenant_id=_audit_tenant(cur, user["tenant_id"]))
+        time.sleep(1.1)
+        return {"ok": True, "token": _fresh_session(response, user)}
+
+    # ------------------------------------------------------ my name / business name
+    def _audit_tenant(cur, tenant_id):
+        """Where a person's own account change is logged: their business, or for
+        the founder (no business) TechDeva's own business. The log needs one."""
+        if tenant_id:
+            return tenant_id
+        from .tdwork import _home
+        h = _home(cur)
+        return h["id"] if h else None
+
+    def _me_row(cur, uid):
+        cur.execute("SELECT u.id, u.tenant_id, u.name, u.email, u.role, u.staff_id, t.name AS business_name "
+                    "FROM users u LEFT JOIN tenants t ON t.id = u.tenant_id WHERE u.id::text = %s", (str(uid),))
+        return cur.fetchone()
+
+    @router.get("/auth/account")
+    def account(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                authorization: str | None = Header(None),
+                td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        _tid, role, uid = identity(x_tenant_id, x_role, authorization, td_session)
+        if not uid:
+            raise HTTPException(401, "Sign in again first.")
+        with tenant_session(None, "techdeva_admin") as cur:
+            u = _me_row(cur, uid)
+        if not u:
+            raise HTTPException(404, "Your account was not found.")
+        return {"name": u["name"] or "", "email": u["email"] or "", "role": u["role"],
+                "business_name": u["business_name"], "has_password": bool(u["email"]),
+                "can_rename_business": u["role"] == "owner" and u["tenant_id"] is not None}
+
+    @router.put("/auth/account")
+    def save_account(body: AccountIn, x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                     authorization: str | None = Header(None),
+                     td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """A signed-in person changes their own name; the owner can also rename
+        the business (its web address stays the same)."""
+        _tid, role, uid = identity(x_tenant_id, x_role, authorization, td_session)
+        if not uid:
+            raise HTTPException(401, "Sign in again first.")
+        name = " ".join((body.name or "").split()) if body.name is not None else None
+        biz = " ".join((body.business_name or "").split()) if body.business_name is not None else None
+        if name is not None and not 2 <= len(name) <= 80:
+            raise HTTPException(400, "Your name must be 2 to 80 characters.")
+        if biz is not None and not 2 <= len(biz) <= 120:
+            raise HTTPException(400, "The business name must be 2 to 120 characters.")
+        with tenant_session(None, "techdeva_admin") as cur:
+            u = _me_row(cur, uid)
+            if not u:
+                raise HTTPException(404, "Your account was not found.")
+            changed = {}
+            if name is not None and name != (u["name"] or ""):
+                cur.execute("UPDATE users SET name = %s WHERE id = %s", (name, u["id"]))
+                if u["staff_id"]:      # the HR record shows the same person
+                    cur.execute("UPDATE staff SET name = %s WHERE id = %s AND tenant_id = %s",
+                                (name, u["staff_id"], u["tenant_id"]))
+                changed["name"] = name
+            if biz is not None and biz != (u["business_name"] or ""):
+                if u["role"] != "owner" or u["tenant_id"] is None:
+                    raise HTTPException(403, "Only the business owner can rename the business.")
+                cur.execute("UPDATE tenants SET name = %s WHERE id = %s", (biz, u["tenant_id"]))
+                changed["business_name"] = biz
+            if changed:
+                record(cur, action="auth.account_edit", resource="users", resource_id=str(u["id"]),
+                       actor=str(u["id"]), actor_type="human", status="ok",
+                       detail={"changed": sorted(changed), "business_from": u["business_name"]
+                               if "business_name" in changed else None},
+                       tenant_id=_audit_tenant(cur, u["tenant_id"]))
+            u = _me_row(cur, uid)
+        return {"ok": True, "changed": sorted(changed), "name": u["name"], "business_name": u["business_name"]}
 
     # ------------------------------------------------------------------ growth
     @router.get("/portal/growth")

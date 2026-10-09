@@ -124,11 +124,19 @@ def _unb64u(s: str) -> bytes:
 def issue_token(*, tenant_id: str | None, user_id: str, role: str,
                 ttl: int | None = None) -> str:
     """Sign a session token. `tenant_id` is None only for techdeva_admin."""
+    if role == "techdeva_admin":
+        # The founder belongs to no business. A founder token that also named
+        # a business would reach the database as "admin + that business", and
+        # is_admin() opens every business's rows -- one business's screens
+        # would then show all of them mixed together.
+        tenant_id = None
     claims = {
         "t": str(tenant_id) if tenant_id else None,
         "u": str(user_id),
         "r": role,
         "exp": int(time.time()) + int(ttl or SESSION_TTL_SECONDS),
+        "iat": int(time.time()),
+        "j": secrets.token_hex(12),          # this login's id: "Sign out" refuses it (db/62)
     }
     payload = _b64u(json.dumps(claims, separators=(",", ":"), sort_keys=True).encode())
     sig = _b64u(hmac.new(_secret(), payload.encode(), hashlib.sha256).digest())
@@ -151,7 +159,89 @@ def verify_token(token: str) -> dict:
         raise AuthError("session expired")
     if claims.get("r") not in {"techdeva_admin", "owner", "operator"}:
         raise AuthError("bad role in token")
+    if claims.get("r") == "techdeva_admin":
+        claims["t"] = None          # tokens issued before the rule above
+    elif not claims.get("t"):
+        raise AuthError("token names no business")
+    cut = _valid_after(claims.get("u"))
+    if cut and int(claims.get("iat", 0)) < cut:
+        raise AuthError("signed out everywhere: sign in again")
+    if claims.get("j") and _signed_out(claims["j"]):
+        raise AuthError("signed out: sign in again")
     return claims
+
+
+# "Sign out" (db/62): this one login is refused from then on.
+_OUT: dict = {}
+_OUT_TTL = 30
+
+
+def _signed_out(jti) -> bool:
+    hit = _OUT.get(jti)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    out = False
+    try:
+        from .db import tenant_session
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("SELECT 1 FROM signed_out_tokens WHERE jti = %s", (str(jti),))
+            out = cur.fetchone() is not None
+    except Exception:  # noqa: BLE001 -- the database briefly away must not sign everyone out
+        out = hit[1] if hit else False
+    if len(_OUT) > 20000:
+        _OUT.clear()
+    _OUT[jti] = (time.time() + _OUT_TTL, out)
+    return out
+
+
+def sign_out(token: str | None) -> bool:
+    """End this one login on the server. Returns True when a login was ended."""
+    try:
+        claims = verify_token(token or "")
+    except AuthError:
+        return False
+    jti = claims.get("j")
+    if not jti:
+        return False
+    from .db import tenant_session
+    with tenant_session(None, "techdeva_admin") as cur:
+        cur.execute("DELETE FROM signed_out_tokens WHERE expires_at < now()")
+        cur.execute("INSERT INTO signed_out_tokens (jti, expires_at) VALUES (%s, to_timestamp(%s)) "
+                    "ON CONFLICT (jti) DO NOTHING", (str(jti), int(claims.get("exp", 0))))
+    _OUT[jti] = (time.time() + _OUT_TTL, True)
+    return True
+
+
+# "Sign out everywhere" (db/56): a person's logins made before
+# users.sessions_valid_after are refused. Looked up per person, cached briefly.
+_REVOKED: dict = {}
+_REVOKED_TTL = 30
+
+
+def _valid_after(uid) -> int:
+    if not uid or len(str(uid)) != 36:          # service tokens (provisioner, scripts) are not people
+        return 0
+    hit = _REVOKED.get(uid)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    cut = 0
+    try:
+        from .db import tenant_session
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("SELECT extract(epoch FROM sessions_valid_after)::bigint AS c FROM users WHERE id::text = %s",
+                        (str(uid),))
+            r = cur.fetchone()
+            cut = int(r["c"]) if r and r["c"] else 0
+    except Exception:  # noqa: BLE001 -- the database briefly away must not sign everyone out
+        cut = hit[1] if hit else 0
+    _REVOKED[uid] = (time.time() + _REVOKED_TTL, cut)
+    return cut
+
+
+def revoke_sessions(cur, uid) -> None:
+    """Refuse every login this person made until now (call inside a transaction)."""
+    cur.execute("UPDATE users SET sessions_valid_after = now() WHERE id::text = %s", (str(uid),))
+    _REVOKED.pop(str(uid), None)
 
 
 def token_from(authorization: str | None, cookie: str | None) -> str | None:

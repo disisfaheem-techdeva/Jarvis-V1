@@ -6,6 +6,7 @@ JSON envelope with the tenant_id so the worker can open a correctly-scoped DB
 session. Every emitted event flows back through the queue, so the whole system
 is uniformly event-driven.
 """
+from .trial import TRIAL_DAYS
 import os
 import json
 import redis
@@ -685,9 +686,11 @@ class Persistence:
             if not s:
                 raise ValueError("signup not found")
             cur.execute("""INSERT INTO tenants (name, industry, status, trial_ends_at, is_test)
-                           VALUES (%s,%s,'trial', now() + interval '14 days', %s) RETURNING id""",
-                        (s["business_name"], s["industry"], _looks_like_test(s.get("contact_email"))))
+                           VALUES (%s,%s,'trial', now() + make_interval(days => %s), %s) RETURNING id""",
+                        (s["business_name"], s["industry"], TRIAL_DAYS, _looks_like_test(s.get("contact_email"))))
             tid = str(cur.fetchone()["id"])
+            from .subdomains import assign as _assign_address
+            _assign_address(cur, tid, s["business_name"])   # <name>.techdeva.net, no manual step
             brand = {"website": s["website_url"], "social": s["social_links"]}
             cur.execute("""INSERT INTO tenant_config (tenant_id, brand, geo, automation)
                            VALUES (%s,%s,%s,'assisted')""",
@@ -701,12 +704,18 @@ class Persistence:
                                ON CONFLICT (email) DO NOTHING""",
                             (tid, owner_name or s["business_name"],
                              s["contact_email"].strip().lower(), password_hash))
-        # kick off the pipeline: analyze the client's whole presence
-        self.emit(tid, "client.onboarded",
-                  {"signup_id": str(signup_id),
-                   "website_url": s["website_url"],
-                   "social_links": s["social_links"],
-                   "competitors": s["competitors"]}, "signup")
+        # kick off the pipeline: analyze the client's whole presence. The
+        # business and its login are already saved; a queue hiccup must not
+        # turn that into an error page (the client would retry and be told
+        # the email is taken). It is logged, and the analysis can be re-run.
+        try:
+            self.emit(tid, "client.onboarded",
+                      {"signup_id": str(signup_id),
+                       "website_url": s["website_url"],
+                       "social_links": s["social_links"],
+                       "competitors": s["competitors"]}, "signup")
+        except Exception as e:   # noqa: BLE001
+            print("[signup] tenant %s created, analysis not queued: %s" % (tid, str(e)[:200]), flush=True)
         return tid
 
     def save_analysis_report(self, tenant_id, signup_id, status, report, gaps):

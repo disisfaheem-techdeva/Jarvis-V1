@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reset password — TechDeva</title>
+<meta name="robots" content="noindex">
+<!-- @td-fonts:start -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<!-- @td-fonts:end -->
+<!-- @td-css:start -->
+<link rel="stylesheet" href="/assets/td.css?v=6c667f0080">
+<!-- @td-css:end -->
+</head>
+<body class="td td-grain page-reset relative flex min-h-screen items-center justify-center bg-bg p-4 text-fg">
+<div aria-hidden="true" class="td-ambient pointer-events-none fixed inset-0"></div>
+<div class="box" id="box"></div>
+<script>
+(function(){
+  var box = document.getElementById('box');
+  var token = new URLSearchParams(location.search).get('token') || '';
+  function post(path, body){
+    return fetch(path, {method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
+      .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(d){ return {ok:r.ok, status:r.status, data:d}; }); })
+      .catch(function(){ return {ok:false, status:0, data:{detail:'Network error. Nothing was changed.'}}; });
+  }
+  function detail(r, dflt){
+    var d = r.data && r.data.detail;
+    if (Array.isArray(d)) d = d.map(function(x){ return String(x.msg || '').replace(/^Value error, /, ''); }).join(' ');
+    return d || dflt;
+  }
+  var head = '<div class="mark">TECH<span>DEVA</span></div>';
+  if (!token) {
+    box.innerHTML = head + '<h1>Forgot your password?</h1><p class="sub">Enter the email you sign in with. We will send you a link to choose a new one.</p>' +
+      '<label for="em">Email</label><input id="em" type="email" autocomplete="username">' +
+      '<button id="go">Send reset link</button><div class="msg" id="msg"></div>' +
+      '<div class="foot"><a href="/dashboard">Back to sign in</a></div>';
+    var go = document.getElementById('go'), msg = document.getElementById('msg');
+    function send(){
+      var em = document.getElementById('em').value.trim();
+      if (!em) { msg.className = 'msg bad'; msg.textContent = 'Enter your email.'; return; }
+      go.disabled = true; msg.className = 'msg'; msg.textContent = 'Sending...';
+      post('/auth/forgot-password', {email: em}).then(function(r){
+        go.disabled = false;
+        if (!r.ok) { msg.className = 'msg bad'; msg.textContent = detail(r, 'Could not send the link. Try again.'); return; }
+        msg.className = 'msg ok'; msg.textContent = r.data.message || 'If that email has an account, a link is on its way.';
+        go.disabled = true;
+      });
+    }
+    go.onclick = send;
+    document.getElementById('em').onkeydown = function(e){ if (e.key === 'Enter') send(); };
+    return;
+  }
+  box.innerHTML = head + '<h1>Choose a new password</h1><p class="sub">At least 10 characters. This link works once, for one hour.</p>' +
+    '<label for="p1">New password</label><input id="p1" type="password" autocomplete="new-password">' +
+    '<label for="p2">Repeat it</label><input id="p2" type="password" autocomplete="new-password">' +
+    '<button id="go">Save password</button><div class="msg" id="msg"></div>';
+  var go2 = document.getElementById('go'), msg2 = document.getElementById('msg');
+  go2.onclick = function(){
+    var a = document.getElementById('p1').value, b = document.getElementById('p2').value;
+    msg2.className = 'msg bad';
+    if (a.length < 10) { msg2.textContent = 'Use at least 10 characters.'; return; }
+    if (a !== b) { msg2.textContent = 'The two passwords do not match.'; return; }
+    go2.disabled = true; msg2.className = 'msg'; msg2.textContent = 'Saving...';
+    post('/auth/set-password', {token: token, password: a}).then(function(r){
+      if (!r.ok) { go2.disabled = false; msg2.className = 'msg bad'; msg2.textContent = detail(r, 'Could not save the password.'); return; }
+      box.innerHTML = head + '<h1>Password saved</h1><p class="sub">You can sign in with your new password now. This link will not work again.</p>' +
+        '<a href="/dashboard"><button>Go to sign in</button></a>';
+    });
+  };
+})();
+</script>
+</body>
+</html>

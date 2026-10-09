@@ -1,50 +1,68 @@
 import type { Metadata } from "next";
-import { Database, Hand, Network, ScrollText } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 
 import { MarketingPage } from "@/components/MarketingPage";
 import { GlowCard } from "@/components/ui/motion";
 
-export const metadata: Metadata = { title: "Platform" };
+export const metadata: Metadata = {
+  title: "Platform: everything in one business dashboard",
+  description:
+    "What TechDeva does: appointments and bills, customer history, WhatsApp AI agent on one or more numbers, invoices, " +
+    "stock alerts, team PIN logins and HR, Facebook & Instagram posting, Meta and Google ad results, a weekly growth advisor " +
+    "and an ad autopilot that works within your limits.",
+  alternates: { canonical: "/platform" },
+};
 
-const PILLARS = [
-  {
-    Icon: Network,
-    title: "Master Orchestrator",
-    body: "A rulebook and task router, not a chatbot. It decides which AI employee does what, and when.",
-  },
-  {
-    Icon: ScrollText,
-    title: "Agent Contract",
-    body: "Every AI employee reads config and events only. The orchestrator is the only thing with write access.",
-  },
-  {
-    Icon: Hand,
-    title: "Human in the loop, in code",
-    body: "Money, publishing and pricing always park for approval. It's enforced in the platform, not just in policy.",
-  },
-  {
-    Icon: Database,
-    title: "Isolated by design",
-    body: "Every business is isolated at the database layer with row-level security. The app never connects as a superuser.",
-  },
+const PARTS = [
+  ["Appointments & calendar", "Book by service and staff member, take part payments, and see every balance from the real bill."],
+  ["Customers & history", "Every visit, payment, package, note and WhatsApp chat for each customer."],
+  ["WhatsApp AI sales agent", "Answers on your business number 24/7 in your customers' language, qualifies them and books. It passes the chat to you when a person should answer; bigger packages cover several numbers."],
+  ["Invoices & money", "Bills you can print, payments, expenses, daily closing, and profit and loss."],
+  ["Stock", "Every product movement recorded, with low-stock alerts before you run out."],
+  ["Team & HR", "Staff records, attendance and HR. Each person logs in with a PIN and sees only their part."],
+  ["Facebook & Instagram posting", "Draft, schedule and publish posts with your photos; nothing goes public without your approval."],
+  ["Ad results", "Spend, leads, chats and cost per result from Meta and Google ads, refreshed through the day."],
+  ["Jarvis voice assistant", "Ask about your figures or tell it to book, reschedule or add an expense, just by talking."],
+  ["Growth advisor", "A weekly read of your own numbers: what to fix, and what to do next to grow."],
+  ["Ad autopilot", "Pauses campaigns that cost more than your limit and writes new ones (picture, headline, text, hashtags, keywords), launching only within the daily budget you set."],
+] as const;
+
+const CONTROL = [
+  "Your data is yours alone: every business is kept strictly separate from every other.",
+  "Your AI employees work for you: they answer, draft and report, and never change a price or spend money beyond the limits you set.",
+  "Owner and staff logins: staff can book and take payments; prices, deletions and reports stay with the owner.",
+  "Works on your phone as well as your computer.",
 ];
 
 export default function PlatformPage() {
   return (
     <MarketingPage
       eyebrow="Platform"
-      title="One engine, every industry"
-      body="Business rules — services, prices, persona, hours, departments — live in configuration, not code. Onboarding a new industry is a config row, never a rebuild."
+      title="One platform, set up for your business"
+      body="Your services, prices, hours and departments are settings, not custom software, so a new clinic, salon or academy is running on the same proven platform the day it signs up."
     >
-      <ul className="grid gap-4 md:grid-cols-2">
-        {PILLARS.map(({ Icon, title, body }) => (
-          <GlowCard as="li" key={title} className="rounded-[var(--card-radius)] border border-line bg-surface p-7">
-            <Icon className="h-5 w-5 text-accent-ink" aria-hidden="true" />
-            <h2 className="mt-5 text-lg font-semibold text-fg">{title}</h2>
-            <p className="mt-2 text-[15px] leading-relaxed text-fg-muted">{body}</p>
+      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {PARTS.map(([t, b]) => (
+          <GlowCard as="li" key={t} className="rounded-[var(--card-radius)] border border-line bg-surface p-6">
+            <h2 className="text-lg font-semibold text-fg">{t}</h2>
+            <p className="mt-2 text-[15px] leading-relaxed text-fg-muted">{b}</p>
           </GlowCard>
         ))}
       </ul>
+
+      <section aria-labelledby="control-title" className="mt-16 rounded-[var(--p-radius-xl)] border border-line bg-bg-elevated p-6 sm:p-10">
+        <h2 id="control-title" className="font-display text-2xl font-semibold tracking-tight text-fg sm:text-3xl">
+          How it keeps you in control
+        </h2>
+        <ul className="mt-6 grid gap-4 sm:grid-cols-2">
+          {CONTROL.map((c) => (
+            <li key={c} className="flex gap-3 text-[15px] leading-relaxed text-fg-muted">
+              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-accent-ink" aria-hidden="true" />
+              {c}
+            </li>
+          ))}
+        </ul>
+      </section>
     </MarketingPage>
   );
 }

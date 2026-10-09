@@ -54,6 +54,45 @@ class Scheduler:
                 self.p.mark_trial_flagged(t["tenant_id"])       # dedupe: don't re-fire
                 emitted += 1
 
+        # Posts the owner approved for a later time.
+        try:
+            from .social import publish_due
+            emitted += publish_due()
+        except Exception as e:
+            print(f"[scheduler] scheduled posts skipped: {e}", flush=True)
+
+        # Ad autopilot (growth planner): auto-pause over the owner's limit, and
+        # the weekly launch within the owner's daily cap. Throttled inside.
+        try:
+            from .adpilot import run_due as adpilot_due
+            emitted += adpilot_due()
+        except Exception as e:
+            print(f"[scheduler] ad autopilot skipped: {e}", flush=True)
+
+        # Reply checker: what each business's WhatsApp agent actually said (bot
+        # errors, services or prices it does not have). Every 10 minutes.
+        try:
+            from .replycheck import run_due as replycheck_due
+            emitted += replycheck_due()
+        except Exception as e:
+            print(f"[scheduler] reply checker skipped: {e}", flush=True)
+
+        # Jarvis reads each business's own Facebook page and website into a setup
+        # preview the owner confirms; again only when those sources change.
+        try:
+            from .page_reader import run_due as pagereader_due
+            emitted += pagereader_due()
+        except Exception as e:
+            print(f"[scheduler] page reader skipped: {e}", flush=True)
+
+        # Trial data retention: warn 3 days before, delete unpaid trials 15 days
+        # after the trial ended (hourly inside).
+        try:
+            from .retention import run_due as retention_due
+            emitted += retention_due()
+        except Exception as e:
+            print(f"[scheduler] trial data retention skipped: {e}", flush=True)
+
         # Oversight: ask the Optimizer (13) to review performance on a cadence.
         # It only ever PROPOSES; the human approval gate is unchanged. Guarded by
         # hasattr so a persistence layer without the helper simply skips this.

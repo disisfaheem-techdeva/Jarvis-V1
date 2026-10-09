@@ -30,9 +30,20 @@ from .brain import make_brain_router
 from .operations import make_operations_router
 from .brand import make_brand_router
 from .console import make_console_router
+from .social import make_social_router, make_media_router
+from .videos import make_video_router, make_video_media_router
+from .aidesign import make_aidesign_router
 from .founder import router as founder_router
 from .policy import make_policy_router
 from .whatsapp import make_whatsapp_router
+from .team import make_team_router
+from .booking import make_booking_router
+from .account import make_account_router
+from .billing import make_billing_router
+from .provisioning import make_provisioning_router
+from .plans import make_plans_router
+from .pins import make_pins_router
+from . import trial
 
 # API docs (/docs, /redoc, /openapi.json) hand anyone on the internet the
 # full route surface and request/response schema. Off by default; set
@@ -67,7 +78,44 @@ app.include_router(make_whatsapp_router())
 app.include_router(make_policy_router())
 app.include_router(make_brand_router())
 app.include_router(make_console_router())
+app.include_router(make_social_router())
+app.include_router(make_media_router())
+app.include_router(make_video_router())
+app.include_router(make_video_media_router())
+app.include_router(make_aidesign_router())
+app.include_router(make_team_router())
+app.include_router(make_booking_router())
 app.include_router(founder_router)
+app.include_router(make_account_router())
+app.include_router(make_billing_router())
+app.include_router(make_provisioning_router())
+app.include_router(make_plans_router())
+app.include_router(make_pins_router())
+from .ads import make_ads_router
+app.include_router(make_ads_router())
+from .tdwork import make_tdwork_router
+app.include_router(make_tdwork_router())
+from .advisor import make_advisor_router
+app.include_router(make_advisor_router())
+from .adpilot import make_adpilot_router
+app.include_router(make_adpilot_router())
+from .retention import make_retention_router
+app.include_router(make_retention_router())
+from .sales import make_sales_router
+app.include_router(make_sales_router())
+from .growth import make_growth_router
+app.include_router(make_growth_router())
+from .trialcap import make_trialcap_router
+app.include_router(make_trialcap_router())
+from .categories import make_categories_router
+app.include_router(make_categories_router())
+# Orders: products sold (bookings stay appointments); money through invoices/payments
+from .orders import make_orders_router
+app.include_router(make_orders_router())
+# Voice: the AI phone agent's call log and number settings (calls answered by app/voice_bridge.py)
+from .voice import make_voice_router
+app.include_router(make_voice_router())
+trial.install(app)
 
 # The two client-facing pages. The API image is built from ./app, so web/ is
 # mounted in (see docker-compose.yml) rather than baked into the image; WEB_DIR
@@ -338,8 +386,8 @@ URL_RE = re.compile(r"^https?://[^\s/$.?#][^\s]*$", re.I)
 WEAK_PASSWORDS = {"password", "password1", "12345678", "123456789", "qwertyui",
                   "letmein1", "changeme", "admin123", "techdeva", "passw0rd"}
 
-SIGNUP_MAX_PER_IP = 3
-SIGNUP_MAX_PER_EMAIL = 1
+SIGNUP_MAX_PER_IP = 10
+SIGNUP_MAX_PER_EMAIL = 5
 SIGNUP_WINDOW = 3600
 _signup_hits: dict = {}
 
@@ -452,7 +500,7 @@ class SignupIn(BaseModel):
 @app.post("/signup")
 def public_signup(body: SignupIn, request: Request):
     """PUBLIC self-serve signup on techdeva.net. No auth: this is the front door.
-    Records the intake, provisions a 14-day trial tenant, creates the client's own
+    Records the intake, provisions a 7-day trial tenant (app/trial.py locks it when it ends unpaid), creates the client's own
     login, and kicks off analysis. The owner does nothing — the pipeline runs
     itself from here.
 
@@ -489,17 +537,85 @@ def public_signup(body: SignupIn, request: Request):
             "message": "Analysis in progress — your report is being prepared."}
 
 
+class DemoRequestIn(BaseModel):
+    name: str
+    business: str
+    phone: str | None = None
+    email: str | None = None
+    message: str | None = None
+    website: str | None = None      # honeypot: a hidden field people never fill
+    topic: str | None = None        # "data_deletion" from the website's deletion page
+
+
+@app.post("/public/demo-request")
+def public_demo_request(body: DemoRequestIn, request: Request):
+    """PUBLIC 'Book a demo' from the website. The form used to post to an
+    address that never existed, so every request was lost. Stored in the
+    signups intake queue (status demo_requested), shown in the founder console."""
+    if (body.website or "").strip():
+        return {"ok": True}                      # a bot filled the hidden field; say nothing
+    ip = _client_ip(request)
+    if not _rate_ok("demo:" + ip, SIGNUP_MAX_PER_IP):
+        raise HTTPException(429, "Too many requests from this address. Please try again later.")
+    name = (body.name or "").strip()[:120]
+    business = (body.business or "").strip()[:160]
+    phone = re.sub(r"[^0-9+ ]", "", body.phone or "").strip()[:30] or None
+    email = (body.email or "").strip().lower()[:200] or None
+    if len(name) < 2 or len(business) < 2:
+        raise HTTPException(400, "Please enter your name and your business name.")
+    if not phone and not email:
+        raise HTTPException(400, "Please leave a phone number or an email so we can reach you.")
+    if email and not EMAIL_RE.match(email):
+        raise HTTPException(400, "That email address does not look right.")
+    if phone and len(re.sub(r"\D", "", phone)) < 7:
+        raise HTTPException(400, "That phone number looks too short.")
+    note = (body.message or "").strip()[:1000] or None
+    kind = "data deletion request" if body.topic == "data_deletion" else "demo request"
+    with tenant_session(None, "techdeva_admin") as cur:
+        cur.execute("""INSERT INTO signups (business_name, industry, contact_email, contact_phone,
+                                            contact_name, note, status)
+                       VALUES (%s, %s, %s, %s, %s, %s, 'demo_requested') RETURNING id""",
+                    (business, kind, email, phone, name, note))
+        sid = cur.fetchone()["id"]
+    print("[demo] request from %s (%s)" % (business, "phone" if phone else "email"), flush=True)
+    return {"ok": True, "id": str(sid)}
+
+
 # ---------------------- the pages the client actually sees ----------------------
 @app.get("/", include_in_schema=False)
-def signup_page():
-    """The public front door on techdeva.net."""
+def signup_page(request: Request):
+    """The public front door on techdeva.net. On a business's own address
+    (drirfan.techdeva.net) the front door is that business's staff login."""
+    from .pins import host_tenant
+    if host_tenant(request):
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login", status_code=302)
     return _page("signup.html")
+
+
+@app.get("/login", include_in_schema=False)
+def login_page():
+    """Staff PIN login: the business is taken from its own address, the
+    PIN-screen device, or the business code."""
+    return _page("pin.html")
 
 
 @app.get("/onboarding", include_in_schema=False)
 def onboarding_page():
     """Where a client describes their business. The agents already read this."""
     return _page("onboarding.html")
+
+
+@app.get("/reset", include_in_schema=False)
+def reset_page():
+    """Forgot password: ask for a link, or choose a new password from one."""
+    return _page("reset.html")
+
+
+@app.get("/pin", include_in_schema=False)
+def pin_page():
+    """Team PIN login: the shared screen's PIN pad, or business code + PIN."""
+    return _page("pin.html")
 
 
 @app.get("/portal", include_in_schema=False)
@@ -582,7 +698,9 @@ def list_events(x_tenant_id: str | None = Header(None), x_role: str | None = Hea
 # ======================== OAuth — client account connections ========================
 from fastapi.responses import RedirectResponse, HTMLResponse
 from .oauth import (meta_auth_url, meta_exchange_code, google_auth_url,
-                    google_exchange_code, save_connection)
+                    google_exchange_code, save_connection, save_failure,
+                    meta_diagnose, MetaOAuthError)
+import html as _html
 
 
 @app.get("/connect/{provider}")
@@ -600,6 +718,9 @@ def connect_start(provider: str,
         raise HTTPException(e.status, e.message)
     if not tenant_id:
         raise HTTPException(400, "tenant required")
+    if _role not in ("owner", "techdeva_admin"):
+        # linking the business's ad accounts is the owner's decision
+        raise HTTPException(403, "Only the business owner can connect accounts.")
     if provider == "meta":
         return RedirectResponse(meta_auth_url(issue_oauth_state(tenant_id, "meta")))
     if provider == "google":
@@ -620,8 +741,20 @@ def meta_callback(code: str = "", state: str = "", error: str = ""):
         return HTMLResponse("<h2>Missing tenant</h2>", 400)
     try:
         token_data = meta_exchange_code(code)
+    except MetaOAuthError as e:
+        # Meta's own reason, shown to the person and kept on the integration
+        # row so the Integrations page says why. Never the secret or the code.
+        why = e.describe()
+        print("[oauth] meta callback refused: %s" % why, flush=True)
+        save_failure(tenant_id, "meta", why)
+        return HTMLResponse(
+            "<html><body style='background:#0A0E1A;color:#EAF1FF;font-family:sans-serif;padding:40px;max-width:720px;margin:auto'>"
+            "<h2 style='color:#E06A6A'>Facebook did not connect</h2><p>" + _html.escape(why) + "</p>"
+            "<p style='color:#8A99B8'>Nothing was saved. Send this message to TechDeva; it says exactly which setting to fix.</p>"
+            "<p><a style='color:#6C8CFF' href='/dashboard#/integrations'>Back to the dashboard</a></p></body></html>", 400)
     except Exception as e:
-        return HTMLResponse(f"<h2>Token exchange failed</h2><p>{e}</p>", 500)
+        print("[oauth] meta callback failed: %s" % type(e).__name__, flush=True)
+        return HTMLResponse("<h2>Token exchange failed</h2><p>%s</p>" % _html.escape(type(e).__name__), 500)
     ad_accts = token_data.get("ad_accounts", [])
     ext = ad_accts[0]["account_id"] if ad_accts else ""
     save_connection(P, tenant_id, "meta", token_data, ext)
@@ -632,8 +765,25 @@ def meta_callback(code: str = "", state: str = "", error: str = ""):
         "<h1 style='color:#5FD44A'>✓ Facebook & Instagram connected!</h1>"
         f"<p>Ad account: {ext or 'will be set up'}</p>"
         "<p>You can close this window. TechDeva is ready to run your campaigns.</p>"
+        "<p><a style='color:#6C8CFF' href='/dashboard#/integrations'>Back to the dashboard</a></p>"
         "</body></html>"
     )
+
+
+@app.get("/oauth/meta/diagnose")
+def meta_diagnose_route(x_tenant_id: str | None = Header(None),
+                        x_role: str | None = Header(None),
+                        authorization: str | None = Header(None),
+                        td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+    """Is the Meta app configured, and does Meta accept its id + secret?
+    Owner or TechDeva only. Returns no secret, only facts about it."""
+    try:
+        tid, role, _uid = resolve_scope(x_tenant_id, x_role, authorization, td_session)
+    except AuthError as e:
+        raise HTTPException(e.status, e.message)
+    if role not in ("owner", "techdeva_admin"):
+        raise HTTPException(403, "Only the business owner can see this.")
+    return meta_diagnose()
 
 
 @app.get("/oauth/google/callback")
@@ -649,13 +799,27 @@ def google_callback(code: str = "", state: str = "", error: str = ""):
     try:
         token_data = google_exchange_code(code)
     except Exception as e:
-        return HTMLResponse(f"<h2>Token exchange failed</h2><p>{e}</p>", 500)
+        why = "Google refused the sign-in (%s)." % type(e).__name__
+        print("[oauth] google callback failed: %s" % type(e).__name__, flush=True)
+        save_failure(tenant_id, "google", why)
+        return HTMLResponse("<h2>Google did not connect</h2><p>%s</p>"
+                            "<p><a href='/dashboard#/integrations'>Back to the dashboard</a></p>" % _html.escape(why), 500)
+    import time as _t
+    if token_data.get("expires_in"):
+        token_data["expires_at"] = _t.time() + float(token_data["expires_in"])
     save_connection(P, tenant_id, "google", token_data, "")
+    picked = None
+    try:
+        from .ads import google_autoselect
+        picked = google_autoselect(tenant_id)
+    except Exception as e:      # reporting may not be switched on yet; the login is saved regardless
+        print("[oauth] google account discovery skipped: %s" % type(e).__name__, flush=True)
     return HTMLResponse(
         "<html><body style='background:#0A0E1A;color:#EAF1FF;font-family:sans-serif;text-align:center;padding:60px'>"
-        "<h1 style='color:#5FD44A'>✓ Google connected!</h1>"
-        "<p>Google Ads and Business Profile are now linked.</p>"
-        "<p>You can close this window.</p>"
+        "<h1 style='color:#5FD44A'>✓ Google connected</h1>"
+        + ("<p>Google Ads account %s is linked.</p>" % _html.escape(picked) if picked
+           else "<p>Next: choose your Google Ads account on the Integrations page.</p>") +
+        "<p><a style='color:#6C8CFF' href='/dashboard#/integrations'>Back to the dashboard</a></p>"
         "</body></html>"
     )
 
@@ -685,6 +849,11 @@ def _integration_view(r):
     }
 
 
+# Platform-wide incidents a client may see: only ones about the service they
+# use. Everything else the server monitor opens is TechDeva's to act on.
+CLIENT_VISIBLE_PLATFORM_INCIDENTS = ("ai.fallback",)
+
+
 @app.get("/incidents")
 def list_incidents(x_tenant_id: str | None = Header(None),
                    x_role: str | None = Header(None),
@@ -697,16 +866,27 @@ def list_incidents(x_tenant_id: str | None = Header(None),
     wonder why nothing has happened today.
     """
     tid, role = scope(x_tenant_id, x_role, authorization, td_session)
+    # The server monitor's own findings ("container down: ...", backups,
+    # certificates) are TechDeva's to act on, not a client's: shown to a
+    # business they only alarm (a 10-second restart during a deploy stayed on
+    # every dashboard for hours, 2 Oct 2026). The founder console still shows
+    # them; clients keep the incidents about their own service (AI fallback).
+    # Default-deny (4 Oct 2026): a new monitor finding, "Alerts are not
+    # reaching Faheem", reached client dashboards because only platform.monitor
+    # was hidden. Clients now see their own incidents plus the platform-wide
+    # kinds listed here, and nothing else.
+    admin = role == "techdeva_admin"
+    hide = "" if admin else " AND (tenant_id IS NOT NULL OR kind = ANY(%s))"
     with tenant_session(tid, role) as cur:
         cur.execute("""SELECT kind, severity, title, detail, status, seen_count,
                               opened_at, last_seen_at,
                               (tenant_id IS NULL) AS platform_wide
                          FROM incidents
-                        WHERE status = 'open'
+                        WHERE status = 'open'""" + hide + """
                         ORDER BY CASE severity WHEN 'critical' THEN 0
                                                WHEN 'warn' THEN 1 ELSE 2 END,
                                  last_seen_at DESC
-                        LIMIT 50""")
+                        LIMIT 50""", () if admin else (list(CLIENT_VISIBLE_PLATFORM_INCIDENTS),))
         rows = [dict(r) for r in cur.fetchall()]
     return {"incidents": rows, "open": len(rows)}
 
@@ -748,6 +928,19 @@ def list_integrations(x_tenant_id: str | None = Header(None),
                               (credentials <> '{}'::jsonb) AS has_credentials
                        FROM integrations ORDER BY provider""")
         rows = {r["provider"]: dict(r) for r in cur.fetchall()}
+        # WhatsApp numbers live in whatsapp_connections (one row per number)
+        # since several numbers per business; the old integrations row is
+        # not written any more, so it alone showed "Never connected".
+        cur.execute("""SELECT phone_number, display_name, connected_at FROM whatsapp_connections
+                        WHERE status = 'connected' ORDER BY connected_at""")
+        wa = cur.fetchall()
+    import datetime as _dt
+    if wa:
+        rows["whatsapp"] = {"provider": "whatsapp", "status": "connected", "has_credentials": True,
+                            "health": "ok",
+                            "external_account": ", ".join(r["phone_number"] or r["display_name"] or "connected"
+                                                          for r in wa)[:200],
+                            "connected_at": wa[0]["connected_at"] or _dt.datetime.now(_dt.timezone.utc)}
 
     out = []
     for provider in KNOWN_PROVIDERS:
@@ -775,6 +968,8 @@ def list_integrations(x_tenant_id: str | None = Header(None),
 # exactly as strict as it was.
 # ---------------------------------------------------------------------------
 import psycopg
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 
@@ -788,6 +983,40 @@ def _db_message(exc: Exception) -> str:
     if hint:
         parts.append(hint)
     return " ".join(p for p in parts if p)[:400]
+
+
+# Field names as a person would say them, for the sentences below.
+_FIELD_WORDS = {"business_name": "Business name", "contact_email": "Email", "contact_phone": "Phone",
+                "contact_name": "Your name", "website_url": "Website", "password": "Password",
+                "industry": "Type of business", "email": "Email", "phone": "Phone", "name": "Name"}
+
+
+@app.exception_handler(RequestValidationError)
+def validation_error_handler(request: Request, exc: RequestValidationError):
+    """A rejected form field. FastAPI's default answer is a list of objects;
+    pages printing it showed "[object Object]" (a new client could not sign
+    up). Every page reads `detail` as one plain sentence; the list stays in
+    `errors` for anything that wants it."""
+    lines = []
+    for e in exc.errors():
+        loc = [str(x) for x in (e.get("loc") or []) if x not in ("body", "query", "path", "header")]
+        field = _FIELD_WORDS.get(loc[-1], loc[-1].replace("_", " ").capitalize()) if loc else ""
+        msg = str(e.get("msg") or "is not valid").replace("Value error, ", "")
+        if e.get("type") == "missing":
+            msg = "is required"
+        elif e.get("type", "").endswith("_parsing") or e.get("type", "").endswith("_type"):
+            msg = "is not in the right format"
+        # the validators already name their field ("password must be ..."): say it once
+        low = msg.lower()
+        if field and (low.startswith(loc[-1].replace("_", " ")) or low.startswith(loc[-1])):
+            msg = msg.split(" ", 1)[1] if " " in msg else msg
+        line = (field + " " + msg).strip() if field else msg
+        line = line[:1].upper() + line[1:]
+        if line not in lines:
+            lines.append(line)
+    text = ". ".join(l.rstrip(".") for l in lines[:4]) + "." if lines else "Please check the form and try again."
+    return JSONResponse(status_code=422, content={"detail": text,
+                                                  "errors": jsonable_encoder(exc.errors(), exclude={"ctx", "input", "url"})})
 
 
 @app.exception_handler(psycopg.errors.DataError)

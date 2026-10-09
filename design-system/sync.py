@@ -59,6 +59,8 @@ TAILWIND_PAGES = [
     ROOT / "web/signup.html",
     ROOT / "web/techdeva.html",
     ROOT / "web/dashboard.html",
+    ROOT / "web/pin.html",
+    ROOT / "web/reset.html",
 ]
 
 FONTS = (

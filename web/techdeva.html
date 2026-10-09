@@ -3,24 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TechDeva - founder console</title>
+<title>TechDeva Founder Console</title>
 <!-- @td-fonts:start -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=f2714e73fe">
+<link rel="stylesheet" href="/assets/td.css?v=6c667f0080">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-techdeva min-h-screen bg-bg text-fg">
+<!-- Founder identity: a violet line across the top, so this screen is never mistaken for a business dashboard. -->
+<div aria-hidden="true" class="fixed inset-x-0 top-0 z-50 h-[3px] bg-[linear-gradient(90deg,var(--p-violet-500),var(--p-violet-800),var(--p-violet-500))]"></div>
 
 <div id="login" class="relative flex min-h-screen items-start justify-center px-4 pt-[12vh]">
   <div aria-hidden="true" class="td-ambient pointer-events-none absolute inset-0"></div>
   <div class="td-glass td-rim relative w-full max-w-sm rounded-[var(--p-radius-xl)] p-6 sm:p-8">
-    <p class="font-mono text-xs tracking-[0.14em] text-accent-ink uppercase">Founder console</p>
-    <h1 class="mt-2 font-display text-2xl font-semibold tracking-tight">TechDeva</h1>
-    <div class="sub">techdeva_admin only.</div>
+    <span class="role-badge">Founder console</span>
+    <h1 class="mt-3 font-display text-2xl font-semibold tracking-tight">TechDeva</h1>
+    <div class="sub">For the TechDeva founder only. Businesses sign in at <a href="/dashboard">/dashboard</a>.</div>
     <form id="lf" class="mt-6 flex flex-col gap-3">
       <label class="td-sr-only" for="email">Email</label>
       <input id="email" class="td-input" type="email" placeholder="Email" autocomplete="username">
@@ -32,25 +34,27 @@
   </div>
 </div>
 
-<div class="min-h-screen grid-cols-[256px_minmax(0,1fr)] max-[900px]:grid-cols-1" id="app" style="display:none">
-  <aside class="flex flex-col border-line bg-bg-elevated/80 py-4 max-[900px]:sticky max-[900px]:top-0 max-[900px]:z-30 max-[900px]:border-b max-[900px]:px-3 max-[900px]:py-2 max-[900px]:backdrop-blur-xl min-[901px]:sticky min-[901px]:top-0 min-[901px]:h-screen min-[901px]:border-r min-[901px]:px-3">
-    <div class="flex items-center gap-2 px-3 pb-3 max-[900px]:pb-2">
+<div class="shell min-h-screen grid-cols-[256px_minmax(0,1fr)] max-[900px]:grid-cols-1" id="app" style="display:none">
+  <aside id="aside" class="flex flex-col border-r border-line bg-bg-elevated px-3 py-4 min-[901px]:sticky min-[901px]:top-0 min-[901px]:h-screen">
+    <div class="flex items-center gap-2 px-3 pb-2">
       <span aria-hidden="true" class="h-1.5 w-1.5 rounded-full bg-accent-ink shadow-[0_0_8px_var(--accent-glow)]"></span>
       <span class="font-display text-[17px] font-semibold tracking-tight">TechDeva</span>
-      <span class="font-mono text-[11px] tracking-[0.12em] text-fg-subtle uppercase">founder</span>
     </div>
+    <span class="role-badge mx-3 self-start">Founder console</span>
+    <div class="sub px-3 pb-2">Every client, in one place</div>
     <nav id="nav" aria-label="Founder console" class="flex-1 overflow-auto"></nav>
-    <div class="border-t border-line px-3 pt-3 text-xs text-fg-muted max-[900px]:hidden">
+    <div class="sidefoot border-t border-line px-3 pt-3 text-xs text-fg-muted">
       <div id="who"></div>
-      <div class="mt-2"><a href="#" id="out">Sign out</a></div>
+      <div class="mt-2"><a href="#" id="chgpw">My account</a> · <a href="#" id="out">Sign out</a></div>
     </div>
   </aside>
   <main class="min-w-0 px-4 pt-6 pb-20 sm:px-8">
     <div class="relative mb-2 flex flex-wrap items-end justify-between gap-4 overflow-hidden rounded-[var(--p-radius-xl)] border border-line bg-bg-elevated px-6 py-6">
       <div aria-hidden="true" class="td-ambient pointer-events-none absolute inset-0 opacity-70"></div>
       <div aria-hidden="true" class="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:linear-gradient(var(--fg)_1px,transparent_1px),linear-gradient(90deg,var(--fg)_1px,transparent_1px)] [background-size:32px_32px]"></div>
-      <div class="relative"><h1 id="vtitle" class="font-display text-3xl font-semibold tracking-tight">Overview</h1><div class="sub" id="vsub"></div></div>
-      <div class="relative flex gap-2"><button id="refresh">Refresh</button></div>
+      <div class="relative flex items-start gap-3"><button id="menubtn" aria-label="Open menu">☰</button>
+        <div><h1 id="vtitle" class="font-display text-3xl font-semibold tracking-tight">Overview</h1><div class="sub" id="vsub"></div></div></div>
+      <div class="relative flex flex-wrap items-center gap-2"><span class="scope">Founder view · all businesses</span><button id="refresh">Refresh</button></div>
     </div>
     <div id="view"></div>
   </main>
@@ -60,7 +64,7 @@
 let TOKEN = null, D = {};
 const NAV = [
   ['RUNNING THE BUSINESS', [
-    ['overview','Overview'], ['clients','Clients'], ['pipeline','Pipeline & trials']]],
+    ['jarvis','Jarvis'], ['overview','Overview'], ['requests','Requests'], ['clients','Clients'], ['connections','Connections'], ['pipeline','Pipeline & trials']]],
   ['WHAT THE AI DELIVERS', [
     ['bookings','Bookings'], ['workforce','AI workforce'], ['approvals','Waiting on you']]],
   ['MONEY', [
@@ -68,9 +72,12 @@ const NAV = [
   ['PLATFORM', [
     ['health','Health'], ['incidents','Incidents']]]
 ];
-const TITLES = {overview:['Overview','The whole business on one screen.'],
+const TITLES = {jarvis:['Jarvis','Pick a client, then say or type what to change for them.'],
+  overview:['Overview','The whole business on one screen.'],
   clients:['Clients','Everyone onboard, what they pay, and what they are getting.'],
+  connections:['Connections','Which clients have connected WhatsApp, Facebook, Instagram and Google. Clients connect these themselves in their dashboard.'],
   pipeline:['Pipeline & trials','Who signed up and who is still on a trial.'],
+  requests:['Requests','Things clients asked for that need you: agents, payments, password resets.'],
   bookings:['Bookings','Appointments the AI has put in your clients diaries.'],
   workforce:['AI workforce','What each client’s agents are doing right now.'],
   approvals:['Waiting on you','Work the platform stopped on and cannot finish alone.'],
@@ -121,9 +128,11 @@ document.getElementById('lf').addEventListener('submit', async e => {
 document.getElementById('out').onclick = async e => {
   e.preventDefault();
   try { await api('/auth/logout', {method:'POST'}); } catch (x) {}
-  TOKEN = null; location.href = '/portal';
+  TOKEN = null; location.href = '/techdeva';
 };
 document.getElementById('refresh').onclick = () => load();
+document.getElementById('menubtn').onclick = () => document.getElementById('aside').classList.toggle('open');
+document.getElementById('nav').addEventListener('click', e => { if (e.target.closest('a')) document.getElementById('aside').classList.remove('open'); });
 window.addEventListener('hashchange', paint);
 
 function show(){
@@ -134,16 +143,23 @@ function show(){
 function current(){ return (location.hash.replace('#/','') || 'overview'); }
 
 async function load(){
-  const [book, health, ops, ai, inc, over, invoices] = await Promise.all([
+  const [book, health, ops, ai, inc, over, invoices, agents, claims, resets, plans, conns] = await Promise.all([
     api('/techdeva/book'),
     api('/techdeva/health').catch(() => null),
     api('/techdeva/operations').catch(() => null),
     api('/ai/health').catch(() => null),
     api('/incidents').catch(() => null),
     api('/techdeva/overview').catch(() => null),
-    api('/techdeva/invoices').catch(() => null)
+    api('/techdeva/invoices').catch(() => null),
+    api('/techdeva/agent-requests').catch(() => null),
+    api('/techdeva/payment-claims').catch(() => null),
+    api('/techdeva/password-resets').catch(() => null),
+    api('/plans').catch(() => null),
+    api('/techdeva/connections').catch(() => null)
   ]);
-  D = {book, health, ops, ai, inc, over, invoices};
+  D = {book, health, ops, ai, inc, over, invoices, agents, claims, resets, plans, conns, usage: D.usage, ret: D.ret};
+  // conversation counts ask every agent, so they arrive after the page
+  api('/techdeva/usage').then(u => { D.usage = u; if (current() === 'clients' || current() === 'overview') paint(); }).catch(() => {});
   renderNav(); paint();
 }
 
@@ -151,7 +167,8 @@ function renderNav(){
   const b = D.book || {}, cur = current();
   const badge = {clients: b.clients ? b.clients.length : 0,
                  approvals: b.awaiting_approval || 0,
-                 incidents: (D.inc && D.inc.open) || 0};
+                 incidents: (D.inc && D.inc.open) || 0,
+                 requests: openRequests()};
   document.getElementById('nav').innerHTML = NAV.map(g =>
     '<div class="navgrp">' + g[0] + '</div>' + g[1].map(it =>
       '<a href="#/' + it[0] + '" class="' + (cur === it[0] ? 'on' : '') + '">' +
@@ -170,6 +187,158 @@ function paint(){
   el.innerHTML = fn();
   if (v === 'clients') wireClients();
   if (v === 'invoices') wireInvoices();
+  if (v === 'jarvis') wireJarvis();
+  if (v === 'requests') wireRequests();
+}
+
+/* ---- Jarvis voice helpers ----
+   jarvisHeard: the phrase heard in THIS listening session. Chrome (Android
+   especially) fires onresult repeatedly, often re-sending the same or a growing
+   copy of the phrase; appending each one typed the user's words several times.
+   jarvisSpeak: read Jarvis's reply aloud after a spoken request. */
+function jarvisHeard(ev){
+  var parts = [];
+  for (var i = 0; i < ev.results.length; i++) {
+    var t = ((ev.results[i][0] && ev.results[i][0].transcript) || '').trim();
+    if (!t) continue;
+    var last = parts.length ? parts[parts.length - 1] : '';
+    if (last && (t === last || t.toLowerCase().indexOf(last.toLowerCase()) === 0)) parts[parts.length - 1] = t;
+    else if (last && last.toLowerCase().indexOf(t.toLowerCase()) === 0) continue;
+    else parts.push(t);
+  }
+  return parts.join(' ');
+}
+var JARVIS_SPOKEN = false;
+var JARVIS_LANG = 'en', JARVIS_AUDIO = null, JARVIS_LAST = '';
+try { JARVIS_LANG = localStorage.getItem('jarvis_lang') || 'en'; } catch (e) {}
+function jarvisLangLabel(){ return JARVIS_LANG === 'ur' ? 'اردو' : 'EN'; }
+function jarvisToggleLang(btn){
+  JARVIS_LANG = JARVIS_LANG === 'ur' ? 'en' : 'ur';
+  try { localStorage.setItem('jarvis_lang', JARVIS_LANG); } catch (e) {}
+  if (btn) btn.textContent = jarvisLangLabel();
+}
+function jarvisRecLang(){ return JARVIS_LANG === 'ur' ? 'ur-PK' : 'en-US'; }
+function jarvisBrowserSpeak(text){
+  try {
+    if (!window.speechSynthesis || !text) return;
+    window.speechSynthesis.cancel();
+    var u = new SpeechSynthesisUtterance(text);
+    u.lang = (JARVIS_LANG === 'ur' || /[؀-ۿ]/.test(text)) ? 'ur-PK' : 'en-US';
+    window.speechSynthesis.speak(u);
+  } catch (e) {}
+}
+/* Jarvis speaks through the server (Gemini voice, real Urdu); the browser's
+   own voice is only the fallback when the server voice is busy. */
+function jarvisSpeak(text){
+  if (!text) return;
+  text = String(text).slice(0, 600);
+  JARVIS_LAST = text;
+  var urdu = JARVIS_LANG === 'ur' || /[؀-ۿ]/.test(text);
+  try { if (JARVIS_AUDIO) JARVIS_AUDIO.pause(); if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {}
+  var h = {'Content-Type': 'application/json'};
+  if (typeof TOKEN !== 'undefined' && TOKEN) h['Authorization'] = 'Bearer ' + TOKEN;
+  fetch('/console/speak', {method: 'POST', credentials: 'include', headers: h,
+                           body: JSON.stringify({text: text, lang: urdu ? 'ur' : 'en'})})
+    .then(function(r){ if (!r.ok) throw new Error('voice ' + r.status); return r.blob(); })
+    .then(function(b){ var a = new Audio(URL.createObjectURL(b)); JARVIS_AUDIO = a; return a.play(); })
+    .catch(function(){ jarvisBrowserSpeak(text); });
+}
+function jarvisListenBtn(cls){
+  return ' <button class="' + cls + '" type="button" onclick="jarvisSpeak(JARVIS_LAST)" title="Hear this reply">&#128266; Listen</button>';
+}
+let JV_CLIENT = '';
+async function jvLoadPosts(){
+  const el = document.getElementById('jv-posts');
+  if (!el || !JV_CLIENT) return;
+  const q = '?tenant=' + encodeURIComponent(JV_CLIENT);
+  el.innerHTML = '<div class="empty">Loading...</div>';
+  let acc, ps;
+  try { [acc, ps] = await Promise.all([api('/social/accounts' + q), api('/social/posts' + q)]); }
+  catch (e) { el.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; return; }
+  const head = acc.connected
+    ? '<div class="sub">Posting to: ' + esc(acc.pages.map(p => p.name + (p.instagram ? ' + Instagram' : '')).join(', ')) + '</div>'
+    : '<div class="sub">This client has not connected Facebook yet. They connect it from their own dashboard (Jarvis, Connect Facebook).</div>';
+  const rows = (ps.posts || []).map(p => {
+    const res = p.results || {};
+    const errs = Object.keys(res).filter(k => res[k] && !res[k].ok).map(k => k + ': ' + (res[k].error || 'failed'));
+    const waiting = p.status === 'draft' || p.status === 'failed';
+    return '<div class="card" style="padding:10px 12px;margin-top:8px"><div class="k-note">' +
+      esc((p.platforms || []).join(' + ')) + ' · ' + esc(p.status) + ' · ' + when(p.created_at) + '</div>' +
+      (p.image_url ? '<img src="' + esc(p.image_url) + '" alt="" style="max-width:200px;border-radius:8px;margin:6px 0;display:block">' : '') +
+      '<div style="white-space:pre-wrap">' + esc(p.caption) + '</div>' +
+      (errs.length ? '<div class="sub warn">' + esc(errs.join(' | ')) + '</div>' : '') +
+      (waiting ? '<div class="k-note" style="margin-top:6px">Waiting for the client to approve.</div>' : '') +
+      '</div>';
+  });
+  el.innerHTML = head + (rows.length ? rows.join('') : '<div class="empty">No posts yet for this client.</div>') +
+    '<div id="jv-pmsg" class="sub" style="margin-top:6px"></div>';
+  const msg = t => { const m = document.getElementById('jv-pmsg'); if (m) m.textContent = t; };
+  el.querySelectorAll('[data-jpub]').forEach(b => b.onclick = async () => {
+    if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Tap again to post publicly'; return; }
+    b.disabled = true; b.textContent = 'Posting...';
+    try { const r = await api('/social/posts/' + b.dataset.jpub + '/publish' + q, {method: 'POST'});
+          await jvLoadPosts(); msg('Result: ' + r.status); }
+    catch (e) { await jvLoadPosts(); msg(e.message); }
+  });
+  el.querySelectorAll('[data-jdis]').forEach(b => b.onclick = async () => {
+    try { await api('/social/posts/' + b.dataset.jdis + q, {method: 'DELETE'}); await jvLoadPosts(); msg('Discarded.'); }
+    catch (e) { msg(e.message); }
+  });
+}
+function wireJarvis(){
+  const sel = document.getElementById('jv-client'), box = document.getElementById('jv-in');
+  const go = document.getElementById('jv-go'), mic = document.getElementById('jv-mic');
+  const lb = document.getElementById('jv-lang'); if (lb) lb.textContent = jarvisLangLabel();
+  const out = document.getElementById('jv-out'), note = document.getElementById('jv-note');
+  if (!sel) return;
+  if (JV_CLIENT) sel.value = JV_CLIENT;
+  sel.onchange = () => { JV_CLIENT = sel.value; out.innerHTML = ''; jvLoadPosts(); };
+  if (sel.value) jvLoadPosts();
+  const send = async () => {
+    const msg = box.value.trim();
+    if (!msg) return;
+    if (!sel.value) { note.textContent = 'Pick a client first.'; return; }
+    JV_CLIENT = sel.value;
+    note.textContent = 'Thinking... (can take up to a minute)'; go.disabled = true;
+    try {
+      const d = await api('/console', {method:'POST', body: JSON.stringify({message: msg, tenant_id: sel.value})});
+      box.value = '';
+      let extra = '';
+      if (d.kind === 'business') extra = (d.action === 'create' ? 'Added to ' : 'Updated in ') + (d.resource || '');
+      if (d.kind === 'teach') extra = 'Their WhatsApp agent will now follow: ' + (d.lesson || '');
+      if (d.kind === 'dashboard') extra = 'Dashboard changed: ' + JSON.stringify(d.changed || {});
+      if (d.kind === 'post') { extra = 'Drafted. The client decides whether it goes out.'; jvLoadPosts(); }
+      const name = sel.options[sel.selectedIndex].text;
+      out.innerHTML = '<div class="card" style="padding:12px 14px"><div class="k-note">' + esc(name) +
+        '</div><div>' + esc(d.reply || 'Done.') + '</div>' +
+        (extra ? '<div class="sub" style="margin-top:6px">' + esc(extra) + '</div>' : '') + jarvisListenBtn('tiny') + '</div>';
+      JARVIS_LAST = d.reply || 'Done.';
+      note.textContent = '';
+      if (JARVIS_SPOKEN) { jarvisSpeak(d.reply || 'Done.'); JARVIS_SPOKEN = false; }
+    } catch (e) {
+      note.textContent = e.message || 'Jarvis could not do that.';
+      if (JARVIS_SPOKEN) { jarvisSpeak(note.textContent); JARVIS_SPOKEN = false; }
+    }
+    go.disabled = false;
+  };
+  go.onclick = send;
+  box.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const label = String.fromCodePoint(127908) + ' Speak';
+  if (!SR) { mic.style.display = 'none'; return; }
+  mic.textContent = label;
+  let rec = null, on = false;
+  mic.onclick = () => {
+    if (on) { rec && rec.stop(); return; }
+    try { rec = new SR(); } catch (e) { mic.style.display = 'none'; return; }
+    rec.lang = jarvisRecLang(); rec.interimResults = false; rec.maxAlternatives = 1;
+    on = true; mic.textContent = '... Listening';
+    const base = box.value.trim();
+    rec.onresult = ev => { const heard = jarvisHeard(ev);
+      if (heard) { box.value = (base ? base + ' ' : '') + heard; JARVIS_SPOKEN = true; } };
+    rec.onerror = rec.onend = () => { on = false; mic.textContent = label; };
+    try { rec.start(); } catch (e) { on = false; mic.textContent = label; }
+  };
 }
 
 function chart(months){
@@ -181,13 +350,31 @@ function chart(months){
     '%"></i><span>' + esc(String(m.month).slice(5)) + '</span></div>').join('') +
     '</div><div class="sub">Tallest bar ' + money(max) + '.</div>';
 }
+function planCell(c){
+  const u = D.usage && D.usage.clients && D.usage.clients[c.id], plans = (D.plans && D.plans.plans) || [];
+  const cur = u && u.plan && u.plan.chosen ? u.plan.key : '';
+  let h = '<select class="plan-pick" data-plan="' + esc(c.id) + '"><option value="">' + (cur ? 'no plan' : 'no plan (Starter limits)') + '</option>' +
+    plans.map(p => '<option value="' + esc(p.key) + '"' + (p.key === cur ? ' selected' : '') + '>' + esc(p.name) +
+      (p.price_pkr != null ? ' · ' + Math.round(p.price_pkr).toLocaleString('en-US') : '') + '</option>').join('') + '</select>';
+  if (u) {
+    const w = u.warning === 'over' ? 'bad' : u.warning === 'near' ? 'warn' : 'dim';
+    h += '<div class="k-note ' + w + '">' + (u.usage.conversations || 0).toLocaleString('en-US') + (u.usage.approximate ? '~' : '') + ' / ' +
+      u.plan.max_conversations.toLocaleString('en-US') + ' chats · ' + u.usage.numbers + '/' + u.plan.max_numbers + ' numbers</div>';
+  } else h += '<div class="k-note dim">usage loading…</div>';
+  return h;
+}
+function isLocked(c){ return c.status === 'paused' || (c.status === 'trial' && c.trial_ends_at && new Date(c.trial_ends_at) < new Date()); }
 function clientRows(rows){
   return rows.map(c => {
     const paidThis = Number(c.paid_this_month)||0, fee = Number(c.monthly_fee)||0;
     const owes = fee > 0 && paidThis <= 0 && c.status === 'active';
     return '<tr><td><div class="name">' + esc(c.name || 'Unnamed') + '</div>' +
-      '<div class="k-note">' + esc(c.industry || '') + '</div></td>' +
-      '<td><span class="pill ' + esc(c.status) + '">' + esc(c.status) + '</span></td>' +
+      '<div class="k-note">' + esc(c.industry || '') + '</div>' +
+      '<div class="k-note">' + (c.subdomain ? '<a href="https://' + esc(c.subdomain) + '.techdeva.net/login" target="_blank" style="color:var(--gold)">' + esc(c.subdomain) + '.techdeva.net</a> ' : '') +
+      '<a href="#" data-sub="' + esc(c.id) + '" data-cur="' + esc(c.subdomain || '') + '" style="color:var(--muted)">' + (c.subdomain ? 'change' : 'give it an address') + '</a></div></td>' +
+      '<td><span class="pill ' + esc(c.status) + '">' + esc(isLocked(c) ? (c.status === 'paused' ? 'locked (paused)' : 'locked (trial ended)') : c.status) + '</span>' +
+        (c.status === 'trial' && c.trial_ends_at ? '<div class="k-note">trial ' + (isLocked(c) ? 'ended ' : 'ends ') + esc(String(c.trial_ends_at).slice(0,10)) + '</div>' : '') + '</td>' +
+      '<td>' + planCell(c) + '</td>' +
       '<td class="num"><input class="fee" data-fee="' + esc(c.id) + '" value="' + (fee||'') + '" placeholder="0"></td>' +
       '<td class="num ' + (owes?'warn':'') + '">' + (paidThis ? money(paidThis) : '-') + '</td>' +
       '<td class="num">' + (Number(c.paid_total) ? money(c.paid_total) : '-') + '</td>' +
@@ -196,6 +383,8 @@ function clientRows(rows){
       '<td class="num ' + (Number(c.awaiting)?'warn':'dim') + '">' + c.awaiting + '</td>' +
       '<td class="dim">' + when(c.last_event_at) + '</td>' +
       '<td><div class="row"><button class="tiny" data-pay="' + esc(c.id) + '">Payment</button>' +
+      (c.status === 'trial' || c.status === 'paused' ? '<button class="tiny" data-trial="' + esc(c.id) + '">+7 days trial</button>' : '') +
+      (c.status !== 'active' ? '<button class="tiny" data-activate="' + esc(c.id) + '">Mark paying</button>' : '') +
       '<button class="tiny" data-hide="' + esc(c.id) + '">Hide</button></div>' +
       '<div class="pay" id="pay-' + esc(c.id) + '"><input placeholder="Amount" data-amt="' + esc(c.id) +
       '"><button class="tiny primary" data-save="' + esc(c.id) + '">Record</button></div></td></tr>';
@@ -203,6 +392,42 @@ function clientRows(rows){
 }
 
 const VIEWS = {
+  connections(){
+    const c = D.conns;
+    if (!c) return '<div class="empty">Could not read the connections.</div>';
+    const t = c.totals, n = t.clients || 0;
+    const pct = x => n ? Math.round(100 * x / n) + '% of clients' : '';
+    const cell = (ok, list) => ok ? '<span style="color:var(--good,#5FD44A)">&#10003;</span> ' + esc((list || []).join(', ')) : '<span style="color:var(--muted,#8A99B8)">&mdash;</span>';
+    return '<section><div class="grid">' +
+      kpi('Clients', n, '') +
+      kpi('WhatsApp connected', t.whatsapp + ' / ' + n, pct(t.whatsapp)) +
+      kpi('Facebook connected', t.facebook + ' / ' + n, pct(t.facebook)) +
+      kpi('Instagram connected', t.instagram + ' / ' + n, pct(t.instagram)) +
+      kpi('Google connected', t.google + ' / ' + n, pct(t.google)) +
+      kpi('Nothing connected yet', t.none, t.none ? 'may need a nudge' : 'everyone has started', t.none ? 'warn' : '') +
+      '</div><div class="card" style="margin-top:14px;overflow:auto">' +
+      tbl('<th>Client</th><th>Status</th><th>WhatsApp</th><th>Facebook</th><th>Instagram</th><th>Google Ads</th>',
+        c.clients.map(r => '<tr><td>' + esc(r.name || 'Unnamed') + '</td><td>' + esc(r.status) + '</td><td>' +
+          cell(r.whatsapp.length, r.whatsapp) + '</td><td>' + cell(r.facebook_connected, r.facebook) + '</td><td>' +
+          cell(r.instagram.length, r.instagram) + '</td><td>' + cell(r.google_connected, r.google ? [r.google] : []) + '</td></tr>')) +
+      '</div></section>';
+  },
+  jarvis(){
+    const cs = ((D.book && D.book.clients) || []);
+    return '<section><div class="card" style="padding:16px">' +
+      '<label class="k-label">Client</label><br><select id="jv-client" style="margin:6px 0 12px;padding:8px;min-width:260px">' +
+      '<option value="">Choose a client...</option>' +
+      cs.map(c => '<option value="' + esc(c.id) + '">' + esc(c.name || 'Unnamed') + '</option>').join('') +
+      '</select>' +
+      '<textarea id="jv-in" rows="3" style="width:100%;padding:12px;border-radius:10px;font:inherit" ' +
+      'placeholder="Add a service called HydraFacial at 8,000. / Close on Fridays. / Teach their agent: consultations are free. / Make their brand colour #C9A227."></textarea>' +
+      '<div class="row" style="margin-top:10px;gap:8px;align-items:center"><button id="jv-go" class="tiny primary">Send</button>' +
+      '<button id="jv-mic" class="tiny" type="button">Speak</button><button id="jv-lang" class="tiny" type="button" title="Voice language: English or Urdu" onclick="jarvisToggleLang(this)">EN</button><span id="jv-note" class="sub"></span></div>' +
+      '<div id="jv-out" style="margin-top:14px"></div>' +
+      '<div class="k-label" style="margin-top:18px">Social posts for this client</div>' +
+      '<div id="jv-posts" style="margin-top:8px"><div class="empty">Pick a client to see their posts.</div></div></div>' +
+      '<div class="sub" style="margin-top:8px">Changes apply to the chosen client only, instantly, and are recorded in the audit log.</div></section>';
+  },
   overview(){
     const b = D.book, h = D.health || {}, o = (D.ops || {}).client_business || {};
     const unpaid = Number(b.unpaid_this_month) || 0;
@@ -216,7 +441,7 @@ const VIEWS = {
       '</div>' +
       '<section><h2>What clients have paid you</h2><div class="card">' + chart(b.months) + '</div></section>' +
       '<section><h2>Clients</h2><div class="card" style="padding:6px 8px">' +
-        tbl('<th>Business</th><th>Status</th><th class="num">Fee</th><th class="num">Paid this month</th>' +
+        tbl('<th>Business</th><th>Status</th><th>Plan &amp; WhatsApp</th><th class="num">Fee</th><th class="num">Paid this month</th>' +
             '<th class="num">Paid all time</th><th>Last paid</th><th class="num">Leads</th>' +
             '<th class="num">AI 7d</th><th class="num">Waiting</th><th>Activity</th><th></th>',
             clientRows(b.clients)) + '</div></section>';
@@ -229,12 +454,66 @@ const VIEWS = {
       kpi('On trial', b.trials, 'not yet converted') +
       kpi('Hidden', b.hidden_test_tenants, 'marked test, never deleted') + '</div>' +
       '<section><div class="card" style="padding:6px 8px">' +
-        tbl('<th>Business</th><th>Status</th><th class="num">Fee</th><th class="num">Paid this month</th>' +
+        tbl('<th>Business</th><th>Status</th><th>Plan &amp; WhatsApp</th><th class="num">Fee</th><th class="num">Paid this month</th>' +
             '<th class="num">Paid all time</th><th>Last paid</th><th class="num">Leads</th>' +
             '<th class="num">AI 7d</th><th class="num">Waiting</th><th>Activity</th><th></th>',
             clientRows(b.clients)) + '</div>' +
-      '<div class="sub" style="margin-top:8px">Type a fee and press Tab to save it. Hide removes a ' +
-      'client from this book without deleting anything.</div></section>';
+      '<div class="sub" style="margin-top:8px">Pick a plan and the fee becomes the plan price (type a different fee after, for a discount). ' +
+      'Type a fee and press Tab to save it. Hide removes a client from this book without deleting anything.</div></section>' +
+      '<section><h2>Plans</h2><div class="card" style="padding:6px 8px">' +
+      tbl('<th>Plan</th><th class="num">Price (PKR / month)</th><th class="num">Abroad (USD / month)</th><th class="num">WhatsApp numbers</th><th class="num">Conversations / month</th><th></th>',
+        ((D.plans && D.plans.plans) || []).map(p => '<tr><td class="name">' + esc(p.name) + '</td>' +
+          '<td class="num"><input class="fee" data-pp="' + esc(p.key) + '" value="' + (p.price_pkr != null ? Math.round(p.price_pkr) : '') + '" placeholder="talk to us"></td>' +
+          '<td class="num"><input class="fee" data-pu="' + esc(p.key) + '" value="' + (p.price_usd != null ? Math.round(p.price_usd) : '') + '" placeholder="talk to us"></td>' +
+          '<td class="num"><input class="fee" data-pn="' + esc(p.key) + '" value="' + p.max_numbers + '"></td>' +
+          '<td class="num"><input class="fee" data-pc="' + esc(p.key) + '" value="' + p.max_conversations + '"></td>' +
+          '<td><button class="tiny primary" data-psave="' + esc(p.key) + '">Save</button></td></tr>')) +
+      '<div class="sub" style="margin-top:6px">Clients see these on their Plan &amp; Billing page and on the website. An empty price shows "Talk to us". ' +
+      'A conversation is one customer writing in a month. Going over is warned, never cut off.</div></div></section>';
+  },
+  requests(){
+    const ag = (D.agents && D.agents.requests) || [], cl = (D.claims && D.claims.claims) || [],
+          rs = (D.resets && D.resets.requests) || [];
+    const how = (D.claims && D.claims.payment_instructions) || '';
+    const agState = {requested:'waiting for you', approved:'queued to build', building:'building', ready:'ready', failed:'build failed', rejected:'rejected'};
+    return '<div class="grid">' +
+      kpi('Agents to approve', ag.filter(a => a.status === 'requested' || a.status === 'failed').length, 'WhatsApp agents clients asked for') +
+      kpi('Payments to check', cl.filter(c => c.status === 'pending').length, 'clients say they paid') +
+      kpi('Password resets', rs.filter(r => r.delivered === 'pending').length, (D.resets && D.resets.email_configured) ? 'email is on' : 'no email set up: send links by WhatsApp') +
+      '</div>' +
+      '<section><h2>WhatsApp agents</h2><div class="card" style="padding:6px 8px">' +
+      tbl('<th>Business</th><th>Owner number</th><th>Assistant</th><th>Status</th><th>When</th><th></th>',
+        ag.map(a => '<tr><td class="name">' + esc(a.business_name) + '<div class="dim">calls owner: ' + esc(a.home_name) + (a.agent_key ? ' · key ' + esc(a.agent_key) : '') + '</div>' +
+          (a.error ? '<div class="dim" style="color:var(--bad,#F87171)">' + esc(a.error) + '</div>' : '') + '</td>' +
+          '<td class="dim">+' + esc(a.owner_phone) + '</td><td class="dim">' + esc(a.assistant) + '</td>' +
+          '<td><span class="pill">' + esc(agState[a.status] || a.status) + '</span></td><td class="dim">' + when(a.created_at) + '</td>' +
+          '<td>' + (a.status === 'requested' || a.status === 'failed'
+            ? '<button class="tiny primary" data-agok="' + esc(a.id) + '">' + (a.status === 'failed' ? 'Retry' : 'Approve') + '</button> ' +
+              '<button class="tiny" data-agno="' + esc(a.id) + '">Reject</button>' : '') +
+            (a.agent_key && !/irfan|clinic|salon|workspace/.test(a.agent_key) && (a.status === 'ready' || a.status === 'failed') ? ' <button class="tiny" data-agrb="' + esc(a.id) + '" data-name="' + esc(a.business_name) + '">Rebuild</button>' : '') +
+            (a.rebuild && a.status !== 'ready' ? '<div class="dim">rebuilding</div>' : '') + '</td></tr>')) +
+      '<div class="sub" style="margin-top:6px">Approve starts the build on the server within a minute (provision-queue.sh). ' +
+      'It waits by itself if the server is short of memory.</div></div></section>' +
+      '<section><h2>Payments clients reported</h2><div class="card" style="padding:6px 8px">' +
+      tbl('<th>Business</th><th class="num">Amount</th><th>Method</th><th>Reference</th><th>Status</th><th>When</th><th></th>',
+        cl.map(c => '<tr><td class="name">' + esc(c.business) + (c.invoice ? '<div class="dim">' + esc(c.invoice) + '</div>' : '') + '</td>' +
+          '<td class="num">' + money(c.amount) + '</td><td class="dim">' + esc(c.method) + '</td><td class="dim">' + esc(c.reference || '-') + '</td>' +
+          '<td><span class="pill">' + esc(c.status) + '</span>' + (c.reason ? '<div class="dim">' + esc(c.reason) + '</div>' : '') + '</td><td class="dim">' + when(c.created_at) + '</td>' +
+          '<td>' + (c.status === 'pending' ? '<button class="tiny primary" data-clok="' + esc(c.id) + '">Money arrived</button> ' +
+            '<button class="tiny" data-clno="' + esc(c.id) + '">Not found</button>' : '') + '</td></tr>')) +
+      '<div class="sub" style="margin-top:6px">Check your bank / JazzCash / Easypaisa first. "Money arrived" records the payment, marks the bill paid, and moves a trial client to active.</div></div></section>' +
+      '<section><h2>How clients pay you</h2><div class="card" style="padding:12px">' +
+      '<textarea id="pay-how" rows="4" style="width:100%;padding:10px;border-radius:10px;font:inherit" placeholder="e.g. Bank: ... Account title: ... IBAN: ...  JazzCash: 03xx...">' + esc(how) + '</textarea>' +
+      '<div class="row" style="margin-top:8px"><button class="tiny primary" id="pay-how-save">Save</button><span class="sub" id="pay-how-msg"></span></div>' +
+      '<div class="sub" style="margin-top:6px">Every client sees this on their Plan &amp; Billing page.</div></div></section>' +
+      '<section><h2>Password resets</h2><div class="card" style="padding:6px 8px">' +
+      tbl('<th>Person</th><th>Business</th><th>Delivered</th><th>When</th><th></th>',
+        rs.map(r => '<tr><td class="name">' + esc(r.name || '') + '<div class="dim">' + esc(r.email) + '</div></td><td class="dim">' + esc(r.business || '-') + '</td>' +
+          '<td><span class="pill">' + esc(r.delivered === 'email' ? 'emailed' : r.delivered === 'handled' ? 'link made' : 'waiting for you') + '</span></td>' +
+          '<td class="dim">' + when(r.created_at) + '</td>' +
+          '<td>' + (r.delivered !== 'email' ? '<button class="tiny" data-rslink="' + esc(r.id) + '">Make link</button>' : '') + '</td></tr>')) +
+      '<div id="rs-out" class="sub" style="margin-top:6px"></div>' +
+      '<div class="sub" style="margin-top:6px">Send the link to the person on WhatsApp. It works once, for one hour. Check the number is really theirs first.</div></div></section>';
   },
   pipeline(){
     const s = (D.ops && D.ops.signups) || [], b = D.book;
@@ -242,9 +521,11 @@ const VIEWS = {
       kpi('On trial now', b.trials, 'still inside the free window') +
       kpi('Converted', b.paying, 'have a fee against their name') + '</div>' +
       '<section><h2>Recent signups</h2><div class="card" style="padding:6px 8px">' +
-      tbl('<th>Business</th><th>Industry</th><th>Status</th><th>When</th>',
-        s.map(x => '<tr><td class="name">' + esc(x.business_name) + '</td><td class="dim">' +
-          esc(x.industry || '-') + '</td><td><span class="pill">' + esc(x.status) + '</span></td>' +
+      tbl('<th>Business</th><th>Industry</th><th>Status</th><th>Contact</th><th>When</th>',
+        s.map(x => '<tr><td class="name">' + esc(x.business_name) + (x.note ? '<div class="dim">' + esc(x.note) + '</div>' : '') +
+          '</td><td class="dim">' + esc(x.industry || '-') + '</td><td><span class="pill">' +
+          esc(x.status === 'demo_requested' ? (x.industry === 'data deletion request' ? 'delete my data' : 'demo requested') : x.status) + '</span></td>' +
+          '<td class="dim">' + esc([x.contact_name, x.contact_phone, x.contact_email].filter(Boolean).join(' · ') || '-') + '</td>' +
           '<td class="dim">' + when(x.created_at) + '</td></tr>')) + '</div></section>';
   },
   bookings(){
@@ -346,7 +627,8 @@ const VIEWS = {
             '<td class="dim">' + when(r.issued_on) + '</td>' +
             '<td class="dim">' + when(r.due_on) + '</td>' +
             '<td class="dim">' + when(r.sent_at) + '</td>' +
-            '<td>' + (r.status === 'draft' ? '<button class="tiny" data-send="' + esc(r.id) + '">Send</button>' : '') + '</td></tr>').join('')) +
+            '<td>' + (r.status === 'draft' ? '<button class="tiny" data-send="' + esc(r.id) + '">Send</button>'
+              : r.status === 'sent' ? '<button class="tiny" data-mpaid="' + esc(r.id) + '">Mark paid</button>' : '') + '</td></tr>').join('')) +
       '</div></section>';
   },
   health(){
@@ -397,12 +679,87 @@ function wireClients(){
       body: JSON.stringify({amount: el.querySelector('[data-amt="' + id + '"]').value})}); load(); }
     catch (e) { alert(e.message); }
   });
+  el.querySelectorAll('[data-plan]').forEach(sel => sel.onchange = async () => {
+    try { await api('/techdeva/clients/' + sel.getAttribute('data-plan') + '/plan', {method:'PUT', body: JSON.stringify({plan_key: sel.value})});
+          D.usage = null; load(); }
+    catch (e) { alert(e.message); }
+  });
+  el.querySelectorAll('[data-psave]').forEach(b => b.onclick = async () => {
+    const k = b.getAttribute('data-psave'), v = a => el.querySelector('[' + a + '="' + k + '"]').value;
+    try { await api('/techdeva/plans/' + k, {method:'PUT', body: JSON.stringify({price_pkr: v('data-pp'), price_usd: v('data-pu'), max_numbers: v('data-pn'), max_conversations: v('data-pc')})});
+          b.textContent = 'Saved'; load(); }
+    catch (e) { alert(e.message); }
+  });
+  el.querySelectorAll('[data-sub]').forEach(a => a.onclick = async e => {
+    e.preventDefault();
+    const v = prompt('Address for this client, before .techdeva.net (e.g. drirfan). Empty removes it.', a.getAttribute('data-cur'));
+    if (v === null) return;
+    try { await api('/techdeva/clients/' + a.getAttribute('data-sub') + '/subdomain', {method:'PUT', body: JSON.stringify({subdomain: v.trim()})}); load(); }
+    catch (err) { alert(err.message); }
+  });
+  el.querySelectorAll('[data-trial]').forEach(b => b.onclick = async () => {
+    try { await api('/techdeva/clients/' + b.getAttribute('data-trial') + '/trial', {method:'POST', body: JSON.stringify({days: 7})}); load(); }
+    catch (e) { alert(e.message); }
+  });
+  el.querySelectorAll('[data-activate]').forEach(b => b.onclick = async () => {
+    if (!confirm('Mark this business as a paying client? Its dashboard will never be locked by the trial.')) return;
+    try { await api('/techdeva/clients/' + b.getAttribute('data-activate') + '/activate', {method:'POST'}); load(); }
+    catch (e) { alert(e.message); }
+  });
   el.querySelectorAll('[data-hide]').forEach(b => b.onclick = async () => {
     if (!confirm('Hide this client from the book? Nothing is deleted.')) return;
     try { await api('/techdeva/clients/' + b.getAttribute('data-hide') + '/hide',
       {method:'POST', body: JSON.stringify({hidden:true})}); load(); }
     catch (e) { alert(e.message); }
   });
+}
+
+function openRequests(){
+  const ag = (D.agents && D.agents.requests) || [], cl = (D.claims && D.claims.claims) || [],
+        rs = (D.resets && D.resets.requests) || [];
+  return ag.filter(a => a.status === 'requested' || a.status === 'failed').length +
+         cl.filter(c => c.status === 'pending').length + rs.filter(r => r.delivered === 'pending').length;
+}
+function wireRequests(){
+  const el = document.getElementById('view');
+  const go = (sel, fn) => el.querySelectorAll(sel).forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try { await fn(b); } catch (e) { alert(e.message); b.disabled = false; }
+  });
+  go('[data-agok]', async b => { await api('/techdeva/agent-requests/' + b.getAttribute('data-agok') + '/approve', {method:'POST'}); load(); });
+  go('[data-agrb]', async b => {
+    if (!confirm('Rebuild the WhatsApp agent of ' + b.getAttribute('data-name') + ' from the current template?\n\n' +
+                 'The server removes the old agent and builds a new one (about 4 minutes). The business must connect its ' +
+                 'number again with a new QR scan, and the agent starts with fresh chat memory. Their business data on ' +
+                 'the platform is not affected.')) return;
+    await api('/techdeva/agent-requests/' + b.getAttribute('data-agrb') + '/rebuild', {method:'POST'}); load();
+  });
+  go('[data-agno]', async b => {
+    const why = prompt('What should the client read? (e.g. We will call you to set it up)', '');
+    if (why === null) { b.disabled = false; return; }
+    await api('/techdeva/agent-requests/' + b.getAttribute('data-agno') + '/reject', {method:'POST', body: JSON.stringify({reason: why})}); load();
+  });
+  go('[data-clok]', async b => {
+    if (!confirm('You found this money in your account?')) { b.disabled = false; return; }
+    await api('/techdeva/payment-claims/' + b.getAttribute('data-clok') + '/confirm', {method:'POST'}); load();
+  });
+  go('[data-clno]', async b => {
+    const why = prompt('What should the client read?', 'We could not find this payment. Please send a screenshot on WhatsApp.');
+    if (why === null) { b.disabled = false; return; }
+    await api('/techdeva/payment-claims/' + b.getAttribute('data-clno') + '/reject', {method:'POST', body: JSON.stringify({reason: why})}); load();
+  });
+  go('[data-rslink]', async b => {
+    const d = await api('/techdeva/password-resets/' + b.getAttribute('data-rslink') + '/link', {method:'POST'});
+    const out = document.getElementById('rs-out');
+    out.innerHTML = 'Link for ' + esc(d.email) + ' (one hour): <input readonly style="width:100%;margin-top:4px" value="' + esc(d.link) + '" onclick="this.select()">';
+    b.disabled = false;
+  });
+  const save = document.getElementById('pay-how-save');
+  if (save) save.onclick = async () => {
+    const m = document.getElementById('pay-how-msg');
+    try { await api('/techdeva/settings/payment_instructions', {method:'PUT', body: JSON.stringify({value: document.getElementById('pay-how').value})}); m.textContent = 'Saved.'; }
+    catch (e) { m.textContent = e.message; }
+  };
 }
 
 function wireInvoices(){
@@ -421,6 +778,12 @@ function wireInvoices(){
       load();
     } catch (e) { alert(e.message); }
   };
+  el.querySelectorAll('[data-mpaid]').forEach(b => b.onclick = async () => {
+    const ref = prompt('Money arrived for this invoice. Reference / transaction ID (optional):', '');
+    if (ref === null) return;
+    try { await api('/techdeva/invoices/' + b.getAttribute('data-mpaid') + '/paid', {method:'POST', body: JSON.stringify({reference: ref})}); load(); }
+    catch (e) { alert(e.message); }
+  });
   el.querySelectorAll('[data-send]').forEach(b => b.onclick = async () => {
     try { await api('/techdeva/invoices/' + b.getAttribute('data-send') + '/send', {method:'POST'}); load(); }
     catch (e) { alert(e.message); }
@@ -431,4 +794,547 @@ api('/me').then(m => {
   document.getElementById('who').textContent = m.role || '';
   if (m.role === 'techdeva_admin') show();
 }).catch(() => {});
+
+/* ======================================================== Part 19: TechDeva's team & services
+   Team: which business on the platform is TechDeva's own (its staff log in
+   there with PINs), and who is on the team. Services catalogue: what TechDeva
+   sells. Client services: which client has what, at what price. Delivery
+   board: tasks per client, given to team members (they see and move their
+   own tasks in TechDeva's dashboard). */
+NAV.splice(1, 0, ['TECHDEVA TEAM & SERVICES', [
+  ['team','Team'], ['catalog','Services catalogue'], ['clientsvc','Client services'], ['work','Delivery board']]]);
+Object.assign(TITLES, {
+  team: ['Team', "TechDeva's own business on the platform, and the people who work in it."],
+  catalog: ['Services catalogue', 'What TechDeva sells, and for how much.'],
+  clientsvc: ['Client services', 'Which client has which service, at what price, since when.'],
+  work: ['Delivery board', 'The work for each client, who is doing it, and by when.']});
+const W = {};
+const CATS = ['plan', 'ads', 'content', 'website', 'setup', 'training', 'other'];
+function wkGet(key, path){
+  if (W[key] !== undefined) return W[key];
+  W[key] = null;
+  api(path).then(d => { W[key] = d; }).catch(e => { W[key] = {error: e.message}; })
+    .then(() => { if (['team','catalog','clientsvc','work'].indexOf(current()) !== -1) paint(); });
+  return null;
+}
+function wkFresh(){ Object.keys(W).forEach(k => delete W[k]); paint(); }
+function wkNoHome(){
+  return '<div class="empty">First choose which business on the platform is TechDeva\'s own, on the ' +
+    '<a href="#/team" style="color:var(--gold)">Team</a> page.</div>';
+}
+const wkPrice = (p, billing) => p == null || p === '' ? '<span class="dim">Talk to us</span>' :
+  money(p) + (billing === 'monthly' ? '<span class="dim"> / month</span>' : '<span class="dim"> once</span>');
+function wkAct(sel, fn){
+  setTimeout(() => document.querySelectorAll(sel).forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try { await fn(b); } catch (e) { alert(e.message); b.disabled = false; }
+  }), 0);
+}
+// After Edit: bring the form (now right under that row) into view, cursor in the first box.
+function wkFocus(id){ setTimeout(() => { const e = document.getElementById(id); if (e) { e.scrollIntoView({block: 'center'}); e.focus(); } }, 30); }
+const wkVal = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+const wkInput = 'style="background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;font:inherit"';
+
+VIEWS.team = function(){
+  const h = wkGet('home', '/techdeva/work/home');
+  if (!h) return '<div class="empty">Loading...</div>';
+  if (h.error) return '<div class="empty">' + esc(h.error) + '</div>';
+  let out = '<section><div class="card" style="margin-bottom:16px">';
+  if (!h.home) {
+    out += '<div class="k-label">Step 1</div><p>Which business on the platform is <b>TechDeva itself</b>? Your team logs in there with their PINs, ' +
+      'and the delivery tasks you give them appear in that dashboard. Clients never see any of it.</p>' +
+      '<select id="wk-home" ' + wkInput + '><option value="">Choose...</option>' +
+      h.candidates.map(c => '<option value="' + esc(c.id) + '"' + (/techdeva/i.test(c.name) ? ' selected' : '') + '>' + esc(c.name) + '</option>').join('') +
+      '</select> <button class="primary" id="wk-home-save">This is TechDeva</button>' +
+      '<div class="k-note">Not in the list? Sign TechDeva up as a business first (portal signup), then come back.</div></div></section>';
+    wkAct('#wk-home-save', async () => {
+      if (!wkVal('wk-home')) throw new Error('Choose the business first.');
+      const d = await api('/techdeva/work/home', {method:'PUT', body: JSON.stringify({tenant_id: wkVal('wk-home')})});
+      alert('Done. ' + (d.catalog_seeded ? 'Your plans were added to the services catalogue.' : ''));
+      wkFresh();
+    });
+    return out;
+  }
+  out += '<div class="k-label">TechDeva\'s own business</div><div style="font-size:18px;font-weight:700;margin:4px 0">' + esc(h.home.name) + '</div>';
+  const t = wkGet('team', '/techdeva/work/team');
+  if (!t) return out + '</div><div class="empty">Loading the team...</div></section>';
+  if (t.error) return out + '</div><div class="empty">' + esc(t.error) + '</div></section>';
+  out += '<div class="k-note">Employees with a PIN log in on their phone at <b>' + esc(location.origin) + '/pin</b> with business code <b style="color:var(--gold);letter-spacing:2px">' +
+    esc(t.code || '') + '</b> and their PIN. They see the tasks you give them under <b>Client work</b>. Staff access has no money pages.</div></div>';
+  const ed = W.empEdit ? (t.employees || []).find(e => e.id === W.empEdit) : null;
+  const v = k => esc(ed && ed[k] != null ? String(ed[k]).slice(0, k === 'joining_date' ? 10 : 200) : '');
+  const form = '<div class="card" id="em-form" style="margin-bottom:16px' + (ed ? ';border:1px solid var(--gold)' : '') + '"><div class="k-label">' + (ed ? 'Edit ' + esc(ed.name) : 'Add an employee') + '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
+    '<input id="em-name" placeholder="Full name" value="' + v('name') + '" ' + wkInput + ' style="flex:1;min-width:170px">' +
+    '<input id="em-job" placeholder="Job, e.g. Sales, Designer" value="' + v('job') + '" ' + wkInput + ' style="flex:1;min-width:170px">' +
+    '<input id="em-phone" placeholder="Phone / WhatsApp" value="' + v('phone') + '" ' + wkInput + ' style="width:170px">' +
+    '<input id="em-email" placeholder="Email (optional)" value="' + v('email') + '" ' + wkInput + ' style="width:200px">' +
+    '<label class="k-note" style="display:flex;flex-direction:column;gap:2px">Joining date<input id="em-join" type="date" value="' + v('joining_date') + '" ' + wkInput + '></label>' +
+    '<label class="k-note" style="display:flex;flex-direction:column;gap:2px">Monthly salary (PKR, only you see it)<input id="em-salary" inputmode="numeric" value="' + esc(ed && ed.salary != null ? Math.round(ed.salary) : '') + '" ' + wkInput + ' style="width:170px"></label></div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center">' +
+    '<input id="em-pin" inputmode="numeric" maxlength="6" placeholder="' + (ed && ed.has_pin ? 'New PIN (empty = keep)' : 'PIN 4-6 digits (optional)') + '" ' + wkInput + ' style="width:200px">' +
+    '<select id="em-access" ' + wkInput + '><option value="staff"' + (ed && ed.access === 'full' ? '' : ' selected') + '>Staff: tasks and daily work, no money</option>' +
+    '<option value="full"' + (ed && ed.access === 'full' ? ' selected' : '') + '>Full: everything, including money</option></select>' +
+    '<button class="primary" id="em-save">' + (ed ? 'Save changes' : 'Add employee') + '</button>' + (ed ? ' <button id="em-cancel">Cancel</button>' : '') + '</div>' +
+    '<div class="k-note" style="margin-top:6px">Give a PIN if they should log in and get tasks. Tell them the PIN yourself; easy PINs like 1234 are refused.</div></div>';
+  if (!ed) out += form;
+  const emps = t.employees || [];
+  out += '<div class="card">' + tbl('<th>Employee</th><th>Job</th><th>Phone</th><th>Joined</th><th>Salary</th><th>Login</th><th>Open tasks</th><th></th>',
+    emps.map(e => '<tr' + (e.active ? '' : ' style="opacity:.55"') + '><td><b>' + esc(e.name) + '</b>' + (e.email ? '<div class="k-note">' + esc(e.email) + '</div>' : '') + '</td><td>' + esc(e.job || '-') +
+      '</td><td>' + esc(e.phone || '-') + '</td><td>' + esc(e.joining_date ? String(e.joining_date).slice(0, 10) : '-') + '</td><td>' +
+      (e.salary != null ? money(e.salary) : '<span class="dim">-</span>') + '</td><td>' +
+      (!e.active ? '<span class="dim">left</span>' : e.has_pin ? '<span class="good">PIN · ' + (e.access === 'full' ? 'full' : 'staff') + '</span>' : '<span class="dim">no login</span>') +
+      '</td><td>' + (e.open_tasks ? '<a href="#/work" style="color:var(--gold)">' + e.open_tasks + '</a>' : '0') + '</td><td style="white-space:nowrap">' +
+      (e.active ? '<button data-emedit="' + esc(e.id) + '">Edit</button> ' + (e.has_pin ? '<button data-emnopin="' + esc(e.id) + '">Remove PIN</button> ' : '') +
+        '<button data-emleft="' + esc(e.id) + '">Left</button>' : '<button data-emback="' + esc(e.id) + '">Rejoined</button>') + '</td></tr>' +
+      (ed && ed.id === e.id ? '<tr><td colspan="8">' + form + '</td></tr>' : ''))) + '</div>';
+  const others = (t.team || []).filter(u => !emps.some(e => String(e.user_id) === String(u.id)));
+  if (others.length) out += '<div class="card" style="margin-top:16px"><div class="k-label">Other logins to this business</div>' +
+    others.map(u => '<div class="k-note" style="margin-top:6px">' + esc(u.name || u.email) + ' · ' + (u.role === 'techdeva_admin' ? 'founder' : u.role === 'owner' ? 'owner' : 'staff') + '</div>').join('') + '</div>';
+  out += '</section>';
+  wkAct('#em-save', async () => {
+    const body = {name: wkVal('em-name'), job: wkVal('em-job'), phone: wkVal('em-phone'), email: wkVal('em-email'), joining_date: wkVal('em-join'), access: wkVal('em-access'), salary: wkVal('em-salary')};
+    if (!body.name) throw new Error('Write the employee\'s name.');
+    if (wkVal('em-pin')) body.pin = wkVal('em-pin');
+    if (ed) await api('/techdeva/work/employees/' + ed.id, {method:'PUT', body: JSON.stringify(body)});
+    else await api('/techdeva/work/employees', {method:'POST', body: JSON.stringify(body)});
+    alert(body.name + (ed ? ' saved.' : ' added.') + (body.pin ? ' They can log in with their PIN now.' : ''));
+    W.empEdit = null; wkFresh();
+  });
+  wkAct('#em-cancel', async () => { W.empEdit = null; paint(); });
+  wkAct('[data-emedit]', async b => { W.empEdit = b.getAttribute('data-emedit'); paint(); wkFocus('em-name'); });
+  const put = (id, body) => api('/techdeva/work/employees/' + id, {method:'PUT', body: JSON.stringify(body)}).then(wkFresh);
+  wkAct('[data-emnopin]', async b => { if (!confirm('Remove this PIN? They can no longer log in.')) { b.disabled = false; return; } await put(b.getAttribute('data-emnopin'), {remove_pin: true}); });
+  wkAct('[data-emleft]', async b => { if (!confirm('Mark as left? Their PIN stops working; their history stays.')) { b.disabled = false; return; } await put(b.getAttribute('data-emleft'), {active: false}); });
+  wkAct('[data-emback]', async b => { await put(b.getAttribute('data-emback'), {active: true}); });
+  return out;
+};
+
+VIEWS.catalog = function(){
+  const c = wkGet('catalog', '/techdeva/work/catalog');
+  if (!c) return '<div class="empty">Loading...</div>';
+  if (c.error) return '<div class="empty">' + esc(c.error) + '</div>';
+  if (!c.home) return wkNoHome();
+  const ed = W.catEdit ? c.items.find(i => i.id === W.catEdit) : null;
+  let out = '<section>';
+  const form = '<div class="card" id="ct-form" style="margin-bottom:16px' + (ed ? ';border:1px solid var(--gold)' : '') + '"><div class="k-label">' + (ed ? 'Edit ' + esc(ed.name) : 'Add a service') + '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
+    '<input id="ct-name" placeholder="Name, e.g. Meta ads management" ' + wkInput + ' value="' + esc(ed ? ed.name : '') + '" style="flex:2;min-width:200px">' +
+    '<select id="ct-cat" ' + wkInput + '>' + CATS.map(k => '<option' + ((ed ? ed.category : 'ads') === k ? ' selected' : '') + '>' + k + '</option>').join('') + '</select>' +
+    '<input id="ct-price" type="number" min="0" placeholder="Price PKR (empty = talk to us)" ' + wkInput + ' value="' + esc(ed && ed.price != null ? ed.price : '') + '" style="width:190px">' +
+    '<select id="ct-bill" ' + wkInput + '><option value="monthly"' + (ed && ed.billing === 'one_time' ? '' : ' selected') + '>per month</option><option value="one_time"' + (ed && ed.billing === 'one_time' ? ' selected' : '') + '>one time</option></select></div>' +
+    '<input id="ct-desc" placeholder="What is included (optional)" ' + wkInput + ' value="' + esc(ed ? ed.description : '') + '" style="width:100%;margin-top:8px;box-sizing:border-box">' +
+    '<div style="margin-top:10px"><button class="primary" id="ct-save">' + (ed ? 'Save changes' : 'Add to catalogue') + '</button>' +
+    (ed ? ' <button id="ct-cancel">Cancel</button>' : '') + '</div></div>';
+  if (!ed) out += form;
+  out += '<div class="card">' + tbl('<th>Service</th><th>Type</th><th>Price</th><th>Clients on it</th><th>Status</th><th></th>',
+    c.items.map(i => '<tr><td><b>' + esc(i.name) + '</b>' + (i.description ? '<div class="k-note">' + esc(i.description) + '</div>' : '') + '</td><td>' + esc(i.category) +
+      '</td><td>' + wkPrice(i.price, i.billing) + '</td><td>' + (i.active_clients || 0) + '</td><td>' +
+      (i.active ? '<span class="good">selling</span>' : '<span class="dim">stopped</span>') + '</td><td style="white-space:nowrap"><button data-ctedit="' + esc(i.id) + '">Edit</button> ' +
+      '<button data-cttog="' + esc(i.id) + '" data-on="' + (i.active ? '1' : '') + '">' + (i.active ? 'Stop selling' : 'Sell again') + '</button></td></tr>' +
+      (ed && ed.id === i.id ? '<tr><td colspan="6">' + form + '</td></tr>' : ''))) + '</div>' +
+    '<div class="k-note" style="margin-top:10px">Plan prices here are what you charge. The limits of each plan (numbers, conversations) are on the Plans panel under Clients.</div></section>';
+  wkAct('#ct-save', async () => {
+    const body = {name: wkVal('ct-name'), category: wkVal('ct-cat'), price: wkVal('ct-price'), billing: wkVal('ct-bill'), description: wkVal('ct-desc')};
+    if (!body.name) throw new Error('Give the service a name.');
+    if (ed) await api('/techdeva/work/catalog/' + ed.id, {method:'PUT', body: JSON.stringify(body)});
+    else await api('/techdeva/work/catalog', {method:'POST', body: JSON.stringify(body)});
+    W.catEdit = null; wkFresh();
+  });
+  wkAct('#ct-cancel', async () => { W.catEdit = null; paint(); });
+  wkAct('[data-ctedit]', async b => { W.catEdit = b.getAttribute('data-ctedit'); paint(); wkFocus('ct-name'); });
+  wkAct('[data-cttog]', async b => { await api('/techdeva/work/catalog/' + b.getAttribute('data-cttog'), {method:'PUT', body: JSON.stringify({active: !b.getAttribute('data-on')})}); wkFresh(); });
+  return out;
+};
+
+VIEWS.clientsvc = function(){
+  const d = wkGet('cs', '/techdeva/work/client-services'), c = wkGet('catalog', '/techdeva/work/catalog');
+  if (!d || !c) return '<div class="empty">Loading...</div>';
+  if (d.error || c.error) return '<div class="empty">' + esc(d.error || c.error) + '</div>';
+  if (!d.home) return wkNoHome();
+  const active = d.items.filter(i => i.status === 'active');
+  const clientsWith = new Set(active.map(i => i.client_tenant_id)).size;
+  let out = '<section><div class="grid" style="margin-top:0;margin-bottom:16px">' +
+    kpi('Monthly from services', money(d.monthly_total), 'active monthly services') +
+    kpi('Active services', active.length, '') + kpi('Clients with a service', clientsWith + ' / ' + d.clients.length, '') + '</div>';
+  out += '<div class="card" style="margin-bottom:16px"><div class="k-label">Give a client a service</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
+    '<select id="cs-client" ' + wkInput + '><option value="">Client...</option>' + d.clients.map(x => '<option value="' + esc(x.id) + '">' + esc(x.name) + '</option>').join('') + '</select>' +
+    '<select id="cs-svc" ' + wkInput + '><option value="">Service...</option>' + c.items.filter(i => i.active).map(i => '<option value="' + esc(i.id) + '">' + esc(i.name) + (i.price != null ? ' — ' + Number(i.price).toLocaleString() : '') + '</option>').join('') + '</select>' +
+    '<input id="cs-price" type="number" min="0" placeholder="Price (empty = catalogue price)" ' + wkInput + ' style="width:210px">' +
+    '<input id="cs-start" type="date" ' + wkInput + '>' +
+    '<button class="primary" id="cs-add">Add</button></div></div>';
+  out += '<div class="card">' + tbl('<th>Client</th><th>Service</th><th>Price</th><th>Since</th><th>Status</th><th>Open tasks</th><th></th>',
+    d.items.map(i => '<tr><td><b>' + esc(i.client_name) + '</b></td><td>' + esc(i.service_name) + '</td><td>' + wkPrice(i.price, i.billing) + '</td><td>' +
+      esc(String(i.started_on || '').slice(0, 10)) + (i.ended_on ? ' → ' + esc(String(i.ended_on).slice(0, 10)) : '') + '</td><td><select data-csst="' + esc(i.id) + '" ' + wkInput + '>' +
+      ['active', 'paused', 'ended'].map(s => '<option' + (s === i.status ? ' selected' : '') + '>' + s + '</option>').join('') + '</select></td><td>' + (i.open_tasks || 0) +
+      '</td><td><button data-cstask="' + esc(i.id) + '">+ Task</button></td></tr>')) + '</div></section>';
+  wkAct('#cs-add', async () => {
+    if (!wkVal('cs-client') || !wkVal('cs-svc')) throw new Error('Choose the client and the service.');
+    await api('/techdeva/work/client-services', {method:'POST', body: JSON.stringify({client_tenant_id: wkVal('cs-client'), catalog_id: wkVal('cs-svc'), price: wkVal('cs-price'), started_on: wkVal('cs-start')})});
+    wkFresh();
+  });
+  setTimeout(() => document.querySelectorAll('[data-csst]').forEach(s => s.onchange = async () => {
+    try { await api('/techdeva/work/client-services/' + s.getAttribute('data-csst'), {method:'PUT', body: JSON.stringify({status: s.value})}); wkFresh(); }
+    catch (e) { alert(e.message); }
+  }), 0);
+  wkAct('[data-cstask]', async b => { W.newTaskCs = b.getAttribute('data-cstask'); location.hash = '#/work'; });
+  return out;
+};
+
+VIEWS.work = function(){
+  const t = wkGet('tasks', '/techdeva/work/tasks'), cs = wkGet('cs', '/techdeva/work/client-services'), team = wkGet('team', '/techdeva/work/team');
+  if (!t || !cs || !team) return '<div class="empty">Loading...</div>';
+  if (t.error || cs.error || team.error) return '<div class="empty">' + esc(t.error || cs.error || team.error) + '</div>';
+  if (!t.home) return wkNoHome();
+  const today = new Date().toISOString().slice(0, 10);
+  let out = '<section><div class="card" style="margin-bottom:16px"><div class="k-label">New task</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
+    '<input id="tk-title" placeholder="e.g. Set up WhatsApp agent" ' + wkInput + ' style="flex:2;min-width:220px">' +
+    '<select id="tk-cs" ' + wkInput + '><option value="">Client service (optional)...</option>' +
+      cs.items.filter(i => i.status !== 'ended').map(i => '<option value="' + esc(i.id) + '"' + (W.newTaskCs === i.id ? ' selected' : '') + '>' + esc(i.client_name + ' — ' + i.service_name) + '</option>').join('') + '</select>' +
+    '<select id="tk-who" ' + wkInput + '><option value="">Give to...</option>' + team.team.filter(p => p.has_pin || !/@pin\.invalid$/.test(p.email || '')).map(p => '<option value="' + esc(p.id) + '">' + esc(p.name || p.email) + '</option>').join('') + '</select>' +
+    '<input id="tk-due" type="date" ' + wkInput + '><button class="primary" id="tk-add">Add task</button></div></div>';
+  const col = (st, label) => {
+    let list = t.tasks.filter(x => x.status === st);
+    if (st === 'done') list = list.slice(0, 20);
+    return '<div class="card" style="min-width:0"><div class="k-label">' + label + ' (' + t.tasks.filter(x => x.status === st).length + ')</div>' +
+      (list.length ? list.map(x => {
+        const late = x.due_on && x.status !== 'done' && String(x.due_on).slice(0, 10) < today;
+        return '<div style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:10px">' +
+          '<div style="font-weight:600">' + esc(x.title) + '</div>' +
+          '<div class="k-note">' + esc(x.client_name || 'TechDeva') + ' · ' + esc(x.assignee_name || 'nobody yet') +
+          (x.due_on ? ' · <span class="' + (late ? 'bad' : '') + '">due ' + esc(String(x.due_on).slice(0, 10)) + '</span>' : '') + '</div>' +
+          '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">' +
+          (st !== 'todo' ? '<button data-tkmv="' + esc(x.id) + '" data-to="' + (st === 'done' ? 'doing' : 'todo') + '">←</button>' : '') +
+          (st !== 'done' ? '<button class="primary" data-tkmv="' + esc(x.id) + '" data-to="' + (st === 'todo' ? 'doing' : 'done') + '">' + (st === 'todo' ? 'Start' : 'Done') + '</button>' : '') +
+          '<button data-tkdel="' + esc(x.id) + '">Delete</button></div></div>';
+      }).join('') : '<div class="k-note" style="margin-top:10px">Nothing here.</div>') + '</div>';
+  };
+  out += '<div class="grid" style="margin-top:0">' + col('todo', 'To do') + col('doing', 'Doing') + col('done', 'Done') + '</div>' +
+    '<div class="k-note" style="margin-top:10px">Your team sees these under <b>Client work</b> in TechDeva\'s dashboard and can move the ones given to them.</div></section>';
+  wkAct('#tk-add', async () => {
+    if (!wkVal('tk-title')) throw new Error('Write the task.');
+    await api('/techdeva/work/tasks', {method:'POST', body: JSON.stringify({title: wkVal('tk-title'), client_service_id: wkVal('tk-cs'), assignee_user_id: wkVal('tk-who'), due_on: wkVal('tk-due')})});
+    W.newTaskCs = null; wkFresh();
+  });
+  wkAct('[data-tkmv]', async b => { await api('/techdeva/work/tasks/' + b.getAttribute('data-tkmv'), {method:'PUT', body: JSON.stringify({status: b.getAttribute('data-to')})}); wkFresh(); });
+  wkAct('[data-tkdel]', async b => {
+    if (!confirm('Delete this task?')) { b.disabled = false; return; }
+    await api('/techdeva/work/tasks/' + b.getAttribute('data-tkdel'), {method:'DELETE'}); wkFresh();
+  });
+  return out;
+};
+
+/* ======================================================== Part 21: trial data + server alert
+   Faheem's rules: only paying clients' data is kept (unpaid trials are deleted
+   15 days after the trial ended, owner warned 3 days before; "Keep" stops it),
+   and at 8 paying clients the console says it is time for a second server. */
+NAV.forEach(g => { if (g[0] === 'PLATFORM' && !g[1].some(x => x[0] === 'trialdata')) g[1].push(['trialdata', 'Trial data & server']); });
+TITLES.trialdata = ['Trial data & server', 'Unpaid trials are deleted 15 days after the trial ends. Paying clients against server room.'];
+function retLoad(){ api('/techdeva/retention').then(r => { D.ret = r; paint(); }).catch(() => {}); }
+setTimeout(retLoad, 500);
+setInterval(retLoad, 10 * 60 * 1000);
+function serverBanner(){
+  const r = D.ret;
+  if (!r || !r.server_alert) return '';
+  return '<div class="card" style="border:1px solid var(--gold);margin-bottom:16px"><div class="k-label" style="color:var(--gold)">Time to buy a new server</div>' +
+    '<div style="margin:6px 0">You have <b>' + r.paying + ' paying client' + (r.paying === 1 ? '' : 's') + '</b> (alert at ' + r.server_alert_at + '). This server fits about 6 more busy WhatsApp agents.</div>' +
+    '<div class="k-note">Buy a 16 GB VPS for client agents (holds about 35–40 busy clients) and tell Claude when it is ready, so new agents go there and the clinic stays alone on this server. ' +
+    '<a href="#/trialdata" style="color:var(--gold)">Details</a></div></div>';
+}
+const _overviewBeforeRet = VIEWS.overview;
+VIEWS.overview = function(){ return serverBanner() + _overviewBeforeRet.apply(this, arguments); };
+VIEWS.trialdata = function(){
+  const r = D.ret;
+  if (!r) { retLoad(); return '<div class="empty">Loading...</div>'; }
+  const day = s => s ? new Date(s).toLocaleDateString([], {day: 'numeric', month: 'short', year: 'numeric'}) : '-';
+  let out = serverBanner() + '<section><div class="grid" style="margin-top:0;margin-bottom:16px">' +
+    kpi('Paying clients', r.paying, 'marked paying, not test, not TechDeva') +
+    kpi('New server at', r.server_alert_at, 'paying clients') +
+    kpi('Trials to be deleted', r.upcoming.filter(u => !u.hold).length, 'unpaid, trial ended') + '</div>';
+  out += '<div class="card" style="margin-bottom:16px"><div class="k-label">Alert me to buy a new server at</div><div style="display:flex;gap:8px;margin-top:8px">' +
+    '<input id="ret-at" type="number" min="1" value="' + esc(r.server_alert_at) + '" style="background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;width:100px">' +
+    '<button class="primary" id="ret-at-save">Save</button><span class="k-note" style="align-self:center">paying clients</span></div></div>';
+  out += '<div class="card" style="margin-bottom:16px"><div class="k-label">Unpaid trials: data deleted ' + r.grace_days + ' days after the trial ends</div>' +
+    '<div class="k-note" style="margin:4px 0 10px">The owner sees the date on their locked dashboard, and is warned ' + r.warn_days + ' days before (plus an email if the server can send email). Keep = never delete while kept.</div>' +
+    tbl('<th>Business</th><th>Trial ended</th><th>Deleted on</th><th>Days left</th><th>Warned</th><th></th>',
+      r.upcoming.map(u => '<tr' + (u.hold ? ' style="opacity:.6"' : '') + '><td><b>' + esc(u.name) + '</b></td><td>' + day(u.trial_ends_at) + '</td><td>' +
+        (u.hold ? '<span class="dim">kept</span>' : '<span class="' + (u.days_left <= r.warn_days ? 'bad' : '') + '">' + day(u.deletes_on) + '</span>') + '</td><td>' +
+        (u.hold ? '-' : u.days_left) + '</td><td>' + (u.warned_at ? day(u.warned_at) + (u.emailed ? ' (email)' : '') : '<span class="dim">not yet</span>') + '</td><td>' +
+        '<button data-rethold="' + esc(u.id) + '" data-on="' + (u.hold ? '' : '1') + '">' + (u.hold ? 'Stop keeping' : 'Keep') + '</button></td></tr>')) + '</div>';
+  out += '<div class="card"><div class="k-label">Deleted</div>' + tbl('<th>Business</th><th>Trial ended</th><th>Deleted</th><th>Rows</th><th>WhatsApp agent</th>',
+    r.deleted.map(x => '<tr><td>' + esc(x.business_name) + '</td><td>' + day(x.trial_ended_at) + '</td><td>' + day(x.deleted_at) + '</td><td>' +
+      Object.values(x.rows_deleted || {}).reduce((a, b) => a + b, 0) + '</td><td>' +
+      (!(x.agent_keys || []).length ? '<span class="dim">none</span>' : x.agents_removed_at ? '<span class="good">removed</span>' :
+        '<span class="bad">' + (x.agent_error ? esc(x.agent_error) : 'waiting for the server job') + '</span><div class="k-note">' + esc(x.agent_keys.join(', ')) + '</div>') + '</td></tr>')) + '</div></section>';
+  setTimeout(() => {
+    const s = document.getElementById('ret-at-save');
+    if (s) s.onclick = async () => { s.disabled = true; try { await api('/techdeva/retention-settings', {method: 'PUT', body: JSON.stringify({server_alert_at: document.getElementById('ret-at').value})}); retLoad(); } catch (e) { alert(e.message); s.disabled = false; } };
+    document.querySelectorAll('[data-rethold]').forEach(b => b.onclick = async () => {
+      const on = !!b.getAttribute('data-on');
+      if (!on && !confirm('Stop keeping this business? Its data will be deleted on its deletion day if it has not paid.')) return;
+      b.disabled = true;
+      try { await api('/techdeva/retention/' + b.getAttribute('data-rethold'), {method: 'PUT', body: JSON.stringify({hold: on})}); retLoad(); }
+      catch (e) { alert(e.message); b.disabled = false; }
+    });
+  }, 0);
+  return out;
+};
+/* ======================================================== Part 22: Sales team
+   Each operator's work, from what they log on their Sales page in TechDeva's
+   dashboard: contacts, new leads, meetings and clients won (today, 7 and 30
+   days, this month) against the targets set here; open leads and overdue
+   follow-ups; their salary and cost per client landed (founder only). */
+NAV.forEach(g => { if (g[0] === 'TECHDEVA TEAM & SERVICES' && !g[1].some(x => x[0] === 'sales')) g[1].splice(1, 0, ['sales', 'Sales team']); });
+TITLES.sales = ['Sales team', 'How each operator is doing: contacts, leads, meetings and clients won against target.'];
+const SLF = { data: undefined, person: {}, open: null, targets: null };
+function slfLoad(){ SLF.data = null; api('/techdeva/sales').then(d => { SLF.data = d; }).catch(e => { SLF.data = {error: e.message}; }).then(() => { if (current() === 'sales') paint(); }); }
+function slfPerson(uid){ SLF.person[uid] = null; api('/techdeva/sales/people/' + uid).then(d => { SLF.person[uid] = d; }).catch(e => { SLF.person[uid] = {error: e.message}; }).then(() => { if (current() === 'sales') paint(); }); }
+const slfWhen = s => s ? new Date(s).toLocaleString([], {weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'}) : '-';
+function slfVs(got, target){
+  if (!target) return '<b>' + got + '</b>';
+  const cls = got >= target ? 'good' : got >= target / 2 ? 'warn' : 'bad';
+  return '<b class="' + cls + '">' + got + '</b><span class="dim"> / ' + target + '</span>';
+}
+function slfBars(days, vals, target){
+  const max = Math.max(target || 0, ...vals, 1);
+  return '<div style="display:flex;gap:2px;align-items:flex-end;height:28px" title="Contacts per day, last 14 days">' + vals.map((v, i) =>
+    '<span title="' + esc(days[i]) + ': ' + v + '" style="width:6px;height:' + Math.max(2, Math.round(v * 28 / max)) + 'px;border-radius:2px;background:' +
+    (target && v >= target ? 'var(--growth)' : v ? 'var(--gold)' : 'var(--line)') + '"></span>').join('') + '</div>';
+}
+VIEWS.sales = function(){
+  if (SLF.data === undefined) slfLoad();
+  const d = SLF.data;
+  if (!d) return '<div class="empty">Loading...</div>';
+  if (d.error) return '<div class="empty">' + esc(d.error) + '</div>';
+  if (!d.home) return wkNoHome();
+  const people = d.people.filter(p => p.access !== 'techdeva_admin');
+  const sum = (k, per) => people.reduce((a, p) => a + (((p.stats || {})[k] || {})[per] || 0), 0);
+  const pl = d.pipeline || {};
+  const open = ['new', 'contacted', 'meeting', 'proposal'].reduce((a, k) => a + (pl[k] || 0), 0);
+  const payroll = people.filter(p => p.active).reduce((a, p) => a + (p.salary || 0), 0);
+  const wonM = sum('won', 'month');
+  let out = '<section><div class="grid" style="margin-top:0;margin-bottom:16px">' +
+    kpi('Contacts today', sum('contacts', 'today'), sum('contacts', 'd7') + ' in the last 7 days') +
+    kpi('Open leads', open, (pl.proposal || 0) + ' with a proposal, ' + (pl.meeting || 0) + ' at meeting stage') +
+    kpi('Clients won this month', wonM, sum('won', 'd30') + ' in the last 30 days', wonM ? 'good' : '') +
+    kpi('Sales payroll', money(payroll), wonM ? money(payroll / wonM) + ' per client won this month' : 'no clients won yet this month') + '</div>';
+  out += '<div class="card" style="margin-bottom:16px;overflow-x:auto"><div class="k-label">Operators</div>' +
+    '<div class="k-note" style="margin:4px 0 10px">Counted from what each person logs on their Sales page (Contacts = WhatsApp, calls, visits and meetings held). Days are Pakistan days. Salary and cost per client are only on this page.</div>' +
+    tbl('<th>Person</th><th>Contacts today</th><th>Last 14 days</th><th>7 / 30 days</th><th>Leads (month)</th><th>Meetings (month)</th><th>Won (month)</th><th>Open · overdue</th><th>Salary</th><th>Cost / client</th><th></th>',
+      people.map(p => {
+        const s = p.stats || {}, g = (k, per) => ((s[k] || {})[per] || 0);
+        return '<tr' + (p.active ? '' : ' style="opacity:.55"') + '><td><b>' + esc(p.name) + '</b><div class="k-note">' + esc(p.job || (p.access === 'owner' ? 'full access' : 'staff')) +
+          (p.last_login_at ? ' · seen ' + when(p.last_login_at) : '') + '</div></td>' +
+          '<td>' + slfVs(g('contacts', 'today'), p.contacts_per_day) + '</td>' +
+          '<td>' + slfBars(d.days, p.daily || [], p.contacts_per_day) + '</td>' +
+          '<td>' + g('contacts', 'd7') + ' / ' + g('contacts', 'd30') + '</td>' +
+          '<td>' + slfVs(g('leads', 'month'), p.leads_per_month) + '</td>' +
+          '<td>' + slfVs(g('meetings', 'month'), p.meetings_per_month) + '</td>' +
+          '<td>' + slfVs(g('won', 'month'), p.clients_per_month) + '</td>' +
+          '<td>' + p.open_leads + (p.overdue ? ' · <span class="bad">' + p.overdue + ' overdue</span>' : '') + (p.upcoming_meetings ? '<div class="k-note">' + p.upcoming_meetings + ' meeting' + (p.upcoming_meetings === 1 ? '' : 's') + ' booked</div>' : '') + '</td>' +
+          '<td>' + (p.salary != null ? money(p.salary) : '<span class="dim">not set</span>') + '</td>' +
+          '<td>' + (p.cost_per_client != null ? money(p.cost_per_client) : '<span class="dim">-</span>') + '</td>' +
+          '<td style="white-space:nowrap"><button data-slfp="' + esc(p.user_id) + '">' + (SLF.open === p.user_id ? 'Hide' : 'Details') + '</button> ' +
+          '<button data-slft="' + esc(p.user_id) + '">Targets</button></td></tr>' +
+          (SLF.targets === p.user_id ? '<tr><td colspan="11"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">' +
+            [['contacts_per_day', 'Contacts a day'], ['leads_per_month', 'New leads a month'], ['meetings_per_month', 'Meetings a month'], ['clients_per_month', 'Clients won a month']].map(t =>
+              '<label class="k-note" style="display:flex;flex-direction:column;gap:2px">' + t[1] + '<input type="number" min="0" max="10000" id="slft-' + t[0] + '" value="' + (p[t[0]] || 0) + '" ' + wkInput + ' style="width:130px"></label>').join('') +
+            '<button class="primary" data-slftsave="' + esc(p.user_id) + '">Save targets</button><button data-slftx="1">Cancel</button></div></td></tr>' : '') +
+          (SLF.open === p.user_id ? '<tr><td colspan="11">' + slfDetail(p.user_id) + '</td></tr>' : '');
+      })) + '</div>';
+  out += '<div class="k-note">Salaries are set on the <a href="#/team" style="color:var(--gold)">Team</a> page (Edit an employee). Operators add leads, log contacts and book meetings on <b>Sales</b> in TechDeva\'s dashboard.</div></section>';
+  wkAct('[data-slfp]', async b => { const u = b.getAttribute('data-slfp'); SLF.open = SLF.open === u ? null : u; if (SLF.open) slfPerson(u); paint(); });
+  wkAct('[data-slft]', async b => { const u = b.getAttribute('data-slft'); SLF.targets = SLF.targets === u ? null : u; paint(); });
+  wkAct('[data-slftx]', async () => { SLF.targets = null; paint(); });
+  wkAct('[data-slftsave]', async b => {
+    const body = {};
+    ['contacts_per_day', 'leads_per_month', 'meetings_per_month', 'clients_per_month'].forEach(k => body[k] = wkVal('slft-' + k) || 0);
+    await api('/techdeva/sales/people/' + b.getAttribute('data-slftsave'), {method: 'PUT', body: JSON.stringify(body)});
+    SLF.targets = null; slfLoad();
+  });
+  wkAct('[data-slflink]', async b => {
+    const sel = document.getElementById('slfc-' + b.getAttribute('data-slflink'));
+    await api('/techdeva/sales/leads/' + b.getAttribute('data-slflink') + '/client', {method: 'PUT', body: JSON.stringify({client_tenant_id: sel ? sel.value : ''})});
+    slfPerson(SLF.open); slfLoad();
+  });
+  return out;
+};
+const SLF_ST = {new: 'New', contacted: 'Contacted', meeting: 'Meeting', proposal: 'Proposal', won: 'Won', lost: 'Lost'};
+function slfDetail(uid){
+  const x = SLF.person[uid];
+  if (x === undefined || x === null) return '<div class="empty">Loading...</div>';
+  if (x.error) return '<div class="empty">' + esc(x.error) + '</div>';
+  const clients = ((D.book || {}).clients || []);
+  let h = '<div class="k-label" style="margin-top:6px">Leads (' + x.leads.length + ')</div>' +
+    tbl('<th>Business</th><th>Status</th><th>Contact</th><th>Source</th><th>Last contact</th><th>Next follow-up</th><th>Became client</th>',
+      x.leads.map(l => {
+        const late = l.next_followup_at && new Date(l.next_followup_at) < new Date() && l.status !== 'won' && l.status !== 'lost';
+        return '<tr><td><b>' + esc(l.business_name) + '</b><div class="k-note">' + esc([l.business_type, l.city].filter(Boolean).join(' · ')) + '</div>' +
+          (l.notes ? '<div class="k-note">' + esc(l.notes) + '</div>' : '') + '</td><td>' + esc(SLF_ST[l.status] || l.status) + '</td><td>' +
+          esc([l.contact_name, l.phone].filter(Boolean).join(' · ') || '-') + '</td><td>' + esc(l.source) + '</td><td>' + (l.last_contact_at ? slfWhen(l.last_contact_at) : '<span class="dim">never</span>') +
+          '</td><td' + (late ? ' class="bad"' : '') + '>' + (l.status === 'won' || l.status === 'lost' ? '-' : slfWhen(l.next_followup_at)) + '</td><td>' +
+          (l.status === 'won' || l.client_name
+            ? '<select id="slfc-' + esc(l.id) + '" ' + wkInput + ' style="max-width:180px"><option value="">Not linked</option>' +
+              clients.map(c => '<option value="' + esc(c.id) + '"' + (String(c.id) === String(l.client_tenant_id) ? ' selected' : '') + '>' + esc(c.name || 'Unnamed') + '</option>').join('') +
+              '</select> <button data-slflink="' + esc(l.id) + '">Save</button>'
+            : '<span class="dim">-</span>') + '</td></tr>';
+      }));
+  h += '<div class="k-label" style="margin-top:14px">Meetings (' + x.meetings.length + ')</div>' +
+    tbl('<th>When</th><th>Business</th><th>Type</th><th>Where</th><th>Status</th>', x.meetings.map(m =>
+      '<tr><td>' + slfWhen(m.starts_at) + '</td><td>' + esc(m.business_name) + '</td><td>' + (m.mode === 'online' ? 'Online' : 'In person') + '</td><td>' +
+      (m.mode === 'online' ? (m.meet_link ? '<a target="_blank" rel="noopener" href="' + esc(m.meet_link) + '" style="color:var(--gold)">link</a>' : '-') : esc(m.place || '-')) +
+      '</td><td>' + esc(m.status.replace('_', '-')) + '</td></tr>'));
+  h += '<div class="k-label" style="margin-top:14px">Contact log (latest ' + x.contacts.length + ')</div>' +
+    tbl('<th>When</th><th>Business</th><th>How</th><th>Result</th><th>Note</th>', x.contacts.map(c =>
+      '<tr><td>' + slfWhen(c.at) + '</td><td>' + esc(c.business_name) + '</td><td>' + esc(c.channel) + '</td><td>' + esc(c.outcome || '-') + '</td><td>' + esc(c.note || '') + '</td></tr>'));
+  return h;
+}
+/* ======================================================== Part 26: Growth proof
+   Has each client grown since TechDeva started? Their own recorded payments,
+   month by month, against the sales level before TechDeva (the baseline),
+   and the agreed profit share. The one-pager is the sales tool: before and
+   after, by default without the client's name and without rupee amounts. */
+NAV.forEach(g => { if (g[0] === 'MONEY' && !g[1].some(x => x[0] === 'growth')) g[1].splice(0, 0, ['growth', 'Growth proof']); });
+TITLES.growth = ['Growth proof', 'How much more each client takes in since TechDeva started: the number to sell on and to bill on.'];
+const GRW = { data: undefined, edit: null };
+function grwLoad(){ GRW.data = null; api('/techdeva/growth').then(d => { GRW.data = d; }).catch(e => { GRW.data = {error: e.message}; }).then(() => { if (current() === 'growth') paint(); }); }
+const grwMonth = s => new Date(s + 'T00:00:00').toLocaleDateString([], {month: 'short', year: 'numeric'});
+const grwPct = p => p == null ? '' : (p > 0 ? '+' : '') + p + '%';
+function grwBars(c){
+  const ms = c.months || [], top = Math.max(1, c.baseline || 0, ...ms.map(m => m.revenue));
+  return '<div style="display:flex;gap:6px;align-items:flex-end;height:120px;margin:10px 0 4px;position:relative">' +
+    (c.baseline != null ? '<div title="baseline" style="position:absolute;left:0;right:0;bottom:' + (100 * c.baseline / top) + '%;border-top:2px dashed #A78BFA"></div>' : '') +
+    ms.map(m => '<div title="' + esc(grwMonth(m.month) + ': ' + money(m.revenue)) + '" style="flex:1;min-width:10px;height:' + Math.max(2, 100 * m.revenue / top) + '%;background:' +
+      (m.partial ? '#4c3d80' : (c.baseline != null && m.revenue >= c.baseline ? '#8B5CF6' : '#5b5b6b')) + ';border-radius:4px 4px 0 0"></div>').join('') + '</div>' +
+    '<div style="display:flex;gap:6px">' + ms.map(m => '<div class="k-note" style="flex:1;min-width:10px;text-align:center;font-size:10px">' + esc(grwMonth(m.month).split(' ')[0]) + '</div>').join('') + '</div>';
+}
+VIEWS.growth = function(){
+  if (GRW.data === undefined) grwLoad();
+  const d = GRW.data;
+  if (!d) return '<div class="empty">Loading...</div>';
+  if (d.error) return '<div class="empty">' + esc(d.error) + '</div>';
+  const cs = d.clients || [];
+  const withBase = cs.filter(c => c.baseline != null && c.last_full);
+  const growing = withBase.filter(c => c.last_full.growth > 0).length;
+  const shareLast = cs.reduce((a, c) => a + ((c.last_full && c.last_full.share) || 0), 0);
+  let out = '<section><div class="grid" style="margin-top:0;margin-bottom:16px">' +
+    kpi('Clients with a baseline', withBase.length + ' of ' + cs.length, cs.length - withBase.length ? (cs.length - withBase.length) + ' still need one (press Terms)' : 'all set', withBase.length === cs.length ? 'good' : '') +
+    kpi('Growing last month', growing + ' of ' + withBase.length, 'sales above their baseline', growing ? 'good' : '') +
+    kpi('Your share, last month', money(shareLast), 'growth x the share % you agreed (only where set)') + '</div>';
+  out += '<div class="card" style="overflow-x:auto"><div class="k-note" style="margin-bottom:10px">Sales are each client\'s recorded payments (Pakistan months). The baseline is what you entered from their old register, or else the average of the months before the start that already have payments. A month only counts once it is over; this month is shown as "so far".</div>' +
+    tbl('<th>Business</th><th>Started</th><th>Baseline / month</th><th>Last full month</th><th>Growth</th><th>This month so far</th><th>Share</th><th>Since start</th><th></th>',
+      cs.map(c => {
+        const l = c.last_full, t = c.this_month, s = c.since_start;
+        const row = '<tr><td><b>' + esc(c.name) + '</b></td><td>' + esc(grwMonth(c.started_on)) + (c.start_entered ? '' : '<div class="k-note">signup date</div>') + '</td>' +
+          '<td>' + (c.baseline != null ? money(c.baseline) + '<div class="k-note">' + esc(c.baseline_source) + '</div>' : '<span class="warn">not set</span><div class="k-note">enter it from their old register</div>') + '</td>' +
+          '<td>' + (l ? money(l.revenue) + '<div class="k-note">' + esc(grwMonth(l.month)) + ' · ' + l.leads + ' leads · ' + l.visits + ' visits</div>' : '<span class="dim">no full month yet</span>') + '</td>' +
+          '<td>' + (l && l.growth != null ? '<b class="' + (l.growth > 0 ? 'good' : 'bad') + '">' + money(l.growth) + '</b><div class="k-note">' + esc(grwPct(l.growth_pct)) + '</div>' : '<span class="dim">-</span>') + '</td>' +
+          '<td>' + (t ? money(t.revenue) : '-') + '</td>' +
+          '<td>' + (c.share_pct != null ? c.share_pct + '%' + (l && l.share != null ? '<div class="k-note">' + money(l.share) + ' last month</div>' : '') : '<span class="dim">not agreed</span>') + '</td>' +
+          '<td>' + (s ? money(s.growth) + '<div class="k-note">over ' + s.months + ' month' + (s.months === 1 ? '' : 's') + (s.share != null ? ' · share ' + money(s.share) : '') + '</div>' : '<span class="dim">-</span>') + '</td>' +
+          '<td style="white-space:nowrap"><button data-grwe="' + esc(c.tenant_id) + '">' + (GRW.edit === c.tenant_id ? 'Close' : 'Terms') + '</button> ' +
+          '<button data-grwp="' + esc(c.tenant_id) + '"' + (c.baseline != null && l ? '' : ' disabled title="Needs a baseline and one full month"') + '>One-pager</button></td></tr>';
+        if (GRW.edit !== c.tenant_id) return row;
+        return row + '<tr><td colspan="9"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">' +
+          '<label class="k-note">TechDeva started<br><input type="date" id="grw_start" value="' + esc(c.start_entered ? c.started_on : '') + '"></label>' +
+          '<label class="k-note">Sales per month before TechDeva (PKR)<br><input type="number" min="0" id="grw_base" value="' + esc(c.baseline_monthly == null ? '' : c.baseline_monthly) + '" placeholder="from their register"></label>' +
+          '<label class="k-note">Where that number comes from<br><input id="grw_note" maxlength="200" value="' + esc(c.baseline_note || '') + '" placeholder="e.g. average Apr-Jun 2026, cash register"></label>' +
+          '<label class="k-note">Profit share agreed (%)<br><input type="number" min="0" max="50" step="0.5" id="grw_share" value="' + esc(c.share_pct == null ? '' : c.share_pct) + '" placeholder="leave empty if none"></label>' +
+          '<button class="primary" data-grws="' + esc(c.tenant_id) + '">Save</button></div>' +
+          '<div class="k-note" style="margin-top:6px">Leave "sales per month before" empty to use the months before the start that already have payments. ' + grwBars(c) + '</div></td></tr>';
+      })) + '</div></section>';
+  setTimeout(() => {
+    document.querySelectorAll('[data-grwe]').forEach(b => b.onclick = () => { GRW.edit = GRW.edit === b.dataset.grwe ? null : b.dataset.grwe; paint(); });
+    wkAct('[data-grws]', async b => {
+      const v = id => document.getElementById(id).value;
+      await api('/techdeva/growth/' + b.dataset.grws, {method: 'PUT', body: JSON.stringify({
+        started_on: v('grw_start') || null, baseline_monthly: v('grw_base'), baseline_note: v('grw_note'), share_pct: v('grw_share')})});
+      GRW.edit = null; grwLoad();
+    });
+    document.querySelectorAll('[data-grwp]').forEach(b => b.onclick = () => grwOnePager(cs.find(c => c.tenant_id === b.dataset.grwp)));
+  }, 0);
+  return out;
+};
+// The before / after page to show a prospect. By default it hides the client's
+// name and the rupee amounts (their figures are theirs); untick to show them,
+// with the client's permission.
+function grwOnePager(c){
+  if (!c) return;
+  const named = confirm('Show the business name "' + c.name + '" on the page?\n\nOK = show it (only with their permission)\nCancel = "A client of TechDeva"');
+  const amounts = confirm('Show rupee amounts?\n\nOK = show sales in PKR (only with their permission)\nCancel = show growth in % only');
+  const full = c.months.filter(m => !m.partial), last = c.last_full, best = full.reduce((a, m) => m.revenue > a.revenue ? m : a, full[0]);
+  const avg = full.reduce((a, m) => a + m.revenue, 0) / full.length;
+  const pct = v => c.baseline > 0 ? Math.round(100 * (v - c.baseline) / c.baseline) : null;
+  const fig = v => amounts ? money(v) : (pct(v) == null ? '' : (pct(v) >= 0 ? '+' : '') + pct(v) + '% vs before');
+  const top = Math.max(c.baseline, ...full.map(m => m.revenue), 1);
+  const w = window.open('', '_blank');
+  if (!w) { alert('Allow pop-ups for this page to open the one-pager.'); return; }
+  w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Growth with TechDeva</title><style>' +
+    'body{font-family:Arial,sans-serif;color:#111;max-width:760px;margin:30px auto;padding:0 20px}h1{color:#6d28d9;margin:0 0 4px}.sub{color:#555;margin:0 0 24px}' +
+    '.k{display:flex;gap:14px;margin:18px 0}.k div{flex:1;border:1px solid #ddd;border-radius:10px;padding:14px}.k b{display:block;font-size:26px;color:#6d28d9}' +
+    '.bars{display:flex;gap:8px;align-items:flex-end;height:200px;border-bottom:1px solid #ccc;position:relative;margin-top:24px}.bars i{flex:1;background:#8B5CF6;border-radius:6px 6px 0 0}' +
+    '.base{position:absolute;left:0;right:0;border-top:2px dashed #999}.lab{display:flex;gap:8px}.lab span{flex:1;text-align:center;font-size:12px;color:#555}' +
+    '.note{color:#666;font-size:12px;margin-top:24px}@media print{button{display:none}}</style></head><body>' +
+    '<button onclick="print()" style="float:right">Print / save as PDF</button>' +
+    '<h1>' + esc(named ? c.name : 'A client of TechDeva') + '</h1><p class="sub">Sales before and since TechDeva started (' + esc(grwMonth(c.started_on)) + ')</p>' +
+    '<div class="k"><div>Before TechDeva<b>' + (amounts ? money(c.baseline) : '100%') + '</b>per month</div>' +
+    '<div>Last month (' + esc(grwMonth(last.month)) + ')<b>' + esc(fig(last.revenue)) + '</b>' + (amounts && pct(last.revenue) != null ? (pct(last.revenue) >= 0 ? '+' : '') + pct(last.revenue) + '%' : '') + '</div>' +
+    '<div>Average since start<b>' + esc(fig(avg)) + '</b>over ' + full.length + ' month' + (full.length === 1 ? '' : 's') + '</div>' +
+    '<div>Best month<b>' + esc(fig(best.revenue)) + '</b>' + esc(grwMonth(best.month)) + '</div></div>' +
+    '<div class="bars"><div class="base" style="bottom:' + (100 * c.baseline / top) + '%"></div>' + full.map(m => '<i style="height:' + Math.max(2, 100 * m.revenue / top) + '%"></i>').join('') + '</div>' +
+    '<div class="lab">' + full.map(m => '<span>' + esc(grwMonth(m.month)) + '</span>').join('') + '</div>' +
+    '<p class="note">Dashed line: sales per month before TechDeva (' + esc(c.baseline_source || '') + '). Bars: recorded sales each full month since. ' +
+    'Leads last month: ' + last.leads + ' · completed visits: ' + last.visits + '. Source: the business\'s own payment records in TechDeva.</p></body></html>');
+  w.document.close();
+}
+/* ======================================================== Part 27: Change my password */
+function pwOpen(){
+  document.getElementById('pw-box')?.remove();
+  const o = document.createElement('div'); o.id = 'pw-box';
+  o.style.cssText = 'position:fixed;inset:0;z-index:320;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:16px';
+  o.innerHTML = '<form id="pw_f" class="card" style="width:min(380px,100%);display:grid;gap:10px">' +
+    '<b>My account</b><div id="acct_box" class="k-note">Loading…</div>' +
+    '<b style="margin-top:6px">Change my password</b>' +
+    '<label class="k-note">Current password<br><input type="password" id="pw_cur" autocomplete="current-password" required style="width:100%"></label>' +
+    '<label class="k-note">New password (at least 10 characters)<br><input type="password" id="pw_new" autocomplete="new-password" minlength="10" required style="width:100%"></label>' +
+    '<label class="k-note">New password again<br><input type="password" id="pw_new2" autocomplete="new-password" minlength="10" required style="width:100%"></label>' +
+    '<div id="pw_msg" class="k-note" style="min-height:18px"></div>' +
+    '<div style="display:flex;gap:8px"><button class="primary" type="submit" id="pw_go">Change password</button><button type="button" id="pw_x">Cancel</button></div>' +
+    '<div style="border-top:1px solid #333;padding-top:10px"><button type="button" id="pw_all">Sign out all other devices</button>' +
+    '<div class="k-note" style="margin-top:4px">This device stays signed in.</div></div></form>';
+  document.body.appendChild(o);
+  const g = id => document.getElementById(id), msg = (t, ok) => { g('pw_msg').textContent = t; g('pw_msg').className = ok ? 'k-note good' : 'k-note bad'; };
+  g('pw_x').onclick = () => o.remove();
+  g('pw_all').onclick = async () => {
+    if (!confirm('Sign out every other device where you are signed in?')) return;
+    g('pw_all').disabled = true;
+    try { const r = await api('/auth/sign-out-everywhere', {method: 'POST'}); if (TOKEN && r.token) TOKEN = r.token; msg('Done: every other device is signed out.', true); }
+    catch (ex) { msg(ex.message); }
+    g('pw_all').disabled = false;
+  };
+  api('/auth/account').then(a => {
+    g('acct_box').innerHTML = '<label class="k-note">Your name<br><input id="ac_name" maxlength="80" value="' + esc(a.name) + '" style="width:100%"></label>' +
+      '<div class="k-note">Signs in as ' + esc(a.email) + '</div>' +
+      '<div style="display:flex;gap:8px;align-items:center;margin-top:6px"><button type="button" id="ac_save">Save name</button><span id="ac_msg" class="k-note"></span></div>';
+    g('ac_save').onclick = async () => {
+      try {
+        const r = await api('/auth/account', {method: 'PUT', body: JSON.stringify({name: g('ac_name').value})});
+        g('ac_msg').textContent = r.changed.length ? 'Saved.' : 'Nothing changed.'; g('ac_msg').className = 'k-note good';
+        const w = document.getElementById('who'); if (w && r.name) w.textContent = r.name;
+      } catch (ex) { g('ac_msg').textContent = ex.message; g('ac_msg').className = 'k-note bad'; }
+    };
+  }).catch(ex => { g('acct_box').textContent = ex.message; });
+  g('pw_f').onsubmit = async e => {
+    e.preventDefault();
+    if (g('pw_new').value.length < 10) return msg('The new password must be at least 10 characters.');
+    if (g('pw_new').value !== g('pw_new2').value) return msg('The two new passwords are not the same.');
+    g('pw_go').disabled = true;
+    try {
+      const r = await api('/auth/change-password', {method: 'POST', body: JSON.stringify({current_password: g('pw_cur').value, new_password: g('pw_new').value})});
+      if (TOKEN && r.token) TOKEN = r.token;      // the old login was just signed out with the others
+      msg('Password changed. Any other device signed in as you has been signed out.', true); setTimeout(() => o.remove(), 2200);
+    } catch (ex) { g('pw_go').disabled = false; msg(ex.message); }
+  };
+}
+document.getElementById('chgpw').onclick = e => { e.preventDefault(); pwOpen(); };
 </script></body></html>

@@ -4,7 +4,11 @@ import { BadgeCheck, FileClock, Ruler } from "lucide-react";
 import { MarketingPage } from "@/components/MarketingPage";
 import { Badge } from "@/components/ui/Badge";
 
-export const metadata: Metadata = { title: "Case Studies" };
+export const metadata: Metadata = {
+  title: "Case studies",
+  description: "TechDeva in production at The Beauty Aesthetic & Lounge, a doctor-led aesthetic clinic in Lahore. Real numbers, published once they are real.",
+  alternates: { canonical: "/case-studies" },
+};
 
 export default function CaseStudiesPage() {
   return (

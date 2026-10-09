@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Staff login</title>
+<meta name="robots" content="noindex">
+<!-- @td-fonts:start -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<!-- @td-fonts:end -->
+<!-- @td-css:start -->
+<link rel="stylesheet" href="/assets/td.css?v=6c667f0080">
+<!-- @td-css:end -->
+</head>
+<body class="td page-pin bg-bg text-fg">
+<div id="bgmark"></div>
+<div class="card" id="card"><div class="tag" role="status">Loading…</div></div>
+<script>
+(function(){
+  var card = document.getElementById('card'), code = '', DEV = null;   // DEV: this screen's own business, if it is a reception screen
+  try { code = localStorage.getItem('td_pin_code') || ''; } catch (e) {}
+  function esc(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function j(method, path, body){
+    return fetch(path, {method: method, credentials: 'include', headers: body ? {'Content-Type':'application/json'} : {}, body: body ? JSON.stringify(body) : undefined})
+      .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(d){ return {ok: r.ok, status: r.status, data: d}; }); })
+      .catch(function(){ return {ok: false, status: 0, data: {detail: 'Network error. Try again.'}}; });
+  }
+  function initials(n){ var w = String(n || '').replace(/^(dr|mr|mrs|ms)\.?\s+/i, '').split(/\s+/).filter(Boolean); return ((w[0] || '?')[0] + (w[1] ? w[1][0] : '')).toUpperCase(); }
+  function dress(info){
+    if (info.accent) document.documentElement.style.setProperty('--accent', info.accent);
+    document.title = (info.business || 'Staff') + ' · Staff login';
+    document.getElementById('bgmark').style.backgroundImage = info.logo ? 'url("' + info.logo + '")' : 'none';
+  }
+  function askCode(msg){
+    dress({});
+    card.innerHTML = '<div class="logo">🔒</div><h1>Staff login</h1><div class="tag">Enter your business code. The owner can see it on the Team page.</div>' +
+      '<label for="code">BUSINESS CODE</label><input id="code" class="code" maxlength="8" autocomplete="off" value="' + esc(code) + '">' +
+      '<button id="next">Next</button><div class="msg" id="msg">' + esc(msg || '') + '</div>' +
+      '<div class="links">' + (DEV ? '<a href="#" id="back">Back to ' + esc(DEV.business) + '</a> · ' : '') + '<a href="/dashboard?email=1">Owner? Sign in with email</a></div>';
+    var go = function(){
+      var c = document.getElementById('code').value.trim().toUpperCase();
+      if (c.length < 4) { document.getElementById('msg').textContent = 'Enter the business code.'; return; }
+      j('GET', '/auth/pin-info?code=' + encodeURIComponent(c)).then(function(r){
+        if (!r.ok) { askCode((r.data && r.data.detail) || 'That code did not work.'); return; }
+        code = c; try { localStorage.setItem('td_pin_code', c); } catch (e) {}
+        pad(r.data, false);
+      });
+    };
+    document.getElementById('next').onclick = go;
+    var back = document.getElementById('back');
+    if (back) back.onclick = function(e){ e.preventDefault(); try { localStorage.removeItem('td_pin_pref'); } catch (x) {} pad(DEV, true); };
+    document.getElementById('code').onkeydown = function(e){ if (e.key === 'Enter') go(); };
+    document.getElementById('code').focus();
+  }
+  function pad(info, device){
+    dress(info);
+    var mark = info.logo ? '<div class="logo" style="background-image:url(&quot;' + esc(info.logo) + '&quot;)"></div>'
+                         : '<div class="logo">' + esc(initials(info.business)) + '</div>';
+    card.innerHTML = mark + '<h1>' + esc(info.business) + '</h1><div class="tag">' + esc(info.tagline || 'Staff login') + '</div>' +
+      '<label for="pin">ENTER PIN</label>' +
+      '<input id="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="• • • •">' +
+      '<button id="go">Login</button><div class="msg" id="msg"></div>' +
+      '<div class="foot">Authorized staff only • PIN required</div>' +
+      '<div class="links"><a href="#" id="chg">Different business</a> · <a href="/dashboard?email=1">Owner email login</a></div>';
+    var inp = document.getElementById('pin'), btn = document.getElementById('go'), msg = document.getElementById('msg');
+    inp.oninput = function(){ inp.value = inp.value.replace(/\D/g, '').slice(0, 6); msg.textContent = ''; };
+    function submit(){
+      var pin = inp.value;
+      if (pin.length < 4) { msg.textContent = 'Enter your 4 to 6 digit PIN.'; return; }
+      btn.disabled = true; btn.textContent = 'Checking…';
+      j('POST', '/auth/pin', {pin: pin, code: device ? undefined : code}).then(function(r){
+        if (r.ok) { location.href = '/dashboard'; return; }
+        btn.disabled = false; btn.textContent = 'Login'; inp.value = ''; inp.focus();
+        msg.textContent = (r.data && r.data.detail) || 'That did not work.';
+      });
+    }
+    btn.onclick = submit;
+    inp.onkeydown = function(e){ if (e.key === 'Enter') submit(); };
+    var chg = document.getElementById('chg');
+    if (chg) chg.onclick = function(e){ e.preventDefault(); try { localStorage.setItem('td_pin_pref', 'code'); } catch (x) {} askCode(''); };
+    inp.focus();
+  }
+  j('GET', '/auth/pin-info').then(function(r){
+    var pref = ''; try { pref = localStorage.getItem('td_pin_pref') || ''; } catch (e) {}
+    if (r.ok && r.data.device) DEV = r.data;
+    // someone chose "Different business" on this screen: keep their business
+    if (r.ok && r.data.device && !(pref === 'code' && code)) { pad(r.data, true); return; }
+    if (code) {
+      j('GET', '/auth/pin-info?code=' + encodeURIComponent(code)).then(function(r2){
+        if (r2.ok && r2.data.business) pad(r2.data, false); else askCode('');
+      });
+    } else askCode('');
+  });
+})();
+</script>
+</body>
+</html>

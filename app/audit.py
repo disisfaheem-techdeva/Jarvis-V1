@@ -18,19 +18,27 @@ import json
 
 
 def record(cur, *, action, resource, resource_id=None, actor=None,
-           actor_type="human", status="ok", detail=None, error=None):
+           actor_type="human", status="ok", detail=None, error=None,
+           tenant_id=None):
     """Append one audit row using the caller's already tenant-scoped cursor.
 
     Runs inside the same transaction as the work it describes, so a rolled-back
     write leaves no audit row claiming it happened.
     """
+    # tenant_id: for founder-scope sessions (no current tenant), name the
+    # client the action touched. The SAVEPOINT is what makes "never rolls back
+    # the real work" true: in Postgres a failed statement aborts the whole
+    # transaction, so without it one bad audit insert silently discarded the
+    # payment / invoice / hide it was describing.
     try:
-        cur.execute(
-            "INSERT INTO executions (tenant_id, actor, actor_type, action, resource, "
-            "resource_id, status, detail, error) "
-            "VALUES (current_tenant(), %s, %s, %s, %s, %s, %s, %s, %s)",
-            (str(actor) if actor else None, actor_type, action, resource,
-             str(resource_id) if resource_id else None, status,
-             json.dumps(detail or {}), error))
+        with cur.connection.transaction():
+            cur.execute(
+                "INSERT INTO executions (tenant_id, actor, actor_type, action, resource, "
+                "resource_id, status, detail, error) "
+                "VALUES (COALESCE(%s::uuid, current_tenant()), %s, %s, %s, %s, %s, %s, %s, %s)",
+                (str(tenant_id) if tenant_id else None,
+                 str(actor) if actor else None, actor_type, action, resource,
+                 str(resource_id) if resource_id else None, status,
+                 json.dumps(detail or {}), error))
     except Exception as exc:                      # noqa: BLE001 - see docstring
         print("[audit] failed to record {0} {1}: {2}".format(action, resource, exc))
