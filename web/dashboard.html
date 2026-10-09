@@ -3913,8 +3913,11 @@ function ownerOnlyPage(id){
     { label: 'Finance', items: [ it('revenue', '💰', 'Revenue'), it('expenses', '🧾', 'Expenses'), it('invoices', '📄', 'Invoices & Payments'),
       it('dayclose', '🔒', 'Daily Closing'), it('pnl', '📊', 'Profit & Loss') ]},
     { label: 'Operations', items: [ it('inventory', '📦', 'Inventory'), it('dailyentry', '📝', 'Daily Entry'), it('reports', '📈', 'Reports') ]},
+    // Campaigns (and Posts, added next to it below) get their own section: an
+    // owner looks for them under Marketing, not inside AI / Automation.
+    { label: 'Marketing', items: [ it('marketing', '📣', 'Campaigns') ]},
     { label: 'AI / Automation', items: [ it('ai', '🤖', 'AI Agents'), it('hermes', '', 'WhatsApp Agent', true),
-      it('needshuman', '🙋', 'Needs Human'), it('marketing', '📣', 'Campaigns') ]},
+      it('needshuman', '🙋', 'Needs Human') ]},
     { label: 'Administration', items: [ it('integrations', '🔗', 'Integrations'), it('whatsapp', '📱', 'WhatsApp Connection') ]}
   );
 })();
@@ -3942,11 +3945,11 @@ navHTML = function(active){
     });
     if (!rows.length) return;
     /* Each section folds open and shut. The section holding the open page is
-       always open; the rest remember what the person last chose (closed
-       until they open them, so the menu stays short). */
+       always open; the rest start open and remember what the person last
+       chose, so nothing is ever tucked away without them doing it. */
     var gid = 'nvg-' + String(g.label || 'main').toLowerCase().replace(/[^a-z0-9]+/g, '-');
     var here = rows.some(function(it){ return it.id === active; });
-    var open = !g.label || here || NAV_OPEN[gid] === true;
+    var open = !g.label || here || NAV_OPEN[gid] !== false;
     var items = '', attn = 0;
     rows.forEach(function(it){
       var badge = '';
