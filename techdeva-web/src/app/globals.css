@@ -440,35 +440,3 @@ p {
     animation: none;
   }
 }
-
-/* ---------- Legacy aliases (temporary) ----------
-   Keep pages not yet migrated to the new primitives rendering correctly.
-   Removed once every page uses src/components/ui. */
-:root {
-  --background: var(--bg);
-  --foreground: var(--fg);
-  --muted: var(--fg-muted);
-  --border: var(--line);
-  --accent-soft: var(--accent-tint);
-  --danger: var(--danger-ink);
-  --success: var(--success-ink);
-}
-.td-card {
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
-  border-radius: var(--card-radius);
-}
-.td-btn-primary {
-  background: var(--accent);
-  color: var(--fg-on-accent);
-  border-radius: var(--btn-radius);
-  font-weight: 500;
-}
-.td-btn-primary:hover {
-  background: var(--accent-hover);
-}
-.td-btn-ghost {
-  border: 1px solid var(--line-strong);
-  color: var(--fg);
-  border-radius: var(--btn-radius);
-}

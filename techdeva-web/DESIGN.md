@@ -141,8 +141,10 @@ zero, so any new motion must still read correctly with no motion at all.
 
 App-level building blocks: `SessionGate` (loading, signed-out and unreachable
 states, each a different truthful screen), `SidebarLayout` (desktop sidebar,
-mobile top bar and bottom tab bar), and `MarketingPage` (site header, hero
-band, closing CTA, footer).
+mobile top bar and bottom tab bar), `MetricCard` (headline number with a
+reason when missing), `ReadableValue` (agent output as readable rows, never
+raw JSON), `AuthShell` and `PasswordInput`, and `MarketingPage` (site header,
+hero band, closing CTA, footer).
 
 ## Copy rules
 
