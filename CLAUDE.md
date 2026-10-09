@@ -11,8 +11,9 @@ before building or changing a screen. In short:
   Never edit the generated copies.
 - New portal or founder-console screens go in `techdeva-web/` and are built
   from `techdeva-web/src/components/ui` (see `techdeva-web/DESIGN.md`).
-- Standalone HTML pages are added to `HTML_TARGETS` in `design-system/sync.py`
-  and use the `.td-*` classes.
+- Pages served by FastAPI (`web/`) are Tailwind too: utilities in the markup,
+  JS-rendered classes via `@apply` in `web/styles/<page>.css`, one built
+  stylesheet at `/assets/td.css`. Steps in the README.
 - Honest data: a missing figure shows "—" with a reason, never 0. Loading,
   empty, error, signed-out and unreachable states are different screens.
 - WCAG 2.2 AA, 44px touch targets, no sideways scroll at 390px, and

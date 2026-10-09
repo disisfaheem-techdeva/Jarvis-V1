@@ -16,14 +16,15 @@ it is short and every rule in it applies.
    listed in `techdeva-web/DESIGN.md` (`SessionGate`, `PageHeader`,
    `MetricCard`, `ReadableValue`, `Table`, `EmptyState`, `Notice`). This is
    the default for anything new.
-2. **Standalone HTML** (a FastAPI-served page in `web/`, a cockpit, a report)
-   → add the path to `HTML_TARGETS` in `design-system/sync.py`, give `<head>`
-   a `<style>` element and `<body>` the class `td`, run the sync script, and
-   build with the `.td-*` classes from `design-system/components.css`.
+2. **A page served by FastAPI** (`web/`) → Tailwind, same utilities as
+   techdeva-web. Utilities in static markup; classes the page's JavaScript
+   renders go in `web/styles/<page>.css` with `@apply`, nested under
+   `.page-<name>`; register in `design-system/web.css` and `TAILWIND_PAGES`.
+   It ships as one stylesheet at `/assets/td.css`. Never add a `<style>` block.
+   A standalone file not served by FastAPI goes in `HTML_TARGETS` instead.
 3. **A new app or framework** → add its CSS path to `COPY_TARGETS` in
-   `sync.py`, import the generated `tokens.css` and `effects.css`, and map
-   tokens into the framework's theme as `techdeva-web/src/app/globals.css`
-   does for Tailwind.
+   `sync.py` and import the generated `tokens.css`, `effects.css` and (for
+   Tailwind) `tailwind.css`, as `techdeva-web/src/app/globals.css` does.
 
 ## Never
 

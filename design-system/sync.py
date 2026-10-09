@@ -16,8 +16,8 @@ Targets:
         Tailwind build of design-system/web.css (tokens + effects + theme +
         components + web/styles/<page>.css), served by app/main.py at
         /assets/td.css. Each page in TAILWIND_PAGES links it with a content hash.
-    HTML_TARGETS / INLINE_WEB_PAGES
-        Single-file pages that inline tokens + effects + components between
+    HTML_TARGETS
+        Single-file pages not served by FastAPI (dashboard-cockpit.html) inline tokens + effects + components between
         /* @td-design-system:start */ … /* @td-design-system:end */.
 
 Fonts go between <!-- @td-fonts:start --> … <!-- @td-fonts:end --> in <head>.
@@ -58,9 +58,6 @@ TAILWIND_PAGES = [
     ROOT / "web/onboarding.html",
     ROOT / "web/signup.html",
     ROOT / "web/techdeva.html",
-]
-# Pages still on the inlined system until they are moved to Tailwind.
-INLINE_WEB_PAGES = [
     ROOT / "web/dashboard.html",
 ]
 
@@ -149,7 +146,7 @@ def main() -> int:
             if not check:
                 path.write_text(want)
 
-    for path in HTML_TARGETS + INLINE_WEB_PAGES:
+    for path in HTML_TARGETS:
         if not path.exists():
             continue
         want = expected_html(path)

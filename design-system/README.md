@@ -17,8 +17,11 @@ static and fast. Approve and reject are instant and unmistakable.
 | --- | --- |
 | `tokens.css` | Every colour, radius, size, motion and chart token, dark and light |
 | `effects.css` | The cinematic layer: grain, ambient light, glass, rim, glow edge, reveals, skeletons, route transitions, reduced motion |
-| `components.css` | `.td-*` classes for plain-HTML pages (button, card, metric, badge, form, table, notice, empty state, nav item) |
-| `sync.py` | Pushes the above into every surface; `--check` fails if anything is stale |
+| `components.css` | `.td-*` classes (button, card, metric, badge, form, table, notice, empty state, nav item) for any page |
+| `tailwind.css` | The token → Tailwind 4 utility bridge (`bg-surface`, `text-fg-muted`, `font-display`, `text-metric`, …), shared by every Tailwind build |
+| `web.css` | Tailwind entry for the FastAPI-served pages; compiles to `web/assets/td.css` |
+| `package.json` | Pins the Tailwind CLI used for that build |
+| `sync.py` | Copies, builds and inlines all of the above; `--check` fails if anything is stale |
 
 **Edit only these files.** Then run `python3 design-system/sync.py`. Copies
 elsewhere carry a "GENERATED" header and are overwritten.
@@ -27,23 +30,29 @@ elsewhere carry a "GENERATED" header and are overwritten.
 
 | Surface | How it gets the system |
 | --- | --- |
-| `techdeva-web/` (Next.js) | `src/app/design-system/{tokens,effects}.css` (generated), bridged to Tailwind in `globals.css`. React primitives in `src/components/ui` — see `techdeva-web/DESIGN.md` |
-| `web/*.html` (served by FastAPI) | tokens + effects + components inlined between `@td-design-system` markers; legacy variable names alias to tokens |
-| `dashboard-cockpit.html` | same as `web/` |
+| `techdeva-web/` (Next.js + Tailwind) | `src/app/design-system/{tokens,effects,tailwind}.css` (generated), imported by `globals.css`. React primitives in `src/components/ui` — see `techdeva-web/DESIGN.md` |
+| `web/*.html` (FastAPI + Tailwind) | One built stylesheet, `web/assets/td.css`, served by `app/main.py` at `/assets/td.css?v=<hash>`. Static markup uses Tailwind utilities; classes a page's JavaScript renders are defined with `@apply` in `web/styles/<page>.css`, scoped under `.page-<name>` on `<body>` |
+| `dashboard-cockpit.html` (standalone file) | tokens + effects + components inlined between `@td-design-system` markers |
 
 ### Building a new dashboard or app
 
 1. **Inside the portal or founder console?** Add a route in `techdeva-web` and
    build it from `src/components/ui`. This is the default for anything new.
-2. **A standalone HTML page** (served by FastAPI, an artifact, an email-able
-   report): add its path to `HTML_TARGETS` in `sync.py`, put an empty
-   `<style>` in `<head>`, run the script, give `<body>` the class `td`, and use
-   the `.td-*` classes. Never hand-copy hex values.
-3. **A new app or framework** (another Next app, a mobile web view): add its
+2. **A page served by FastAPI**: put it in `web/`, give `<head>` the
+   `<!-- @td-fonts:start/end -->` and `<!-- @td-css:start/end -->` marker
+   pairs and `<body>` the classes `td page-<name>`. Build static markup with
+   Tailwind utilities; for classes your JavaScript renders, add
+   `web/styles/<name>.css` (rules with `@apply`, nested under `.page-<name>`)
+   and import it in `design-system/web.css`. Add the page to `TAILWIND_PAGES`
+   in `sync.py` and run it. Add a route in `app/main.py` that returns
+   `_page("<name>.html")`.
+3. **A standalone single file** (not served by FastAPI: an export, an
+   email-able report): add it to `HTML_TARGETS`, put a `<style>` in `<head>`,
+   run the script, give `<body>` the class `td`, and use the `.td-*` classes.
+4. **A new app or framework** (another Next app, a mobile web view): add its
    CSS location to `COPY_TARGETS` in `sync.py` and import the generated
-   `tokens.css` and `effects.css`. Map tokens into that framework's theme the
-   way `techdeva-web/src/app/globals.css` does for Tailwind.
-4. **A tenant-branded dashboard:** keep this system's structure, states and
+   `tokens.css`, `effects.css` and, for Tailwind, `tailwind.css`.
+5. **A tenant-branded dashboard:** keep this system's structure, states and
    rules. Swap only the accent primitives (`--p-violet-*`) for the tenant's hue,
    and re-run the contrast and chart checks below before shipping.
 
@@ -172,7 +181,7 @@ Never animate tables, lead rows, approval cards or form fields. Under
 ## Ship checklist
 
 - [ ] Only tokens: no raw hex, no one-off fonts, radii or shadows
-- [ ] `python3 design-system/sync.py --check` passes
+- [ ] `python3 design-system/sync.py --check` passes (it rebuilds `web/assets/td.css` and compares)
 - [ ] axe-core WCAG 2.2 AA: no violations, in dark and light
 - [ ] 390px wide: no sideways scroll, 44px targets, content at the top
 - [ ] Loading, empty, error, signed-out and unreachable states are designed
