@@ -1,0 +1,65 @@
+/* /portal — the client's trial dashboard. Classes below are the ones the page's
+   JavaScript renders; static markup uses Tailwind utilities directly. */
+.page-portal {
+  & .err { @apply mb-3 hidden rounded-[var(--p-radius-md)] border border-danger/30 bg-danger-tint px-4 py-3 text-sm text-danger; }
+
+  /* summary tiles */
+  & .stat { @apply flex flex-col rounded-[var(--card-radius)] border border-line bg-surface p-4 sm:p-5; }
+  & .stat .k { @apply text-[13px] font-medium text-fg-muted; }
+  & .stat .v { @apply mt-3 font-display text-metric font-semibold tabular-nums text-fg; }
+
+  /* setup nudge */
+  & .setup {
+    @apply relative mb-6 overflow-hidden rounded-[var(--p-radius-xl)] border border-accent-line p-5 sm:p-6;
+    background: radial-gradient(70% 120% at 0% 0%, var(--ambient-1), transparent 70%), var(--card-glass-bg);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), var(--shadow-lg);
+  }
+  & .setup:empty { @apply hidden; }
+  & .setup h3 { @apply m-0 font-display text-xl font-semibold tracking-tight text-fg; }
+  & .setup p { @apply mt-2 mb-4 max-w-prose text-[15px] text-fg-muted; }
+  & .setup .bar { @apply mb-4 h-2 max-w-sm overflow-hidden rounded-full bg-surface-3; }
+  & .setup .bar i { @apply block h-full rounded-full bg-[linear-gradient(90deg,var(--p-violet-600),var(--p-violet-400))]; }
+  & .setup a.go { @apply inline-flex h-11 items-center rounded-[var(--btn-radius)] bg-accent px-4 text-sm font-medium text-on-accent no-underline hover:bg-accent-hover; }
+  & .setup .left { @apply mt-3 text-sm text-fg-subtle; }
+  & .setup.ok { @apply border-line bg-surface shadow-none; }
+  & .setup.ok a.go { @apply border border-line-strong bg-surface-2 text-fg hover:bg-surface-3; }
+
+  /* cards and the work inside them */
+  & .card { @apply mb-3.5 rounded-[var(--card-radius)] border border-line bg-surface p-5 sm:p-6; }
+  & .card h3 { @apply m-0 text-base font-semibold text-fg; }
+  & .meta { @apply text-xs text-fg-subtle; }
+  & .card > .meta:first-of-type { @apply mt-1; }
+  & .pill { @apply inline-flex h-6 items-center rounded-full bg-surface-3 px-2.5 text-xs font-medium capitalize text-fg-muted; }
+  & .pill.wait { @apply bg-warning-tint text-warning; }
+  & .pill.ok { @apply bg-success-tint text-success; }
+  & .pill.no { @apply bg-danger-tint text-danger; }
+  & .acts { @apply mt-4 flex flex-wrap gap-2; }
+  & .approve { @apply inline-flex h-11 min-w-28 items-center justify-center rounded-[var(--btn-radius)] bg-success-fill px-5 text-sm font-medium text-white hover:brightness-110 disabled:opacity-50; }
+  & .reject { @apply inline-flex h-11 min-w-28 items-center justify-center rounded-[var(--btn-radius)] border border-line-strong bg-transparent px-5 text-sm font-medium text-danger hover:border-danger hover:bg-danger-tint disabled:opacity-50; }
+  & .linkbtn { @apply inline-flex h-9 items-center rounded-[var(--btn-radius)] border border-line-strong bg-transparent px-3 text-sm text-fg-muted hover:bg-surface-2 hover:text-fg; }
+  & ul { @apply mt-2 mb-0 list-disc space-y-1.5 pl-5 marker:text-fg-subtle; }
+  & .good li { @apply text-success; }
+  & .bad li { @apply text-danger; }
+  & .empty { @apply rounded-[var(--card-radius)] border border-dashed border-line-strong bg-surface/60 p-6 text-center text-sm text-fg-muted; }
+  & .gap { @apply border-l-[3px] border-l-warning; }
+  & .score { @apply font-display text-5xl leading-none font-semibold tabular-nums text-fg; }
+  & table { @apply w-full border-collapse text-sm; }
+  & .card h3 + table { @apply mt-3; }
+  & th { @apply pb-2 text-left text-xs font-medium tracking-[0.06em] text-fg-subtle uppercase; }
+  & td { @apply border-t border-line py-2.5 pr-3 text-fg; }
+  & pre { @apply mt-2.5 max-h-56 overflow-auto rounded-[var(--p-radius-sm)] border border-line bg-bg-elevated p-3 text-xs text-fg-muted; }
+
+  /* deliverables */
+  & .piece { @apply border-t border-line pt-4 pb-1; }
+  & .pmeta { @apply mb-2 flex flex-wrap items-center gap-2.5; }
+  & .fmt { @apply inline-flex h-6 items-center rounded-full bg-accent-tint px-2.5 text-[11px] font-medium tracking-[0.08em] text-accent-ink uppercase; }
+  & .why { @apply text-xs text-fg-subtle; }
+  & .hook { @apply mb-2 text-[17px] leading-snug font-semibold text-fg; }
+  & .cap { @apply whitespace-pre-wrap text-[15px] text-fg; }
+  & .tags { @apply mt-2 text-sm text-accent-ink; }
+  & .cta { @apply mt-2 text-sm text-fg-muted; }
+  & .art { @apply mt-3.5 grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-3.5; }
+  & .art figure { @apply m-0; }
+  & .art svg { @apply block h-auto w-full rounded-[var(--p-radius-md)] border border-line; }
+  & .art figcaption { @apply mt-2 text-xs text-fg; }
+}

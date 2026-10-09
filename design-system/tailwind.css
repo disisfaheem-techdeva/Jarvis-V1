@@ -1,0 +1,65 @@
+/*
+ * TechDeva design system — TAILWIND THEME. Maps tokens to Tailwind 4 utilities
+ * (bg-surface, text-fg-muted, font-display, text-metric, …) so every Tailwind
+ * build — techdeva-web and the FastAPI pages — shares one vocabulary.
+ * Edit here, then run: python3 design-system/sync.py
+ */
+
+/* ---------- Tailwind bridge ---------- */
+@custom-variant light (&:where([data-theme=light], [data-theme=light] *));
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-on-accent: var(--fg-on-accent);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-tint: var(--accent-tint);
+  --color-accent-line: var(--accent-line);
+  --color-success: var(--success-ink);
+  --color-success-tint: var(--success-tint);
+  --color-success-fill: var(--success-fill);
+  --color-warning: var(--warning-ink);
+  --color-warning-tint: var(--warning-tint);
+  --color-danger: var(--danger-ink);
+  --color-danger-tint: var(--danger-tint);
+  --color-danger-fill: var(--danger-fill);
+  --color-info: var(--info-ink);
+  --color-info-tint: var(--info-tint);
+  --color-ring: var(--ring);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-display: var(--font-display-face), var(--font-geist-sans), ui-sans-serif, sans-serif;
+
+  /* Type scale — see DESIGN.md */
+  --text-label: 0.75rem;
+  --text-label--line-height: 1rem;
+  --text-label--letter-spacing: 0.06em;
+  --text-display: clamp(2.5rem, 5.2vw, 4.25rem);
+  --text-display--line-height: 1;
+  --text-display--letter-spacing: -0.035em;
+  --text-metric: clamp(2.5rem, 5vw, 3.5rem);
+  --text-metric--line-height: 1;
+  --text-metric--letter-spacing: -0.03em;
+
+  --radius-xs: var(--p-radius-xs);
+  --radius-sm: var(--p-radius-sm);
+  --radius-md: var(--p-radius-md);
+  --radius-lg: var(--p-radius-lg);
+  --radius-xl: var(--p-radius-xl);
+
+  --ease-out-expo: var(--p-ease-out);
+
+  --animate-rise: td-rise var(--p-dur-slow) var(--p-ease-out) both;
+  --animate-fade: td-fade var(--p-dur-slow) var(--p-ease-out) both;
+}

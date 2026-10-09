@@ -1,0 +1,15 @@
+/*
+ * Tailwind entry for the FastAPI-served pages in web/. Built by
+ * design-system/sync.py into web/assets/td.css, which app/main.py serves at
+ * /assets/td.css. Pages get the same tokens and utility vocabulary as
+ * techdeva-web; each page's JS-rendered classes live in web/styles/<page>.css.
+ */
+@import "tailwindcss" source(none);
+@source "../web/*.html";
+
+@import "./tokens.css";
+@import "./effects.css";
+@import "./tailwind.css";
+@import "./components.css";
+
+@import "../web/styles/portal.css";

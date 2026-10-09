@@ -1,0 +1,12 @@
+{
+  "name": "techdeva-design-system",
+  "private": true,
+  "description": "Builds the Tailwind stylesheet for the FastAPI-served pages in web/ from the shared design tokens.",
+  "scripts": {
+    "build:web": "tailwindcss -i ./web.css -o ../web/assets/td.css --minify"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.3.3",
+    "tailwindcss": "4.3.3"
+  }
+}

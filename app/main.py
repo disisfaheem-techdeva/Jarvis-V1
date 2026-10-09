@@ -520,6 +520,22 @@ def dashboard_page():
     return _page("dashboard.html")
 
 
+@app.get("/assets/td.css", include_in_schema=False)
+def design_system_css():
+    """The Tailwind build of the shared design system, used by the pages above.
+
+    Built from design-system/ into web/assets/td.css by design-system/sync.py.
+    Pages link it as /assets/td.css?v=<content hash>, so it can be cached for a
+    year: a new build is a new URL.
+    """
+    path = WEB_DIR / "assets" / "td.css"
+    if not path.is_file():
+        raise HTTPException(503, f"td.css is not available on this server (expected at {path}). "
+                                 f"Run design-system/sync.py.")
+    return FileResponse(path, media_type="text/css",
+                        headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
 @app.get("/techdeva", include_in_schema=False)
 def techdeva_page():
     """The founder view. The page needs no credential; its data does."""
