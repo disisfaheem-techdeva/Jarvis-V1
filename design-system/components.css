@@ -1,0 +1,125 @@
+/*
+ * TechDeva design system — COMPONENTS for plain HTML (no React, no Tailwind).
+ * The same primitives as techdeva-web/src/components/ui, as .td-* classes, for
+ * the FastAPI-served pages in web/ and any static or server-rendered page.
+ * Every value comes from tokens.css. Edit here, then run: python3 design-system/sync.py
+ */
+
+/* ---------- Base ---------- */
+html { background: var(--bg); color-scheme: dark; -webkit-text-size-adjust: 100%; }
+:root[data-theme="light"] { color-scheme: light; }
+body.td {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 400 15px/1.6 var(--td-font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+:root {
+  --td-font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --td-font-display: "Bricolage Grotesque", "Geist", ui-sans-serif, system-ui, sans-serif;
+  --td-font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.td-display { font-family: var(--td-font-display); letter-spacing: -0.025em; }
+.td-mono { font-family: var(--td-font-mono); }
+.td-num { font-variant-numeric: tabular-nums; }
+.td-muted { color: var(--fg-muted); }
+.td-subtle { color: var(--fg-subtle); }
+.td-label { font-size: 12px; line-height: 16px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 500; color: var(--fg-subtle); }
+.td-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
+::selection { background: var(--accent-tint); color: var(--fg); }
+
+/* ---------- Page header ---------- */
+.td-page-header h1 { margin: 0; font: 600 clamp(1.5rem, 3vw, 1.9rem)/1.15 var(--td-font-display); letter-spacing: -0.025em; color: var(--fg); }
+.td-page-header p { margin: 8px 0 0; max-width: 65ch; color: var(--fg-muted); }
+
+/* ---------- Button ---------- */
+.td-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: var(--btn-h-md); padding: 0 16px; border-radius: var(--btn-radius);
+  border: 1px solid transparent; font: 500 14px/1 var(--td-font-sans); white-space: nowrap;
+  cursor: pointer; text-decoration: none; user-select: none;
+  transition: background-color 150ms, border-color 150ms, color 150ms, transform 150ms;
+  background: var(--accent); color: var(--fg-on-accent);
+}
+.td-btn:hover { background: var(--accent-hover); }
+.td-btn:active { transform: translateY(1px); }
+.td-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.td-btn:disabled, .td-btn[aria-disabled="true"] { opacity: 0.5; pointer-events: none; }
+.td-btn--secondary { background: var(--surface-2); color: var(--fg); border-color: var(--line-strong); }
+.td-btn--secondary:hover { background: var(--surface-3); }
+.td-btn--ghost { background: transparent; color: var(--fg-muted); }
+.td-btn--ghost:hover { background: var(--surface-2); color: var(--fg); }
+.td-btn--danger { background: transparent; color: var(--danger-ink); border-color: var(--line-strong); }
+.td-btn--danger:hover { background: var(--danger-tint); border-color: var(--danger-ink); }
+.td-btn--approve { background: var(--success-fill); color: #fff; }
+.td-btn--approve:hover { background: var(--success-fill); filter: brightness(1.1); }
+.td-btn--sm { height: var(--btn-h-sm); padding: 0 12px; font-size: 13px; }
+.td-btn--lg { height: var(--btn-h-lg); padding: 0 24px; font-size: 15px; }
+
+/* ---------- Card ---------- */
+.td-card { position: relative; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--card-radius); }
+.td-card--pad { padding: 20px; }
+@media (min-width: 640px) { .td-card--pad { padding: 24px; } }
+.td-card__title { margin: 0; font-size: 16px; font-weight: 600; color: var(--fg); }
+
+/* ---------- Metric (headline number) ---------- */
+.td-metric__label { font-size: 14px; font-weight: 500; color: var(--fg-muted); }
+.td-metric__value { margin-top: 12px; font: 600 clamp(2rem, 4vw, 3rem)/1 var(--td-font-display); letter-spacing: -0.03em; color: var(--fg); font-variant-numeric: tabular-nums; }
+.td-metric__value[data-missing] { color: var(--fg-subtle); }
+.td-metric__help { margin-top: 12px; font-size: 12px; color: var(--fg-subtle); }
+
+/* ---------- Badge ---------- */
+.td-badge { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: var(--badge-radius); font-size: 12px; font-weight: 500; white-space: nowrap; background: var(--surface-3); color: var(--fg-muted); }
+.td-badge--dot::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+.td-badge--accent { background: var(--accent-tint); color: var(--accent-ink); }
+.td-badge--success { background: var(--success-tint); color: var(--success-ink); }
+.td-badge--warning { background: var(--warning-tint); color: var(--warning-ink); }
+.td-badge--danger { background: var(--danger-tint); color: var(--danger-ink); }
+.td-badge--info { background: var(--info-tint); color: var(--info-ink); }
+
+/* ---------- Form ---------- */
+.td-field { display: flex; flex-direction: column; gap: 6px; }
+.td-field > label { font-size: 14px; font-weight: 500; color: var(--fg); }
+.td-field__hint { font-size: 12px; color: var(--fg-subtle); }
+.td-field__error { font-size: 12px; font-weight: 500; color: var(--danger-ink); }
+.td-input, .td-select, .td-textarea {
+  width: 100%; box-sizing: border-box; height: var(--input-h); padding: 0 14px;
+  border-radius: var(--input-radius); border: 1px solid var(--input-border);
+  background: var(--input-bg); color: var(--fg); font: 400 15px/1.4 var(--td-font-sans);
+  transition: border-color 150ms, box-shadow 150ms;
+}
+.td-textarea { height: auto; min-height: 96px; padding: 10px 14px; line-height: 1.6; }
+.td-input::placeholder, .td-textarea::placeholder { color: var(--fg-subtle); }
+.td-input:hover, .td-select:hover, .td-textarea:hover { border-color: var(--accent-line); }
+.td-input:focus, .td-select:focus, .td-textarea:focus { outline: none; border-color: var(--ring); box-shadow: 0 0 0 3px var(--accent-tint); }
+.td-input[aria-invalid="true"] { border-color: var(--danger-ink); }
+
+/* ---------- Table (calm data: static, high contrast) ---------- */
+.td-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--card-radius); background: var(--surface); }
+.td-table { width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; }
+.td-table th { height: 44px; padding: 0 16px; background: var(--surface-2); border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-subtle); white-space: nowrap; }
+.td-table td { height: var(--table-row-h); padding: 0 16px; border-bottom: 1px solid var(--line); color: var(--fg); }
+.td-table tr:last-child td { border-bottom: 0; }
+.td-table tbody tr:hover { background: var(--surface-2); }
+.td-table .td-num, .td-table td[data-num] { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---------- Notice ---------- */
+.td-notice { display: flex; gap: 12px; align-items: flex-start; padding: 16px; border-radius: var(--p-radius-md); border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--fg); }
+.td-notice__title { margin: 0; font-size: 14px; font-weight: 600; }
+.td-notice__body { margin: 4px 0 0; font-size: 14px; color: var(--fg-muted); }
+.td-notice--info { background: var(--info-tint); border-color: color-mix(in oklab, var(--info-ink) 30%, transparent); }
+.td-notice--success { background: var(--success-tint); border-color: color-mix(in oklab, var(--success-ink) 30%, transparent); }
+.td-notice--warning { background: var(--warning-tint); border-color: color-mix(in oklab, var(--warning-ink) 30%, transparent); }
+.td-notice--danger { background: var(--danger-tint); border-color: color-mix(in oklab, var(--danger-ink) 30%, transparent); }
+
+/* ---------- Empty state ---------- */
+.td-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 32px; border: 1px dashed var(--line-strong); border-radius: var(--card-radius); background: color-mix(in oklab, var(--surface) 60%, transparent); }
+.td-empty h2 { margin: 0; font-size: 16px; font-weight: 600; color: var(--fg); }
+.td-empty p { margin: 0; max-width: 65ch; font-size: 14px; color: var(--fg-muted); }
+
+/* ---------- Navigation item ---------- */
+.td-nav-item { display: flex; align-items: center; gap: 12px; min-height: var(--nav-item-h); padding: 0 12px; border-radius: var(--p-radius-sm); color: var(--fg-muted); text-decoration: none; font-size: 14px; }
+.td-nav-item:hover { background: var(--surface-2); color: var(--fg); }
+.td-nav-item[aria-current="page"], .td-nav-item.is-active { background: var(--accent-tint); color: var(--fg); font-weight: 500; }
