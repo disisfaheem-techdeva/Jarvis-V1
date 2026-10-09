@@ -1,0 +1,20 @@
+/* / (signup) — start a trial. Classes below are rendered by the page's
+   JavaScript or shared across many fields; the rest is utilities in the markup. */
+.page-signup {
+  & label { @apply mb-1.5 block text-sm font-medium text-fg; }
+  & input, & select {
+    @apply h-[var(--input-h)] w-full rounded-[var(--input-radius)] border border-[var(--input-border)] bg-[var(--input-bg)] px-3.5 text-[15px] text-fg transition-[border-color,box-shadow] placeholder:text-fg-subtle hover:border-accent-line focus:border-[var(--ring)] focus:[box-shadow:0_0_0_3px_var(--accent-tint)] focus:outline-none;
+  }
+  & fieldset { @apply m-0 mb-8 border-0 p-0; }
+  & legend { @apply pb-4 text-label font-semibold text-accent-ink uppercase; }
+  & .row { @apply grid gap-4 sm:grid-cols-2; }
+  & .field { @apply mb-4; }
+  & .hint { @apply mt-1.5 text-xs text-fg-subtle; }
+
+  /* competitor rows (rendered by JS) */
+  & .comp { @apply mb-3 grid gap-3 sm:grid-cols-[1fr_1fr_auto]; }
+  & .x { @apply inline-flex h-[var(--input-h)] min-w-11 cursor-pointer items-center justify-center rounded-[var(--btn-radius)] border border-line-strong bg-transparent px-3 text-fg-muted hover:border-danger hover:bg-danger-tint hover:text-danger; }
+
+  & .msg { @apply mt-5 hidden rounded-[var(--p-radius-md)] p-4 text-sm; }
+  & .msg.err { @apply block border border-warning/40 bg-warning-tint text-warning; }
+}
