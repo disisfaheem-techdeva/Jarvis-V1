@@ -6185,6 +6185,112 @@ function adsPerfHTML(){
   return panel('Ad results (live from the ad platforms)', body + '<div class="card-note" style="padding:8px 16px">Updated ' +
     esc(String(S[key].fetched_at || '').replace('T', ' ').slice(0, 16)) + ' UTC · refreshed every 15 minutes.</div>', sw);
 }
+/* ---------------------------------------------------------- A/B test
+   Compare two campaigns already running on the same platform. No new ads and
+   no new spending: it reads the same live results as "Ad results". A winner is
+   named only when the gap in results per view is 95% certain (two-proportion
+   z-test) AND the winner's cost per result is also lower; otherwise it says
+   what is missing. If the owner switched on auto-pause in the ad autopilot
+   rules, a clear loser that is still running is paused, through the same
+   audited /adpilot/pause the Pause buttons use. */
+var AB = { days: 7, prov: null, a: null, b: null, busy: false, paused: {} };
+var AB_MIN_RESULTS = 20;        // both versions together, before any verdict
+function abNormCdf(z){           // standard normal CDF (Abramowitz-Stegun 7.1.26)
+  var t = 1 / (1 + 0.3275911 * Math.abs(z) / Math.SQRT2);
+  var y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-z * z / 2);
+  return z >= 0 ? (1 + y) / 2 : (1 - y) / 2;
+}
+function abResults(r){ return (Number(r.leads) || 0) + (Number(r.chats) || 0); }
+function abVerdict(A, B){
+  var ra = abResults(A), rb = abResults(B), na = Number(A.impressions) || 0, nb = Number(B.impressions) || 0;
+  if (!na || !nb) return { state: 'wait', text: 'One of the two has no views in this period yet.' };
+  if (ra + rb < AB_MIN_RESULTS)
+    return { state: 'wait', text: 'Not enough results yet to call it: ' + (ra + rb) + ' so far, at least ' + AB_MIN_RESULTS + ' needed between the two.' };
+  var pa = ra / na, pb = rb / nb, pool = (ra + rb) / (na + nb);
+  var se = Math.sqrt(pool * (1 - pool) * (1 / na + 1 / nb));
+  var z = se ? (pb - pa) / se : 0, conf = 1 - 2 * (1 - abNormCdf(Math.abs(z)));
+  var cpa = ra ? A.spend / ra : Infinity, cpb = rb ? B.spend / rb : Infinity;
+  var pct = Math.min(99, Math.floor(conf * 100));   // never "100% sure"
+  if (conf < 0.95) return { state: 'wait', conf: pct, text: 'Too close to call: ' + pct + '% sure, 95% needed. Let both run longer.' };
+  var win = pb > pa ? 'b' : 'a', winCost = win === 'b' ? cpb : cpa, loseCost = win === 'b' ? cpa : cpb;
+  if (winCost > loseCost) return { state: 'mixed', conf: pct, text: 'Mixed: ' + win.toUpperCase() + ' gets more results per view (' + pct +
+    '% sure), but each result costs more. No winner on cost yet.' };
+  return { state: 'win', win: win, conf: pct, text: win.toUpperCase() + ' wins: more results per view (' + pct + '% sure) and a lower cost per result.' };
+}
+function abHTML(){
+  var key = 'ads_perf_' + AB.days;
+  var sw = '<select class="fld" id="ab_days" style="width:auto" aria-label="Period">' + [7, 30, 90].map(function(n){
+    return '<option value="' + n + '"' + (AB.days === n ? ' selected' : '') + '>Last ' + n + ' days</option>'; }).join('') + '</select>';
+  var title = 'A/B test: compare two ads';
+  if (!need(key, '/ads/performance?days=' + AB.days)) return panel(title, loading('Reading your ad results...'), sw);
+  if (!S[key]) return panel(title, errState('Could not read the ad results.'), sw);
+  var plats = (S[key].platforms || []).filter(function(pl){ return pl.connected && !pl.error && (pl.campaigns || []).length >= 2; });
+  if (!plats.length) return panel(title, empty('Two campaigns needed',
+    'Run two versions of an ad (a different picture, headline or text) as two campaigns on the same platform, and compare them here.'), sw);
+  if (!AB.prov || !plats.some(function(p){ return p.provider === AB.prov; })) AB.prov = plats[0].provider;
+  var pl = plats.filter(function(p){ return p.provider === AB.prov; })[0], cs = pl.campaigns, c = pl.currency;
+  var byId = function(id){ return cs.filter(function(x){ return x.id === id; })[0]; };
+  if (!byId(AB.a)) AB.a = cs[0].id;
+  if (!byId(AB.b) || AB.b === AB.a) AB.b = (cs[1].id === AB.a ? cs[0] : cs[1]).id;
+  var A = byId(AB.a), B = byId(AB.b);
+  var pick = function(id, cur){ return '<select class="fld" id="' + id + '" aria-label="' + (id === 'ab_a' ? 'Version A' : 'Version B') + '">' +
+    cs.map(function(x){ return '<option value="' + esc(x.id) + '"' + (x.id === cur ? ' selected' : '') + '>' + esc(x.name || x.id) +
+      (x.status && x.status !== 'active' ? ' (' + esc(x.status) + ')' : '') + '</option>'; }).join('') + '</select>'; };
+  var plSel = plats.length > 1 ? '<label class="card-note">Platform<select class="fld" id="ab_prov">' + plats.map(function(p){
+    return '<option value="' + p.provider + '"' + (p.provider === AB.prov ? ' selected' : '') + '>' + (p.provider === 'meta' ? 'Facebook &amp; Instagram' : 'Google') + '</option>'; }).join('') + '</select></label>' : '';
+  var v = AB.a === AB.b ? { state: 'wait', text: 'Pick two different campaigns.' } : abVerdict(A, B);
+  var resLabel = pl.provider === 'meta' ? 'Results (leads + WhatsApp chats)' : 'Results (conversions)';
+  var row = function(label, f){ return '<tr><td>' + label + '</td><td>' + f(A, 'a') + '</td><td>' + f(B, 'b') + '</td></tr>'; };
+  var num = function(n){ return Number(n || 0).toLocaleString(); };
+  var pctOf = function(x, n){ return n ? (100 * x / n).toFixed(2) + '%' : '—'; };
+  var tick = function(k){ return v.state === 'win' && v.win === k ? ' <span class="pill attn">Winner</span>' : ''; };
+  var table = '<div class="tbl-wrap"><table><thead><tr><th></th><th>Version A' + tick('a') + '</th><th>Version B' + tick('b') + '</th></tr></thead><tbody>' +
+    row('Campaign', function(x){ return esc(x.name || x.id); }) +
+    row('Spent', function(x){ return adsMoney(x.spend, c); }) +
+    row('Times shown', function(x){ return num(x.impressions); }) +
+    row('Clicks', function(x){ return num(x.clicks); }) +
+    row('Click rate', function(x){ return pctOf(Number(x.clicks) || 0, Number(x.impressions) || 0); }) +
+    row(resLabel, function(x){ return num(abResults(x)); }) +
+    row('Results per 1,000 views', function(x){ return x.impressions ? (1000 * abResults(x) / x.impressions).toFixed(2) : '—'; }) +
+    row('Cost per result', function(x){ var r = abResults(x); return r ? adsMoney(Math.round(x.spend / r), c) : '—'; }) +
+    '</tbody></table></div>';
+  var tone = v.state === 'win' ? 'var(--growth)' : v.state === 'mixed' ? 'var(--warn)' : 'var(--muted)';
+  var auto = S.adpilot && S.adpilot.settings && S.adpilot.settings.auto_pause, loser = v.state === 'win' ? (v.win === 'a' ? B : A) : null;
+  var note = '';
+  if (loser && AB.paused[loser.id]) note = '<div class="card-note" style="margin-top:6px">' + esc(AB.paused[loser.id]) + '</div>';
+  else if (loser && loser.status === 'active')
+    note = '<div class="card-note" style="margin-top:6px">' + (auto ? 'Auto-pause is on: pausing the losing version...' :
+      'Auto-pause is off, so nothing was changed. <button class="btn" id="ab_pause" type="button">Pause the losing version</button>') + '</div>';
+  var body = '<div style="padding:14px 16px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">' + plSel +
+    '<label class="card-note">Version A' + pick('ab_a', AB.a) + '</label><label class="card-note">Version B' + pick('ab_b', AB.b) + '</label></div>' + table +
+    '<div style="padding:12px 16px"><b style="color:' + tone + '">' + esc(v.text) + '</b>' + note +
+    '<div class="card-note" style="margin-top:6px">Compares campaigns already running; it never creates ads or spends money. ' +
+    'For a fair test, change one thing only (picture, headline or text) and give both the same budget and audience.</div></div>';
+  setTimeout(function(){ abWire(loser, auto, v); }, 0);
+  return panel(title, body, sw);
+}
+function abWire(loser, auto, v){
+  var g = function(id){ return document.getElementById(id); };
+  if (g('ab_days')) g('ab_days').onchange = function(){ AB.days = Number(g('ab_days').value) || 7; renderShell(); };
+  if (g('ab_prov')) g('ab_prov').onchange = function(){ AB.prov = g('ab_prov').value; AB.a = AB.b = null; renderShell(); };
+  if (g('ab_a')) g('ab_a').onchange = function(){ AB.a = g('ab_a').value; renderShell(); };
+  if (g('ab_b')) g('ab_b').onchange = function(){ AB.b = g('ab_b').value; renderShell(); };
+  var pause = function(by){
+    if (!loser || AB.busy || AB.paused[loser.id]) return;
+    AB.busy = true;
+    api('/adpilot/pause', { method: 'POST', body: { provider: AB.prov, campaign_id: loser.id, campaign_name: loser.name || '',
+      reason: 'A/B test: lost to the other version (' + v.conf + '% sure). ' + (by === 'auto' ? 'Paused by auto-pause.' : 'Paused by the owner.') } })
+      .then(function(r){
+        AB.busy = false;
+        AB.paused[loser.id] = r.ok ? 'Paused "' + (loser.name || loser.id) + '". You can switch it back on from Ad results or Ads Manager.'
+                                   : 'Could not pause it: ' + ((r.data && r.data.detail) || 'the ad platform did not answer') + '.';
+        if (r.ok) { S['ads_perf_' + AB.days] = undefined; LOADING['ads_perf_' + AB.days] = false; }
+        renderShell();
+      });
+  };
+  if (g('ab_pause')) g('ab_pause').onclick = function(){ g('ab_pause').disabled = true; pause('owner'); };
+  if (auto && loser && loser.status === 'active' && isOwner()) pause('auto');
+}
 var _viewMarketingBefore18 = VIEWS.marketing;
 VIEWS.marketing = function(){
   var h = _viewMarketingBefore18();
@@ -6193,7 +6299,7 @@ VIEWS.marketing = function(){
   h = h.replace(/<a class="btn primary" href="\/connect\/meta">Connect Facebook &amp; Instagram<\/a>/,
     '<a class="btn primary" href="#/integrations">Connect on Integrations</a>');
   var at = h.indexOf('<div class="panel"><div class="panel-head">');   // first real panel, after the summary tiles
-  h = at > -1 ? h.slice(0, at) + adsPerfHTML() + h.slice(at) : h + adsPerfHTML();
+  h = at > -1 ? h.slice(0, at) + adsPerfHTML() + abHTML() + h.slice(at) : h + adsPerfHTML() + abHTML();
   // set up a campaign here too (Page + ad account pickers), same as Growth Advisor
   var ap = apPanels();
   if (ap) { setTimeout(advWire, 0); return h + actbar() + ap; }
