@@ -161,8 +161,11 @@ def read_business(tid, force=False):
         fp = fingerprint(pages, sites)
         if not fp:
             return "no_sources"
+        # a menu photo read by Jarvis is not a page read: skip it, or every
+        # photo would make the page and website look changed and be re-read
         cur.execute("""SELECT fingerprint, status, extract(epoch FROM now() - created_at) AS age
-                         FROM setup_suggestions WHERE tenant_id = %s ORDER BY created_at DESC LIMIT 1""", (tid,))
+                         FROM setup_suggestions WHERE tenant_id = %s AND fingerprint NOT LIKE 'photo:%%'
+                        ORDER BY created_at DESC LIMIT 1""", (tid,))
         last = cur.fetchone()
         cur.execute("SELECT slug FROM business_categories WHERE active ORDER BY sort_order")
         slugs = [r["slug"] for r in cur.fetchall()]

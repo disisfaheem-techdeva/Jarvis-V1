@@ -275,6 +275,69 @@ def _attached_images(body):
     return out[:MAX_IMAGES]
 
 
+# Jarvis used to pass attached pictures on only as "for a social media post",
+# so the model never saw them and a photographed menu came back as "I cannot
+# read it". A picture sent with words about a menu or price list -- or with
+# no words about a post -- is read with the same reader as the "photo of the
+# menu" button on Business & agent, and lands there as a suggestion the owner
+# checks and saves. Nothing is saved to services from here.
+_MENU_WORDS = re.compile(r"menu|price|rate|list|card|service|treatment|package|course|fee|read|parh|"
+                         r"\u0645\u06cc\u0646\u0648|\u0631\u06cc\u0679|\u0642\u06cc\u0645\u062a|\u0644\u0633\u0679|\u067e\u0691\u06be", re.I)
+_POST_WORDS = re.compile(r"\bpost|caption|publish|schedule|instagram|facebook|\bstory|\breel|\bads?\b|"
+                         r"\u067e\u0648\u0633\u0679", re.I)
+MENU_PHOTOS_MAX = 3          # pages of one menu read per message
+
+
+def _wants_menu_read(message, attached):
+    if not attached:
+        return False
+    return bool(_MENU_WORDS.search(message)) or not _POST_WORDS.search(message)
+
+
+def _read_menu_photos(tid, role, urls):
+    """Read the words off the attached pictures and file them as a setup
+    suggestion for Business & agent. Returns (found_counts, error)."""
+    from .setup_reader import photo_to_text, read_text
+    texts = []
+    with tenant_session(tid, role) as cur:
+        for u in urls[:MENU_PHOTOS_MAX]:
+            token = u.rsplit("/", 1)[-1].replace(".jpg", "", 1)
+            cur.execute("SELECT bytes FROM social_media WHERE tenant_id = %s AND token = %s", (tid, token))
+            row = cur.fetchone()
+            if row:
+                texts.append(bytes(row["bytes"]))
+        cur.execute("SELECT slug FROM business_categories WHERE active ORDER BY sort_order")
+        slugs = [r["slug"] for r in cur.fetchall()]
+    if not texts:
+        return None, "I could not open that picture. Attach it again and I will read it."
+    words = []
+    for data in texts:
+        try:
+            words.append(photo_to_text(data, "image/jpeg"))
+        except RuntimeError as e:
+            return None, "I could not read the picture right now (%s). Nothing was changed." % str(e)[:120]
+    text = "\n\n".join(w for w in words if w.strip())[:40000]
+    if not text.strip():
+        return None, "I could not find any writing in that picture. Try a sharper, closer photo of the menu."
+    draft = read_text(text, slugs)
+    found = {"services": len(draft.get("services") or []), "hours": len(draft.get("hours") or []),
+             "knowledge": len(draft.get("knowledge") or [])}
+    status = "ready" if any(found.values()) or draft.get("business_type") else "nothing_found"
+    src = [{"kind": "photo", "ref": "menu photo (%d page%s)" % (len(texts), "" if len(texts) == 1 else "s"),
+            "ok": True, "note": None}]
+    with tenant_session(tid, role) as cur:
+        cur.execute("""INSERT INTO setup_suggestions (tenant_id, sources, fingerprint, draft, source_text, status)
+                       VALUES (%s, %s, %s, %s, %s, %s)""",
+                    (tid, json.dumps(src), "photo:" + str(uuid.uuid4()), json.dumps(draft), text, status))
+        if status == "ready":   # only the newest suggestion is ever offered
+            cur.execute("""UPDATE setup_suggestions SET status = 'dismissed', decided_at = now()
+                            WHERE tenant_id = %s AND status = 'ready'
+                              AND id <> (SELECT id FROM setup_suggestions WHERE tenant_id = %s
+                                          ORDER BY created_at DESC LIMIT 1)""", (tid, tid))
+    return (found if status == "ready" else None), (None if status == "ready" else
+            "I read the picture but found no services or prices in it. You can paste the price list as text on Business & agent.")
+
+
 def _tidy_caption(text):
     """Instagram takes at most 5 hashtags; extra ones after the fifth are
     dropped so a Jarvis caption can always go to both platforms."""
@@ -633,6 +696,19 @@ def make_console_router():
         # pinned on the model or the voice, not guessed at.
         voice = bool(body.get("voice"))
         attached = _attached_images(body)
+        if _wants_menu_read(message, attached):
+            if role not in ("owner", "techdeva_admin"):
+                return {"kind": "question", "reply": "Only the business owner can add a menu or price list."}
+            found, err = _read_menu_photos(tid, role, attached)
+            if err:
+                return {"kind": "question", "reply": err}
+            what = ", ".join(x for x in (
+                "%d item%s" % (found["services"], "" if found["services"] == 1 else "s") if found["services"] else "",
+                "opening hours" if found["hours"] else "",
+                "%d note%s" % (found["knowledge"], "" if found["knowledge"] == 1 else "s") if found["knowledge"] else "") if x)
+            return {"kind": "action", "action": "navigate", "ok": True, "navigate": "bizagent",
+                    "reply": "I read your menu and found %s. It is on Business & agent now: check the names and prices, "
+                             "then press Save. Nothing changes until you do." % (what or "your business details")}
         if attached:
             message += ("\n[The owner attached %d picture%s to this message, for a social media post.]"
                         % (len(attached), "" if len(attached) == 1 else "s"))

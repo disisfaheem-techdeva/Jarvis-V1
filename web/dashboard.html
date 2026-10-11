@@ -5646,6 +5646,12 @@ function consoleSend(opt){
         }
         if (d.kind === 'action' && d.ok) {
           if (d.navigate) go = d.navigate;
+          if (d.navigate === 'bizagent' && jvImgUrls().length) {
+            // Jarvis read the attached menu: drop the pictures so the next
+            // message does not read them again, and load the new suggestion
+            JV.imgs = []; jvRenderAttach();
+            JS.draft = null; JS.sugLoaded = null; JS.sid = null; bpLoad(true);
+          }
           else if (d.refresh) {
             jvFreshData();
             var page = { appointments: 'appointments', customers: 'customers', leads: 'leads', expenses: 'expenses', posts: 'posts' }[d.refresh[0]];
@@ -7538,7 +7544,7 @@ function jsLoadSuggestion(){
 function jsFromText(){
   if (!JS.from || !JS.from.length) return '';
   return '<div style="padding:10px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px"><b>Jarvis read ' +
-    JS.from.map(function(s){ return (s.kind === 'facebook' ? 'your Facebook page ' : 'your website ') + esc(s.ref); }).join(' and ') +
+    JS.from.map(function(s){ return (s.kind === 'facebook' ? 'your Facebook page ' : s.kind === 'photo' ? 'your ' : 'your website ') + esc(s.ref); }).join(' and ') +
     '</b><div class="card-note">This is what it found there. Nothing is saved until you press Save. Prices are often not on a page: paste or photograph your price list below to add them.</div></div>';
 }
 var JS_DAY = { sunday: 'Sun', monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat' };
@@ -7624,7 +7630,7 @@ function jsPanel(){
     if (!sg) return out;
     var what = [sg.business_type ? 'your business type' : '', sg.services ? sg.services + ' item' + (sg.services === 1 ? '' : 's') : '',
                 sg.hours ? 'opening hours' : '', sg.knowledge ? sg.knowledge + ' fact' + (sg.knowledge === 1 ? '' : 's') : ''].filter(Boolean).join(', ');
-    var from = (sg.sources || []).map(function(s){ return s.kind === 'facebook' ? 'Facebook page' : 'website'; }).join(' and ');
+    var from = (sg.sources || []).map(function(s){ return s.kind === 'facebook' ? 'Facebook page' : s.kind === 'photo' ? 'menu photo' : 'website'; }).join(' and ');
     var bn = '<div class="panel" style="padding:14px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;border:1px solid var(--accent,#6C8CFF)">' +
       '<div><b>🤖 Jarvis read your ' + esc(from || 'page') + '</b><div class="card-note">It found ' + esc(what || 'details') + ' to set up your dashboard and WhatsApp agent. Check it and press Save.</div></div>' +
       '<a class="btn primary" href="#/bizagent">Review</a></div>';
