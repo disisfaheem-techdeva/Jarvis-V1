@@ -15,16 +15,17 @@ const siteUrl = `https://${brand.domain}`;
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: `${brand.name} | Portable charcoal grill, cash on delivery in Pakistan`,
+    default: `${brand.name} | Ready-to-grill BBQ box delivered in Lahore`,
     template: `%s | ${brand.name}`,
   },
   description:
-    "Portable charcoal grill that gets coals hot fast. Tikka, seekh and BBQ anywhere. Cash on delivery across Pakistan.",
+    "Pakistan's first ready-to-grill BBQ box. Grill, coal, marinated meat, pita and sides in one box, delivered across Lahore. Cash on delivery.",
   openGraph: {
     type: "website",
     siteName: brand.name,
     url: siteUrl,
     locale: "en_PK",
+    description: "Pakistan's first ready-to-grill BBQ box, delivered across Lahore.",
   },
   twitter: { card: "summary_large_image" },
   alternates: { canonical: "/" },

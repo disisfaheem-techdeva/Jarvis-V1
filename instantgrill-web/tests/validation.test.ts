@@ -20,8 +20,9 @@ describe("normalizePkMobile", () => {
 
 describe("validateOrder", () => {
   const good = {
-    customer: { name: "Ayesha Khan", phone: "0321 7654321", city: "Lahore", address: "House 12, Street 4, DHA Phase 5" },
-    cart: [{ bundleId: "solo", qty: 1 }],
+    customer: { name: "Ayesha Khan", phone: "0321 7654321", area: "DHA", address: "House 12, Street 4, Phase 5" },
+    cart: [{ slug: "chicken-tikka", qty: 1, chutney: "Imli", salad: "Fresh" }],
+    slot: { date: "2026-10-15", slot: "morning" },
   };
 
   it("accepts and normalises a good order", () => {
@@ -31,9 +32,9 @@ describe("validateOrder", () => {
   });
 
   it("reports every bad field at once", () => {
-    const v = validateOrder({ customer: { name: "A", phone: "123", city: "", address: "short" }, cart: [] });
+    const v = validateOrder({ customer: { name: "A", phone: "123", area: "Karachi", address: "short" }, cart: [] });
     expect(v.ok).toBe(false);
-    if (!v.ok) expect(Object.keys(v.errors).sort()).toEqual(["address", "cart", "city", "name", "phone"]);
+    if (!v.ok) expect(Object.keys(v.errors).sort()).toEqual(["address", "area", "cart", "name", "phone", "slot"]);
   });
 
   it("survives garbage input", () => {

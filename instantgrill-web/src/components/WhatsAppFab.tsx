@@ -8,7 +8,7 @@ export function whatsappLink(text: string) {
 export function WhatsAppFab() {
   return (
     <a
-      href={whatsappLink("Hi Instant Grill, I have a question about the grill.")}
+      href={whatsappLink("Assalam o Alaikum Instant Grill, I want to order a BBQ box.")}
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Chat with us on WhatsApp"

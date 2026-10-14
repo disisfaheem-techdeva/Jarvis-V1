@@ -1,13 +1,14 @@
-# Instant Grill storefront
+# Instant Grill
 
-Premium COD storefront for instantgrill.shop: Next.js 16, Tailwind 4, Motion, Postgres or file storage.
+Pakistan's first ready-to-grill BBQ box, Lahore. Next.js 16, Tailwind 4, Motion, Postgres or file storage.
 
-- `docs/AUDIT.md`: what was wrong with the old approach and the target spec
-- `docs/ARCHITECTURE.md`: ecosystem, code map, data model, how to run and deploy
-- `docs/IMAGE_BRIEF.md`: the photo set the site needs
-
-Before launch, replace every value marked `EDIT` in `src/lib/catalog.ts` (prices, WhatsApp number, claims).
+- `src/lib/catalog.ts`: menu, prices, contact, delivery areas (single source of truth)
+- `src/lib/delivery.ts`: delivery slot rules
+- `docs/AUDIT.md`: what was built, QA results and the [TO CONFIRM] list
+- `docs/ARCHITECTURE.md`: system map, code map, data model, run and deploy
+- `docs/IMAGE_BRIEF.md`: which photo goes where
 
 ```bash
 npm install && cp .env.example .env.local && npm run dev
+npm test && npm run typecheck && npm run lint && npm run build
 ```

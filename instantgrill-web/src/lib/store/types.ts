@@ -1,14 +1,24 @@
+import type { SlotChoice } from "../delivery";
 import type { PricedLine } from "../pricing";
 import type { CustomerInput } from "../validation";
 
 export const ORDER_STATUSES = [
-  "pending", // placed on the site, not yet confirmed with the customer
+  "new", // placed on the site, not yet confirmed with the customer
   "confirmed", // customer confirmed on call or WhatsApp
-  "shipped", // handed to courier
+  "preparing", // kitchen is marinating and packing
+  "out_for_delivery", // with the rider
   "delivered",
   "cancelled",
-  "returned", // refused at door / RTO
 ] as const;
+
+export const STATUS_LABEL: Record<(typeof ORDER_STATUSES)[number], string> = {
+  new: "New",
+  confirmed: "Confirmed",
+  preparing: "Preparing",
+  out_for_delivery: "Out for delivery",
+  delivered: "Delivered",
+  cancelled: "Cancelled",
+};
 
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
@@ -21,11 +31,12 @@ export type Order = {
   customer: CustomerInput;
   lines: PricedLine[];
   subtotal: number;
-  shipping: number;
+  /** null until the delivery fee is confirmed; then added by the team. */
+  deliveryFee: number | null;
   total: number;
+  slot: SlotChoice;
   paymentMethod: "cod";
-  trackingNumber?: string;
-  courier?: string;
+  rider?: string;
   history: StatusEvent[];
   source?: { utmSource?: string; utmCampaign?: string; referrer?: string };
 };
@@ -33,8 +44,7 @@ export type Order = {
 export type OrderUpdate = {
   status?: OrderStatus;
   note?: string;
-  trackingNumber?: string;
-  courier?: string;
+  rider?: string;
 };
 
 export interface OrderRepository {
@@ -46,12 +56,12 @@ export interface OrderRepository {
 
 /** Statuses an order may move to from each status. Keeps the admin honest. */
 export const TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  pending: ["confirmed", "cancelled"],
-  confirmed: ["shipped", "cancelled"],
-  shipped: ["delivered", "returned"],
+  new: ["confirmed", "cancelled"],
+  confirmed: ["preparing", "cancelled"],
+  preparing: ["out_for_delivery", "cancelled"],
+  out_for_delivery: ["delivered", "cancelled"],
   delivered: [],
   cancelled: [],
-  returned: [],
 };
 
 export function applyUpdate(order: Order, patch: OrderUpdate, now = new Date()): Order {
@@ -63,7 +73,6 @@ export function applyUpdate(order: Order, patch: OrderUpdate, now = new Date()):
     next.status = patch.status;
     next.history.push({ status: patch.status, at: now.toISOString(), note: patch.note });
   }
-  if (patch.trackingNumber !== undefined) next.trackingNumber = patch.trackingNumber || undefined;
-  if (patch.courier !== undefined) next.courier = patch.courier || undefined;
+  if (patch.rider !== undefined) next.rider = patch.rider || undefined;
   return next;
 }

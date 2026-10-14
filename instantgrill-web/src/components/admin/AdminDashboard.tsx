@@ -3,19 +3,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowClockwise, SignOut, WhatsappLogo } from "@phosphor-icons/react";
 import { formatPKR } from "@/lib/pricing";
-import { ORDER_STATUSES, TRANSITIONS, type Order, type OrderStatus } from "@/lib/store/types";
+import { describeSlot } from "@/lib/delivery";
+import { ORDER_STATUSES, STATUS_LABEL, TRANSITIONS, type Order, type OrderStatus } from "@/lib/store/types";
 import { toIntlPk } from "@/lib/validation";
 import { Button } from "../ui";
 
 const TOKEN_KEY = "ig.admin";
 
 const statusStyle: Record<OrderStatus, string> = {
-  pending: "bg-ember-500/15 text-ember-300",
+  new: "bg-ember-500/15 text-ember-300",
   confirmed: "bg-sky-400/15 text-sky-300",
-  shipped: "bg-violet-400/15 text-violet-300",
+  preparing: "bg-amber-400/15 text-amber-300",
+  out_for_delivery: "bg-violet-400/15 text-violet-300",
   delivered: "bg-ok/15 text-ok",
   cancelled: "bg-coal-700 text-ash-400",
-  returned: "bg-danger/15 text-danger",
 };
 
 const field =
@@ -27,6 +28,8 @@ export function AdminDashboard() {
   const [filter, setFilter] = useState<OrderStatus | "all">("all");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Lahore date of the last refresh, for the "due today" count.
+  const [today, setToday] = useState("");
 
   useEffect(() => {
     try {
@@ -50,6 +53,7 @@ export function AdminDashboard() {
     }
     const data = await res.json();
     setOrders(data.orders);
+    setToday(new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10));
   }, []);
 
   useEffect(() => {
@@ -74,14 +78,13 @@ export function AdminDashboard() {
   const stats = useMemo(() => {
     const list = orders ?? [];
     const count = (s: OrderStatus) => list.filter((o) => o.status === s).length;
-    const closed = count("delivered") + count("returned");
     return {
-      pending: count("pending"),
-      inTransit: count("confirmed") + count("shipped"),
+      toConfirm: count("new"),
+      inKitchen: count("confirmed") + count("preparing"),
+      dueToday: list.filter((o) => o.slot?.date === today && o.status !== "cancelled" && o.status !== "delivered").length,
       delivered: list.filter((o) => o.status === "delivered").reduce((s, o) => s + o.total, 0),
-      rto: closed ? Math.round((count("returned") / closed) * 100) : null,
     };
-  }, [orders]);
+  }, [orders, today]);
 
   if (!token) {
     return (
@@ -138,10 +141,10 @@ export function AdminDashboard() {
 
       <dl className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {[
-          ["To confirm", String(stats.pending)],
-          ["In transit", String(stats.inTransit)],
+          ["To confirm", String(stats.toConfirm)],
+          ["In kitchen", String(stats.inKitchen)],
+          ["Due today", String(stats.dueToday)],
           ["Delivered revenue", formatPKR(stats.delivered)],
-          ["Return rate", stats.rto === null ? "No data" : `${stats.rto}%`],
         ].map(([k, v]) => (
           <div key={k} className="rounded-[var(--radius-card)] bg-coal-900 p-5 ring-1 ring-white/[0.06]">
             <dt className="text-sm text-ash-400">{k}</dt>
@@ -157,11 +160,11 @@ export function AdminDashboard() {
             type="button"
             onClick={() => setFilter(s)}
             aria-pressed={filter === s}
-            className={`rounded-full px-4 py-1.5 text-sm capitalize ring-1 transition ${
+            className={`rounded-full px-4 py-1.5 text-sm ring-1 transition ${
               filter === s ? "bg-ember-500 text-coal-950 ring-ember-500" : "text-ash-300 ring-coal-600 hover:ring-ash-400"
             }`}
           >
-            {s}
+            {s === "all" ? "All" : STATUS_LABEL[s]}
           </button>
         ))}
       </div>
@@ -176,7 +179,7 @@ export function AdminDashboard() {
         </div>
       ) : visible.length === 0 ? (
         <p className="rounded-[var(--radius-card)] bg-coal-900 p-10 text-center text-ash-400">
-          No {filter === "all" ? "" : filter} orders yet. New orders from the site appear here.
+          No {filter === "all" ? "" : STATUS_LABEL[filter].toLowerCase()} orders yet. New orders from the site appear here.
         </p>
       ) : (
         <ul className="space-y-3">
@@ -186,24 +189,32 @@ export function AdminDashboard() {
                 <div>
                   <div className="flex items-center gap-3">
                     <span className="font-mono text-ash-50">{o.id}</span>
-                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${statusStyle[o.status]}`}>
-                      {o.status}
+                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${statusStyle[o.status]}`}>
+                      {STATUS_LABEL[o.status]}
                     </span>
                   </div>
                   <p className="mt-2 text-sm text-ash-100">
                     {o.customer.name}, {o.customer.phone}
                   </p>
                   <p className="mt-1 max-w-xl text-sm text-ash-400">
-                    {o.customer.address}, {o.customer.city}
+                    {o.customer.address}, {o.customer.area}
+                    {o.customer.landmark ? ` (near ${o.customer.landmark})` : ""}
                     {o.customer.notes ? `. Note: ${o.customer.notes}` : ""}
                   </p>
-                  <p className="mt-1 text-sm text-ash-400">
-                    {o.lines.map((l) => `${l.name} × ${l.qty}`).join(", ")}
-                    {o.source?.utmSource ? `. Source: ${o.source.utmSource}` : ""}
-                  </p>
+                  <p className="mt-1 text-sm font-medium text-ember-300">Deliver {describeSlot(o.slot)}</p>
+                  <ul className="mt-1 text-sm text-ash-300">
+                    {o.lines.map((l) => (
+                      <li key={`${l.slug}-${l.chutney}-${l.salad}`}>
+                        {l.qty} × {l.name}
+                        {l.chutney ? ` (${l.chutney}, ${l.salad} salad)` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                  {o.source?.utmSource && <p className="mt-1 text-xs text-ash-400">Source: {o.source.utmSource}</p>}
                 </div>
                 <div className="text-right">
                   <p className="font-mono text-lg text-ember-400">{formatPKR(o.total)}</p>
+                  {o.deliveryFee === null && <p className="text-xs text-ash-400">+ delivery</p>}
                   <p className="text-xs text-ash-400">{new Date(o.createdAt).toLocaleString("en-PK")}</p>
                 </div>
               </div>
@@ -222,25 +233,26 @@ export function AdminDashboard() {
                 {TRANSITIONS[o.status].map((next) => (
                   <Button
                     key={next}
-                    variant={next === "cancelled" || next === "returned" ? "ghost" : "primary"}
-                    className="h-10 capitalize"
+                    variant={next === "cancelled" ? "ghost" : "primary"}
+                    className="h-10"
                     disabled={busy === o.id}
-                    onClick={() => patch(o.id, { status: next })}
+                    onClick={() => {
+                      if (next === "cancelled" && !confirm(`Cancel ${o.id}?`)) return;
+                      patch(o.id, { status: next });
+                    }}
                   >
-                    Mark {next}
+                    {next === "cancelled" ? "Cancel" : `Mark ${STATUS_LABEL[next].toLowerCase()}`}
                   </Button>
                 ))}
-                {(o.status === "confirmed" || o.status === "shipped") && (
+                {(o.status === "preparing" || o.status === "out_for_delivery") && (
                   <form
                     className="flex flex-wrap gap-2"
                     onSubmit={(e) => {
                       e.preventDefault();
-                      const fd = new FormData(e.currentTarget);
-                      patch(o.id, { courier: String(fd.get("courier")), trackingNumber: String(fd.get("tn")) });
+                      patch(o.id, { rider: String(new FormData(e.currentTarget).get("rider")) });
                     }}
                   >
-                    <input name="courier" aria-label="Courier" placeholder="Courier" defaultValue={o.courier} className={`${field} w-32`} />
-                    <input name="tn" aria-label="Tracking number" placeholder="Tracking no." defaultValue={o.trackingNumber} className={`${field} w-40`} />
+                    <input name="rider" aria-label="Rider" placeholder="Rider name" defaultValue={o.rider} className={`${field} w-40`} />
                     <Button type="submit" variant="ghost" className="h-10" disabled={busy === o.id}>
                       Save
                     </Button>

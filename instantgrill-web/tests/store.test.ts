@@ -9,14 +9,15 @@ function order(id: string, createdAt = new Date().toISOString()): Order {
   return {
     id,
     createdAt,
-    status: "pending",
-    customer: { name: "Bilal Ahmed", phone: "03001234567", city: "Karachi", address: "Flat 3B, Block 7, Clifton" },
-    lines: [{ bundleId: "solo", name: "The Grill", unitPrice: 100, qty: 1, lineTotal: 100 }],
-    subtotal: 100,
-    shipping: 0,
-    total: 100,
+    status: "new",
+    customer: { name: "Bilal Ahmed", phone: "03001234567", area: "Gulberg", address: "House 3B, Block 7, Main Boulevard" },
+    lines: [{ slug: "chicken-tikka", name: "Chicken Tikka", unitPrice: 3000, qty: 1, lineTotal: 3000, chutney: "Imli", salad: "Fresh" }],
+    subtotal: 3000,
+    deliveryFee: null,
+    total: 3000,
+    slot: { date: "2026-10-15", slot: "morning" },
     paymentMethod: "cod",
-    history: [{ status: "pending", at: createdAt }],
+    history: [{ status: "new", at: createdAt }],
   };
 }
 
@@ -27,10 +28,12 @@ describe("applyUpdate", () => {
     expect(o.history.at(-1)).toMatchObject({ status: "confirmed", note: "called" });
   });
 
-  it("refuses to skip or reverse steps", () => {
+  it("walks the rider flow and refuses to skip or reverse steps", () => {
+    let o = order("IG-AAAAAA");
+    for (const s of ["confirmed", "preparing", "out_for_delivery", "delivered"] as const) o = applyUpdate(o, { status: s });
+    expect(o.history.map((h) => h.status)).toEqual(["new", "confirmed", "preparing", "out_for_delivery", "delivered"]);
     expect(() => applyUpdate(order("IG-AAAAAA"), { status: "delivered" })).toThrow();
-    const delivered = { ...order("IG-AAAAAA"), status: "delivered" as const };
-    expect(() => applyUpdate(delivered, { status: "pending" })).toThrow();
+    expect(() => applyUpdate(o, { status: "new" })).toThrow();
   });
 });
 

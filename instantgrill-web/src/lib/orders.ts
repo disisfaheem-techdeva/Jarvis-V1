@@ -1,5 +1,6 @@
 import "server-only";
 import { randomInt, timingSafeEqual } from "node:crypto";
+import type { SlotChoice } from "./delivery";
 import { quote } from "./pricing";
 import { orders, type Order } from "./store";
 import type { CartLine } from "./pricing";
@@ -17,6 +18,7 @@ export function newOrderId(): string {
 export async function placeOrder(input: {
   customer: CustomerInput;
   cart: CartLine[];
+  slot: SlotChoice;
   source?: Order["source"];
 }): Promise<Order> {
   const q = quote(input.cart);
@@ -24,14 +26,15 @@ export async function placeOrder(input: {
   const order: Order = {
     id: newOrderId(),
     createdAt: now,
-    status: "pending",
+    status: "new",
     customer: input.customer,
     lines: q.lines,
     subtotal: q.subtotal,
-    shipping: q.shipping,
+    deliveryFee: q.deliveryFee,
     total: q.total,
+    slot: input.slot,
     paymentMethod: "cod",
-    history: [{ status: "pending", at: now }],
+    history: [{ status: "new", at: now }],
     source: input.source,
   };
   await orders().create(order);
@@ -40,7 +43,7 @@ export async function placeOrder(input: {
 
 /**
  * Forwards a new order to ORDER_WEBHOOK_URL (Google Sheet script, WhatsApp
- * agent, Slack, courier booking...). Fire-and-forget: a slow or broken
+ * agent, Slack, owner email...). Fire-and-forget: a slow or broken
  * webhook must never fail a customer's checkout.
  */
 export function notifyNewOrder(order: Order): void {
@@ -57,7 +60,7 @@ export function notifyNewOrder(order: Order): void {
   }).catch((err) => console.error("order webhook failed", order.id, err));
 }
 
-/** Public view for the tracking page: no address, masked phone. */
+/** Public view for the confirmation and tracking pages: area only, masked phone. */
 export function publicOrder(o: Order) {
   return {
     id: o.id,
@@ -65,13 +68,12 @@ export function publicOrder(o: Order) {
     status: o.status,
     lines: o.lines,
     subtotal: o.subtotal,
-    shipping: o.shipping,
+    deliveryFee: o.deliveryFee,
     total: o.total,
-    city: o.customer.city,
+    slot: o.slot,
+    area: o.customer.area,
     firstName: o.customer.name.split(" ")[0],
     phoneMasked: o.customer.phone.slice(0, 4) + "*****" + o.customer.phone.slice(-2),
-    trackingNumber: o.trackingNumber,
-    courier: o.courier,
     history: o.history.map(({ status, at }) => ({ status, at })),
   };
 }

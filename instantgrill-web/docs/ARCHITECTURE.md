@@ -3,12 +3,14 @@
 ## Ecosystem
 
 ```
- Meta / TikTok / Google ads  ──utm──►  instantgrill.shop (Next.js 16)
+ Instagram / TikTok / Meta ads ──utm──► instantgrill.shop (Next.js 16)
                                          │
              ┌───────────────────────────┼─────────────────────────────┐
              │ Storefront (static)       │ API (route handlers)        │
              │  /            home        │  POST /api/orders           │
-             │  /checkout    COD form    │  GET  /api/orders/:id?phone │
+             │  /menu        tabs        │                             │
+             │  /menu/:slug  box builder │                             │
+             │  /checkout    COD + slot  │  GET  /api/orders/:id?phone │
              │  /order/:id   thank you   │  GET  /api/admin/orders     │
              │  /track       lookup      │  PATCH /api/admin/orders/:id│
              │  /admin       ops         │                             │
@@ -20,19 +22,19 @@
                                                         │
                        ORDER_WEBHOOK_URL ◄──────────────┘  order.created
                         ├─ Google Sheet (Apps Script)
-                        ├─ WhatsApp agent / team alert
-                        └─ courier booking (next step)
+                        └─ WhatsApp / email owner alert
 
- Customer ──wa.me──► WhatsApp: confirm order (cuts COD returns)
- Team     ──/admin─► confirm, ship (courier + tracking no.), deliver, return
+ Customer ──wa.me──► WhatsApp 0335 4693665: full order prefilled
+ Owner    ──/admin─► confirm, preparing, out for delivery (rider), delivered
 ```
 
 ## Code map
 
 | Path | Role |
 |---|---|
-| `src/lib/catalog.ts` | Single source of truth: prices, bundles, claims, FAQ, image slots. Edit `EDIT` values. |
-| `src/lib/pricing.ts` | Server-side cart pricing, free-delivery threshold |
+| `src/lib/catalog.ts` | Single source of truth: menu, prices, contact, delivery areas, FAQ, image slots |
+| `src/lib/delivery.ts` | Delivery slot rules (Asia/Karachi), shared by checkout and the API |
+| `src/lib/pricing.ts` | Server-side cart pricing with chutney/salad rules |
 | `src/lib/validation.ts` | Order validation, Pakistani mobile normalisation |
 | `src/lib/orders.ts` | Place order, public view, webhook, admin auth, rate limit |
 | `src/lib/store/*` | Repository interface, Postgres and file implementations, status rules |
@@ -44,14 +46,13 @@
 
 ## Data model
 
-`Order { id, createdAt, status, customer{name, phone, city, address, notes}, lines[], subtotal, shipping, total, paymentMethod: "cod", courier?, trackingNumber?, history[{status, at, note}], source{utmSource, utmCampaign, referrer} }`
+`Order { id, createdAt, status, customer{name, phone, area, address, landmark, notes}, lines[{slug, name, unitPrice, qty, chutney, salad}], subtotal, deliveryFee|null, total, slot{date, slot}, paymentMethod: "cod", rider?, history[{status, at, note}], source{utmSource, utmCampaign, referrer} }`
 
 Status flow:
 
 ```
-pending ─► confirmed ─► shipped ─► delivered
-   │           │            └────► returned (RTO)
-   └───────────┴─► cancelled
+new ─► confirmed ─► preparing ─► out_for_delivery ─► delivered
+ └──────────┴────────────┴────────────────┴─► cancelled
 ```
 
 ## Design system

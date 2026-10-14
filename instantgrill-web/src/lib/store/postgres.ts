@@ -11,9 +11,18 @@ export class PostgresOrderRepository implements OrderRepository {
 
   async create(order: Order) {
     await this.pool.query(
-      `INSERT INTO orders (id, created_at, status, phone, city, total, doc)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [order.id, order.createdAt, order.status, order.customer.phone, order.customer.city, order.total, order],
+      `INSERT INTO orders (id, created_at, status, phone, area, slot_date, total, doc)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        order.id,
+        order.createdAt,
+        order.status,
+        order.customer.phone,
+        order.customer.area,
+        order.slot.date,
+        order.total,
+        order,
+      ],
     );
   }
 

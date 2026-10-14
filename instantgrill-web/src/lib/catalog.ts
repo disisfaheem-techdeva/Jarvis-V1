@@ -1,224 +1,228 @@
 /**
- * Single source of truth for everything the store sells and claims.
- *
- * Every price, claim and image path on the site is read from here, and the
- * order API prices carts from here too, so the client can never set its own
- * price. Values marked EDIT are placeholders: replace them with the real
- * product facts before launch. Do not publish a claim the product cannot back.
+ * Single source of truth for the menu, prices, facts and image slots.
+ * Every page and the order API read from here; the server prices every order
+ * from this file, so the browser can never set its own price.
+ * Values marked [TO CONFIRM] are waiting on the owner.
  */
 
 export type ImageSlot = {
-  /** Path under /public, e.g. "/images/hero.webp". null renders a labelled placeholder. */
+  /** Path under /public, e.g. "/images/hero.webp". null renders a placeholder. */
   src: string | null;
   alt: string;
-  /** What the photo must show. Also used as the generation brief in docs/IMAGE_BRIEF.md. */
+  /** What the photo must show (see docs/IMAGE_BRIEF.md). */
   brief: string;
 };
 
-export type Bundle = {
-  id: string;
+export type Category = "chicken" | "beef" | "mutton" | "mix" | "family" | "deal" | "extra" | "drink";
+
+export type Product = {
+  slug: string;
   name: string;
-  /** One line under the name: what is in the box. */
-  contents: string;
-  /** Price in whole rupees. EDIT */
+  category: Category;
+  /** Whole rupees. */
   price: number;
-  /** Struck-through reference price, only if it is a real previous price. EDIT */
-  compareAt?: number;
-  highlight?: boolean;
+  pieces?: number;
+  serves?: number;
+  /** For mix, family and deal boxes: what is inside, by slug. Used for savings maths. */
+  contains?: string[];
+  description: string;
+  tags?: ("boneless" | "kabab" | "premium")[];
+  soldOut?: boolean;
+  image: ImageSlot;
 };
 
 export const brand = {
   name: "Instant Grill",
   domain: "instantgrill.shop",
-  tagline: "Charcoal flavour without the wait.",
-  /** International format, digits only, used for wa.me links. EDIT */
-  whatsapp: "923000000000",
-  email: "hello@instantgrill.shop",
+  positioning: "Pakistan's first ready-to-grill BBQ box",
+  whatsapp: "923354693665",
+  phoneDisplay: "0335 4693665",
+  email: "info@instantgrill.shop",
+  address: "Orange Square, Baghbanpura, near UET, Lahore",
+  instagram: "https://www.instagram.com/instant_grill.shop",
+  tiktok: "https://www.tiktok.com/@instantgrill.shop",
+  facebook: "https://www.facebook.com/search/top?q=Instant%20Grill", // [TO CONFIRM] exact Page URL
   currency: "PKR",
+  hoursDisplay: "Open daily 12 PM – 12 AM. Morning delivery 10 AM – 12 PM.",
 };
 
-export const shipping = {
-  /** Flat delivery fee in rupees. EDIT */
-  fee: 250,
-  /** Orders at or above this subtotal ship free. EDIT */
-  freeAbove: 10000,
-  /** Shown on product and checkout. EDIT */
-  eta: "2 to 5 working days across Pakistan",
-  replacementDays: 7,
+export const delivery = {
+  city: "Lahore",
+  /** Rupees, or null until confirmed. While null, checkout says the fee is confirmed on WhatsApp. [TO CONFIRM] */
+  fee: null as number | null,
+  /** [TO CONFIRM] the areas you actually deliver to. "Other" lets the team confirm by phone. */
+  areas: [
+    "Baghbanpura",
+    "Shalimar",
+    "Mughalpura",
+    "Harbanspura",
+    "Lahore Cantt",
+    "Gulberg",
+    "DHA",
+    "Model Town",
+    "Garden Town",
+    "Faisal Town",
+    "Johar Town",
+    "Allama Iqbal Town",
+    "Township",
+    "Wapda Town",
+    "Bahria Town",
+    "Valencia",
+    "Samanabad",
+    "Shadman",
+    "Walled City",
+    "Other (we will confirm)",
+  ],
 };
 
-export const product = {
-  slug: "instant-grill",
-  name: "Instant Grill",
-  summary:
-    "A compact charcoal grill built to get coals cooking-hot fast, then pack away into one carry case.",
-  bundles: [
-    {
-      id: "solo",
-      name: "The Grill",
-      contents: "Instant Grill, grate, ash tray, carry case",
-      price: 12999,
-    },
-    {
-      id: "cookout",
-      name: "Cookout Kit",
-      contents: "The Grill plus tongs, skewer set and heat gloves",
-      price: 15499,
-      compareAt: 16997,
-      highlight: true,
-    },
-    {
-      id: "family",
-      name: "Family Pack",
-      contents: "Two grills plus the full accessory kit",
-      price: 27999,
-      compareAt: 30997,
-    },
-  ] satisfies Bundle[],
-  maxQtyPerLine: 5,
-};
+export const BOX_INCLUDES = [
+  "~850 g marinated meat",
+  "Disposable grill + coal",
+  "Tong",
+  "4 pita breads",
+  "Hummus",
+  "Aloo Bukhara or Imli chutney",
+  "Fresh or Russian salad",
+];
+
+export const CHUTNEYS = ["Aloo Bukhara", "Imli"] as const;
+export const SALADS = ["Fresh", "Russian"] as const;
+export type Chutney = (typeof CHUTNEYS)[number];
+export type Salad = (typeof SALADS)[number];
+
+const img = (alt: string, brief: string): ImageSlot => ({ src: null, alt, brief });
+const boxImg = (name: string) =>
+  img(
+    `Open Instant Grill box with ${name} on the grill`,
+    `Open white Instant Grill box on dark surface, ${name} on the built-in grill, pita, hummus and salad tubs around it. Use the owner's real box photo. 4:3.`,
+  );
+
+const BOX_DESC = "Serves 2. About 850 g marinated meat with the grill, coal, tong, pita, hummus, chutney and salad.";
+
+export const products: Product[] = [
+  // Chicken
+  { slug: "chicken-tikka", name: "Chicken Tikka", category: "chicken", price: 3000, serves: 2, tags: ["boneless"], description: BOX_DESC, image: boxImg("chicken tikka") },
+  { slug: "chicken-kabab", name: "Chicken Kabab", category: "chicken", price: 3100, pieces: 6, serves: 2, tags: ["kabab"], description: BOX_DESC, image: boxImg("chicken kababs") },
+  { slug: "chicken-shashlik", name: "Chicken Shashlik", category: "chicken", price: 3200, serves: 2, tags: ["boneless"], description: BOX_DESC, image: boxImg("chicken shashlik skewers") },
+  { slug: "malai-boti", name: "Malai Boti", category: "chicken", price: 3300, serves: 2, tags: ["boneless"], description: BOX_DESC, image: boxImg("malai boti") },
+  // Beef
+  { slug: "beef-seekh-kabab", name: "Beef Seekh Kabab", category: "beef", price: 3500, serves: 2, tags: ["kabab"], description: BOX_DESC, image: boxImg("beef seekh kababs") },
+  { slug: "beef-bihari-boti", name: "Beef Bihari Boti", category: "beef", price: 3800, serves: 2, tags: ["boneless"], description: BOX_DESC, image: boxImg("beef bihari boti") },
+  { slug: "rib-eye-tikka", name: "Rib Eye Tikka", category: "beef", price: 3900, serves: 2, tags: ["boneless", "premium"], description: BOX_DESC, image: boxImg("rib eye tikka") },
+  // Mutton
+  { slug: "mutton-seekh-kabab", name: "Mutton Seekh Kabab", category: "mutton", price: 4200, serves: 2, tags: ["kabab"], description: BOX_DESC, image: boxImg("mutton seekh kababs") },
+  { slug: "reshmi-boti", name: "Mutton Reshmi Boti", category: "mutton", price: 4800, serves: 2, tags: ["boneless", "premium"], description: BOX_DESC, image: boxImg("mutton reshmi boti") },
+  { slug: "namkeen-boti", name: "Mutton Namkeen Boti", category: "mutton", price: 4800, serves: 2, tags: ["premium"], description: BOX_DESC, image: boxImg("mutton namkeen boti") },
+  { slug: "mutton-champ", name: "Mutton Champ", category: "mutton", price: 4800, pieces: 6, serves: 2, tags: ["premium"], description: BOX_DESC, image: boxImg("mutton champ") },
+  // Mix (half/half)
+  { slug: "mix-malai-tikka", name: "Malai Boti + Chicken Tikka", category: "mix", price: 3150, serves: 2, contains: ["malai-boti", "chicken-tikka"], description: "Half and half. " + BOX_DESC, image: boxImg("malai boti and chicken tikka") },
+  { slug: "mix-tikka-beef-seekh", name: "Chicken Tikka + Beef Seekh", category: "mix", price: 3250, serves: 2, contains: ["chicken-tikka", "beef-seekh-kabab"], description: "Half and half. " + BOX_DESC, image: boxImg("chicken tikka and beef seekh") },
+  { slug: "mix-beef-seekh-bihari", name: "Beef Seekh + Bihari Boti", category: "mix", price: 3650, serves: 2, contains: ["beef-seekh-kabab", "beef-bihari-boti"], description: "Half and half. " + BOX_DESC, image: boxImg("beef seekh and bihari boti") },
+  { slug: "mix-malai-mutton-seekh", name: "Malai Boti + Mutton Seekh", category: "mix", price: 3750, serves: 2, contains: ["malai-boti", "mutton-seekh-kabab"], description: "Half and half. " + BOX_DESC, image: boxImg("malai boti and mutton seekh") },
+  { slug: "mix-mutton-seekh-namkeen", name: "Mutton Seekh + Namkeen Boti", category: "mix", price: 4500, serves: 2, contains: ["mutton-seekh-kabab", "namkeen-boti"], description: "Half and half. " + BOX_DESC, image: boxImg("mutton seekh and namkeen boti") },
+  { slug: "trio-mix", name: "Trio Mix", category: "mix", price: 3600, serves: 2, contains: ["chicken-tikka", "beef-seekh-kabab", "mutton-seekh-kabab"], description: "Chicken Tikka, Beef Seekh and Mutton Seekh. " + BOX_DESC, image: boxImg("chicken tikka, beef seekh and mutton seekh") },
+  // Family (2 boxes, serves 4)
+  { slug: "family-chicken", name: "Family Chicken", category: "family", price: 6000, serves: 4, contains: ["chicken-tikka", "malai-boti"], description: "Two boxes: Chicken Tikka and Malai Boti. Serves 4.", image: boxImg("two boxes of chicken tikka and malai boti") },
+  { slug: "family-chicken-beef", name: "Family Chicken + Beef", category: "family", price: 6200, serves: 4, description: "Two boxes, one chicken and one beef. Serves 4.", image: boxImg("a chicken box and a beef box") },
+  { slug: "family-beef", name: "Family Beef", category: "family", price: 6900, serves: 4, contains: ["beef-seekh-kabab", "beef-bihari-boti"], description: "Two boxes: Beef Seekh and Bihari Boti. Serves 4.", image: boxImg("two boxes of beef seekh and bihari boti") },
+  { slug: "family-chicken-mutton", name: "Family Chicken + Mutton", category: "family", price: 7100, serves: 4, description: "Two boxes, one chicken and one mutton. Serves 4.", image: boxImg("a chicken box and a mutton box") },
+  { slug: "family-mutton", name: "Family Mutton", category: "family", price: 8500, serves: 4, contains: ["mutton-seekh-kabab", "reshmi-boti"], description: "Two boxes: Mutton Seekh and Reshmi Boti. Serves 4.", image: boxImg("two boxes of mutton seekh and reshmi boti") },
+  // Deals
+  { slug: "dawat-deal", name: "Dawat Deal", category: "deal", price: 10000, serves: 6, contains: ["chicken-tikka", "beef-seekh-kabab", "mutton-seekh-kabab"], description: "Three boxes: Chicken Tikka, Beef Seekh and Mutton Seekh. Serves 6.", image: boxImg("three boxes laid out for a dawat") },
+  { slug: "party-deal", name: "Party Deal", category: "deal", price: 12500, serves: 8, contains: ["chicken-tikka", "chicken-tikka", "beef-seekh-kabab", "mutton-seekh-kabab"], description: "Four boxes: 2 Chicken Tikka, Beef Seekh and Mutton Seekh. Serves 8.", image: boxImg("four boxes on a rooftop table for a party") },
+  // Extras
+  { slug: "extra-chicken-skewer", name: "Extra Chicken Skewer", category: "extra", price: 550, description: "One extra marinated chicken skewer.", image: img("Marinated chicken skewer", "Single raw marinated chicken skewer on dark slate. 1:1.") },
+  { slug: "extra-beef-skewer", name: "Extra Beef Skewer", category: "extra", price: 650, description: "One extra marinated beef skewer.", image: img("Marinated beef skewer", "Single raw marinated beef skewer on dark slate. 1:1.") },
+  { slug: "extra-mutton-skewer", name: "Extra Mutton Skewer", category: "extra", price: 800, description: "One extra marinated mutton skewer.", image: img("Marinated mutton skewer", "Single raw marinated mutton skewer on dark slate. 1:1.") },
+  // Drinks [TO CONFIRM] brands/flavours
+  { slug: "drink-375", name: "Soft Drink 375 ml", category: "drink", price: 100, description: "Chilled soft drink.", image: img("Soft drink can", "Chilled soft drink, 375 ml. 1:1.") },
+  { slug: "drink-500", name: "Soft Drink 500 ml", category: "drink", price: 150, description: "Chilled soft drink.", image: img("Soft drink bottle 500 ml", "Chilled soft drink, 500 ml. 1:1.") },
+  { slug: "drink-1l", name: "Soft Drink 1 L", category: "drink", price: 200, description: "Chilled soft drink.", image: img("Soft drink bottle 1 litre", "Chilled soft drink, 1 litre. 1:1.") },
+  { slug: "drink-1-5l", name: "Soft Drink 1.5 L", category: "drink", price: 250, description: "Chilled soft drink.", image: img("Soft drink bottle 1.5 litre", "Chilled soft drink, 1.5 litre. 1:1.") },
+];
+
+export const CATEGORIES: { id: Category; label: string }[] = [
+  { id: "chicken", label: "Chicken" },
+  { id: "beef", label: "Beef" },
+  { id: "mutton", label: "Mutton" },
+  { id: "mix", label: "Mix Boxes" },
+  { id: "family", label: "Family" },
+  { id: "deal", label: "Deals" },
+  { id: "extra", label: "Extras" },
+  { id: "drink", label: "Drinks" },
+];
+
+/** Boxes come with a chutney and salad choice; extras and drinks do not. */
+export function isBox(p: Product): boolean {
+  return p.category !== "extra" && p.category !== "drink";
+}
+
+export function findProduct(slug: string): Product | undefined {
+  return products.find((p) => p.slug === slug);
+}
+
+/** Saving versus buying the contained boxes separately. null when contents are not fixed. */
+export function savingFor(p: Product): number | null {
+  if (!p.contains) return null;
+  const separate = p.contains.reduce((s, slug) => s + (findProduct(slug)?.price ?? 0), 0);
+  // Half/half mix boxes are one box, not two, so "separately" does not apply.
+  if (p.category === "mix") return null;
+  return separate > p.price ? separate - p.price : null;
+}
+
+export const BESTSELLERS = ["chicken-tikka", "malai-boti", "beef-bihari-boti", "trio-mix"];
 
 export const images = {
-  hero: {
-    src: null,
-    alt: "Instant Grill with glowing coals and skewers on a rooftop at dusk",
-    brief:
-      "Hero product shot. Instant Grill three-quarter view, lid off, coals glowing orange, seekh kebabs on the grate, faint smoke. Rooftop at blue-hour dusk, Lahore skyline soft in background. Dark, cinematic, warm rim light from the coals. 4:5 portrait, product fills 60% of frame.",
-  },
-  fastStart: {
-    src: null,
-    alt: "Coals catching inside the grill's chimney chamber",
-    brief:
-      "Macro close-up looking down into the grill: charcoal catching, bright orange edges, sparks lifting. Black background. 16:10 landscape.",
-  },
-  portable: {
-    src: null,
-    alt: "Instant Grill packed in its carry case in a car boot",
-    brief:
-      "Grill packed in its carry case sitting in an open car boot next to a cooler, mountain road in soft focus (Murree or Naran feel). Golden hour. 4:5 portrait.",
-  },
-  clean: {
-    src: null,
-    alt: "Hand sliding out the ash tray after cooking",
-    brief:
-      "Close-up of a hand sliding out the ash tray from under the grill, ash contained, clean stone counter. Even soft light, dark tones. 1:1 square.",
-  },
-  family: {
-    src: null,
-    alt: "Family gathered around the grill on a terrace",
-    brief:
-      "Pakistani family of four around the grill on a home terrace at night, string lights, tikka on the grate, candid laughter, faces partly turned. Warm, documentary feel. 16:9 landscape.",
-  },
-  build: {
-    src: null,
-    alt: "Detail of the grill's steel body and vents",
-    brief:
-      "Studio detail of the steel body and air vents, raking side light showing the finish, charcoal-black seamless backdrop. 1:1 square.",
-  },
-  howLoad: {
-    src: null,
-    alt: "Charcoal being poured into the grill",
-    brief: "Top-down: charcoal being poured into the empty grill. Dark slate surface. 4:3.",
-  },
-  howLight: {
-    src: null,
-    alt: "Flame lit at the base of the grill",
-    brief: "Low angle: a match lighting the starter at the base vent, first flames. 4:3.",
-  },
-  howGrill: {
-    src: null,
-    alt: "Chicken tikka sizzling on the grate",
-    brief: "Close-up: chicken tikka sizzling on the grate, char marks, light smoke. 4:3.",
-  },
+  hero: img(
+    "Open Instant Grill box with skewers on the built-in grill and glowing coals",
+    "HERO: the owner's real open-box photo. White Instant Grill box on dark background, skewers on the grill, coals glowing, pita and sides around. 4:5.",
+  ),
+  everything: img(
+    "Everything that comes in an Instant Grill box laid out",
+    "Flat lay on dark surface: box, disposable grill, coal, tong, marinated meat, 4 pita, hummus, chutney, salad. Real photo. 16:10.",
+  ),
+  rooftop: img("Friends grilling an Instant Grill box on a Lahore rooftop", "Rooftop at dusk, box on a ledge, skewers on the grill, string lights. 4:5."),
+  noMess: img("Hands lifting the disposable grill out of the box after cooking", "Close-up: cooked skewers, the disposable grill tray, a clean table. 1:1."),
+  fresh: img("Marinated meat inside the box before grilling", "Close-up of marinated tikka in its tray inside the box. 1:1."),
+  dawat: img("Family dawat with several Instant Grill boxes on a terrace", "Night terrace, family around 3 boxes, warm light. 16:9."),
+  stepOrder: img("Ordering an Instant Grill box on a phone", "Hand holding a phone showing WhatsApp chat with Instant Grill. 4:3."),
+  stepDeliver: img("Rider handing over a sealed Instant Grill box", "Sealed white box being handed over at a door. 4:3."),
+  stepLight: img("Lighting the coal in the box's disposable grill", "Match lighting the coal in the grill tray, first flames. 4:3."),
+  stepGrill: img("Skewers sizzling on the Instant Grill", "Close-up of tikka and seekh sizzling on the grill, light smoke. 4:3."),
 } satisfies Record<string, ImageSlot>;
 
-/**
- * Why Instant Grill. Five reasons, five bento cells (see WhyBento).
- * Keep claims that the product can prove. EDIT the copy to the real specs.
- */
 export const reasons = [
-  {
-    key: "fast",
-    title: "Coals ready in minutes, not an hour",
-    body: "A chimney-style airflow pulls air through the charcoal so it lights evenly and gets hot quickly.",
-    image: "fastStart",
-  },
-  {
-    key: "portable",
-    title: "Packs into one case",
-    body: "Rooftop, lawn, picnic or the Naran trip. It travels in the boot and sets up in a minute.",
-    image: "portable",
-  },
-  {
-    key: "clean",
-    title: "Ash stays in the tray",
-    body: "Slide the tray out, empty it, done. No ash on the floor.",
-    image: "clean",
-  },
-  {
-    key: "flavour",
-    title: "Real charcoal taste",
-    body: "Gas and electric grills can't give you that smoky tikka and seekh flavour. Charcoal can.",
-    image: "family",
-  },
-  {
-    key: "build",
-    title: "Built to last for years",
-    body: "Heavy steel body and a grate that won't warp. Backed by a replacement guarantee.",
-    image: "build",
-  },
+  { key: "everything", title: "Everything in one box", body: "Grill, coal, tong, marinated meat, pita, hummus, chutney and salad. Nothing to buy, nothing to prep.", image: "everything" },
+  { key: "anywhere", title: "BBQ anywhere", body: "Rooftop, lawn, farmhouse, cricket night or a camping trip. Open the box and light it.", image: "rooftop" },
+  { key: "fresh", title: "Marinated fresh", body: "Marinated fresh every day in our Baghbanpura kitchen.", image: "fresh" },
+  { key: "nomess", title: "No mess after", body: "The grill is disposable. Let the coals cool, then throw it away.", image: "noMess" },
+  { key: "dawat", title: "Made for sharing", body: "One box serves 2. Family boxes, Dawat and Party deals feed 4 to 8.", image: "dawat" },
 ] as const;
 
 export const steps = [
-  { title: "Load", body: "Fill the chamber with charcoal. No pyramid building.", image: "howLoad" },
-  { title: "Light", body: "Light the base. The airflow does the rest while you prep.", image: "howLight" },
-  { title: "Grill", body: "Grate on, food on. Tikka, seekh, corn, burgers.", image: "howGrill" },
+  { title: "Order", body: "Pick your box on the site or on WhatsApp. Pay cash on delivery.", image: "stepOrder" },
+  { title: "Delivered in the box", body: "Our rider brings it within 6 hours, or in the morning slot.", image: "stepDeliver" },
+  { title: "Light the coal", body: "Light it and wait about 10 minutes until the coals glow.", image: "stepLight" },
+  { title: "Grill and eat", body: "Skewers on, turn with the tong, serve with pita and sides.", image: "stepGrill" },
 ] as const;
 
-export const comparison = {
-  us: [
-    "Coals ready while you marinate",
-    "Ash contained in a tray",
-    "Fits in the car boot",
-    "Real charcoal flavour",
-  ],
-  them: [
-    "Fanning coals for 30 minutes or more",
-    "Ash and embers on the floor",
-    "Heavy and stays in one place",
-    "Gas and electric taste flat",
-  ],
-};
-
-export const faqs = [
-  {
-    q: "Can I pay cash on delivery?",
-    a: "Yes. Cash on delivery is available across Pakistan. We call or WhatsApp to confirm your order before dispatch.",
-  },
-  {
-    q: "How long does delivery take?",
-    a: `Usually ${shipping.eta}. You get a tracking number on WhatsApp once it ships.`,
-  },
-  {
-    q: "What if it arrives damaged?",
-    a: `Send us a photo on WhatsApp within ${shipping.replacementDays} days and we replace it.`,
-  },
-  {
-    q: "What fuel does it use?",
-    a: "Regular lump charcoal or briquettes from any store.",
-  },
-  {
-    q: "Can I use it indoors?",
-    a: "No. Like every charcoal grill, use it outdoors or in an open, well-ventilated space only.",
-  },
+export const grillGuide = [
+  "Place the box on a flat, heat-safe surface outdoors or in the open air.",
+  "Light the coal and wait about 10 minutes until it glows and stops flaming.",
+  "Put the skewers on and turn them with the tong until cooked through.",
+  "Let the coals cool completely before you throw the grill away.",
 ];
 
-/**
- * Real customer reviews only. The reviews section stays hidden while this is
- * empty, so the site never shows invented testimonials.
- */
-export const reviews: { name: string; city: string; text: string; rating: number }[] = [];
+export const faqs = [
+  { q: "What's in the box?", a: `${BOX_INCLUDES.join(", ")}. One box serves 2.` },
+  { q: "How fast is delivery?", a: "We deliver within 6 hours of your order. Orders placed late evening or after midnight are delivered the next morning between 10 AM and 12 PM." },
+  { q: "Where do you deliver?", a: "Across Lahore by our own riders. Pick your area at checkout; if it is not listed, choose Other and we will confirm." },
+  { q: "Can I use it indoors?", a: "No. Use it outdoors or in the open air only, away from children, and let the coals cool before disposal." },
+  { q: "How do I store it if I am not grilling right away?", a: "Keep it in the fridge and grill it the same day." },
+  { q: "How do I pay?", a: "Cash on delivery. JazzCash and Easypaisa are coming soon." },
+  { q: "Can I change or cancel my order?", a: `Message us on WhatsApp at ${brand.phoneDisplay} with your order number before it is out for delivery.` },
+  { q: "Do you do bulk or event orders?", a: "Yes. The Dawat Deal serves 6 and the Party Deal serves 8. For bigger events, message us on WhatsApp." },
+];
 
-export function findBundle(id: string): Bundle | undefined {
-  return product.bundles.find((b) => b.id === id);
-}
+/** Real customer reviews only. The section stays hidden while this is empty. */
+export const reviews: { name: string; area: string; text: string; rating: number }[] = [];

@@ -19,7 +19,7 @@ export function HowItWorks() {
     <section id="how" className="scroll-mt-16 border-t border-white/[0.06] bg-coal-900 py-24 md:py-32">
       <Container>
         <h2 className="text-4xl font-semibold tracking-[-0.03em] text-ash-50 md:text-5xl">
-          From bag of coal to dinner
+          How it works
         </h2>
 
         <div className="mt-14 grid gap-12 md:grid-cols-2 md:gap-16">
@@ -58,7 +58,7 @@ export function HowItWorks() {
                 key={s.title}
                 onViewportEnter={() => setActive(i)}
                 viewport={{ amount: 0.6 }}
-                className="flex flex-col justify-center md:min-h-[70vh]"
+                className="flex flex-col justify-center md:min-h-[60vh]"
               >
                 <MotionImage
                   slot={images[s.image]}

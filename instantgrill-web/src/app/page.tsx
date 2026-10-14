@@ -1,33 +1,37 @@
 import { Hero } from "@/components/home/Hero";
 import { TrustStrip } from "@/components/home/TrustStrip";
 import { WhyBento } from "@/components/home/WhyBento";
+import { Bestsellers } from "@/components/home/Bestsellers";
 import { HowItWorks } from "@/components/home/HowItWorks";
-import { Compare } from "@/components/home/Compare";
-import { BuyBox } from "@/components/home/BuyBox";
+import { InEveryBox } from "@/components/home/InEveryBox";
+import { DealsStrip } from "@/components/home/DealsStrip";
 import { Reviews } from "@/components/home/Reviews";
 import { Faq } from "@/components/home/Faq";
 import { FinalCta } from "@/components/home/FinalCta";
 import { MobileBuyBar } from "@/components/home/MobileBuyBar";
-import { brand, faqs, product } from "@/lib/catalog";
+import { brand, faqs } from "@/lib/catalog";
 
 function structuredData() {
   const url = `https://${brand.domain}`;
   return [
     {
       "@context": "https://schema.org",
-      "@type": "Product",
-      name: product.name,
-      description: product.summary,
-      brand: { "@type": "Brand", name: brand.name },
+      "@type": "Restaurant",
+      name: brand.name,
+      description: brand.positioning,
       url,
-      offers: product.bundles.map((b) => ({
-        "@type": "Offer",
-        name: b.name,
-        price: b.price,
-        priceCurrency: brand.currency,
-        availability: "https://schema.org/InStock",
-        url: `${url}/#shop`,
-      })),
+      telephone: "+" + brand.whatsapp,
+      email: brand.email,
+      servesCuisine: "BBQ",
+      priceRange: "Rs 3000-12500",
+      address: {
+        "@type": "PostalAddress",
+        streetAddress: "Orange Square, Baghbanpura, near UET",
+        addressLocality: "Lahore",
+        addressCountry: "PK",
+      },
+      openingHours: "Mo-Su 12:00-24:00",
+      sameAs: [brand.instagram, brand.tiktok],
     },
     {
       "@context": "https://schema.org",
@@ -52,9 +56,10 @@ export default function Home() {
       <Hero />
       <TrustStrip />
       <WhyBento />
+      <Bestsellers />
       <HowItWorks />
-      <Compare />
-      <BuyBox />
+      <InEveryBox />
+      <DealsStrip />
       <Reviews />
       <Faq />
       <FinalCta />

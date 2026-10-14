@@ -2,10 +2,11 @@
 
 import { useRef } from "react";
 import { motion, useReducedMotion, useScroll, useTransform } from "motion/react";
-import { ArrowDown } from "@phosphor-icons/react";
-import { images } from "@/lib/catalog";
+import { WhatsappLogo } from "@phosphor-icons/react";
+import { brand, images } from "@/lib/catalog";
 import { MotionImage } from "../MotionImage";
-import { ButtonLink, Container } from "../ui";
+import { ButtonLink, Container, buttonClass } from "../ui";
+import { whatsappLink } from "../WhatsAppFab";
 
 const ease = [0.16, 1, 0.3, 1] as const;
 
@@ -28,25 +29,30 @@ export function Hero() {
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[70%] bg-[radial-gradient(50%_60%_at_75%_80%,rgb(242_101_42/0.18),transparent_70%)]" />
       <Container className="relative grid min-h-[calc(100dvh-4rem)] items-center gap-10 py-12 md:grid-cols-[1.05fr_1fr] md:py-16 lg:gap-16">
         <div className="max-w-xl">
-          <motion.p {...enter(0)} className="text-sm font-medium text-ember-300">
-            Cash on delivery across Pakistan
+          <motion.p {...enter(0)} className="text-sm font-semibold uppercase tracking-[0.14em] text-ember-300">
+            Pakistan&apos;s first
           </motion.p>
           <motion.h1
             {...enter(0.08)}
             className="mt-5 text-5xl font-semibold leading-[1.02] tracking-[-0.035em] text-ash-50 sm:text-6xl lg:text-7xl"
           >
-            Charcoal flavour. <span className="text-ash-400">Without the wait.</span>
+            Ready-to-Grill <span className="text-ash-400">BBQ Box</span>
           </motion.h1>
           <motion.p {...enter(0.16)} className="mt-6 max-w-md text-lg leading-relaxed text-ash-300">
-            A portable charcoal grill that gets coals hot fast, so tikka night starts when you are hungry.
+            Grill, coal, marinated meat, pita and sides in one box. Delivered across Lahore.
           </motion.p>
           <motion.div {...enter(0.24)} className="mt-9 flex flex-wrap gap-3">
-            <ButtonLink href="#shop" size="lg">
-              Order now
+            <ButtonLink href="/menu" size="lg">
+              Build your box
             </ButtonLink>
-            <ButtonLink href="#how" size="lg" variant="ghost">
-              How it works <ArrowDown size={16} />
-            </ButtonLink>
+            <a
+              href={whatsappLink(`Assalam o Alaikum ${brand.name}, I want to order a BBQ box.`)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={buttonClass("ghost", "lg")}
+            >
+              <WhatsappLogo size={18} weight="fill" className="text-[#25d366]" /> Order on WhatsApp
+            </a>
           </motion.div>
         </div>
 

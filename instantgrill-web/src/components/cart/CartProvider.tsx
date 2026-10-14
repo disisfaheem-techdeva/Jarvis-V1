@@ -1,39 +1,38 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer } from "react";
-import { findBundle, product, shipping } from "@/lib/catalog";
-import type { CartLine } from "@/lib/pricing";
+import { delivery, findProduct } from "@/lib/catalog";
+import { MAX_QTY_PER_LINE, lineKey, type CartLine } from "@/lib/pricing";
 
 type State = { lines: CartLine[]; open: boolean; hydrated: boolean };
 type Action =
   | { type: "hydrate"; lines: CartLine[] }
-  | { type: "add"; bundleId: string; qty: number }
-  | { type: "set"; bundleId: string; qty: number }
-  | { type: "remove"; bundleId: string }
+  | { type: "add"; line: CartLine; open: boolean }
+  | { type: "set"; key: string; qty: number }
+  | { type: "remove"; key: string }
   | { type: "clear" }
   | { type: "open"; open: boolean };
 
-const STORAGE_KEY = "ig.cart.v1";
+const STORAGE_KEY = "ig.cart.v2";
 
-function clampQty(n: number) {
-  return Math.max(1, Math.min(product.maxQtyPerLine, Math.floor(n) || 1));
-}
+const clampQty = (n: number) => Math.max(1, Math.min(MAX_QTY_PER_LINE, Math.floor(n) || 1));
 
 function reducer(state: State, a: Action): State {
   switch (a.type) {
     case "hydrate":
       return { ...state, lines: a.lines, hydrated: true };
     case "add": {
-      const existing = state.lines.find((l) => l.bundleId === a.bundleId);
+      const key = lineKey(a.line);
+      const existing = state.lines.find((l) => lineKey(l) === key);
       const lines = existing
-        ? state.lines.map((l) => (l.bundleId === a.bundleId ? { ...l, qty: clampQty(l.qty + a.qty) } : l))
-        : [...state.lines, { bundleId: a.bundleId, qty: clampQty(a.qty) }];
-      return { ...state, lines, open: true };
+        ? state.lines.map((l) => (lineKey(l) === key ? { ...l, qty: clampQty(l.qty + a.line.qty) } : l))
+        : [...state.lines, { ...a.line, qty: clampQty(a.line.qty) }];
+      return { ...state, lines, open: a.open || state.open };
     }
     case "set":
-      return { ...state, lines: state.lines.map((l) => (l.bundleId === a.bundleId ? { ...l, qty: clampQty(a.qty) } : l)) };
+      return { ...state, lines: state.lines.map((l) => (lineKey(l) === a.key ? { ...l, qty: clampQty(a.qty) } : l)) };
     case "remove":
-      return { ...state, lines: state.lines.filter((l) => l.bundleId !== a.bundleId) };
+      return { ...state, lines: state.lines.filter((l) => lineKey(l) !== a.key) };
     case "clear":
       return { ...state, lines: [] };
     case "open":
@@ -48,11 +47,11 @@ type CartContext = {
   count: number;
   /** Display estimate only. The server re-prices every order from the catalog. */
   subtotal: number;
-  shippingFee: number;
+  deliveryFee: number | null;
   total: number;
-  add: (bundleId: string, qty?: number) => void;
-  setQty: (bundleId: string, qty: number) => void;
-  remove: (bundleId: string) => void;
+  add: (line: CartLine, opts?: { open?: boolean }) => void;
+  setQty: (key: string, qty: number) => void;
+  remove: (key: string) => void;
   clear: () => void;
   setOpen: (open: boolean) => void;
 };
@@ -69,7 +68,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       const parsed = raw ? (JSON.parse(raw) as CartLine[]) : [];
-      if (Array.isArray(parsed)) saved = parsed.filter((l) => findBundle(l.bundleId) && l.qty > 0);
+      if (Array.isArray(parsed)) saved = parsed.filter((l) => findProduct(l?.slug) && l.qty > 0);
     } catch {
       /* start with an empty cart */
     }
@@ -101,23 +100,25 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state.lines, hydrated]);
 
-  const add = useCallback((bundleId: string, qty = 1) => dispatch({ type: "add", bundleId, qty }), []);
-  const setQty = useCallback((bundleId: string, qty: number) => dispatch({ type: "set", bundleId, qty }), []);
-  const remove = useCallback((bundleId: string) => dispatch({ type: "remove", bundleId }), []);
+  const add = useCallback(
+    (line: CartLine, opts?: { open?: boolean }) => dispatch({ type: "add", line, open: opts?.open ?? true }),
+    [],
+  );
+  const setQty = useCallback((key: string, qty: number) => dispatch({ type: "set", key, qty }), []);
+  const remove = useCallback((key: string) => dispatch({ type: "remove", key }), []);
   const clear = useCallback(() => dispatch({ type: "clear" }), []);
   const setOpen = useCallback((open: boolean) => dispatch({ type: "open", open }), []);
 
   const value = useMemo<CartContext>(() => {
-    const subtotal = state.lines.reduce((s, l) => s + (findBundle(l.bundleId)?.price ?? 0) * l.qty, 0);
-    const shippingFee = subtotal === 0 || subtotal >= shipping.freeAbove ? 0 : shipping.fee;
+    const subtotal = state.lines.reduce((s, l) => s + (findProduct(l.slug)?.price ?? 0) * l.qty, 0);
     return {
       lines: state.lines,
       open: state.open,
       hydrated,
       count: state.lines.reduce((s, l) => s + l.qty, 0),
       subtotal,
-      shippingFee,
-      total: subtotal + shippingFee,
+      deliveryFee: delivery.fee,
+      total: subtotal + (delivery.fee ?? 0),
       add,
       setQty,
       remove,

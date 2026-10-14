@@ -5,20 +5,20 @@ import { Container } from "../ui";
 
 /**
  * Five reasons, five cells (no empty tiles). Desktop grid, 6 columns:
- *   row 1   [ fast ............ ][ portable ]
- *   row 2   [ clean ][ build   ][ portable ]
- *   row 3   [ flavour, full-width cinematic ]
+ *   row 1   [ everything ...... ][ anywhere ]
+ *   row 2   [ fresh ][ no mess ][ anywhere ]
+ *   row 3   [ dawat, full-width cinematic   ]
  * Mobile: single column in reading order.
  */
 const layout: Record<string, { cell: string; media: string }> = {
-  fast: { cell: "md:col-span-4", media: "aspect-[16/10] md:aspect-auto md:min-h-[340px]" },
-  portable: { cell: "md:col-span-2 md:row-span-2", media: "aspect-[4/5] md:aspect-auto md:h-full" },
-  clean: { cell: "md:col-span-2", media: "aspect-square md:aspect-auto md:min-h-[300px]" },
-  build: { cell: "md:col-span-2", media: "aspect-square md:aspect-auto md:min-h-[300px]" },
-  flavour: { cell: "md:col-span-6", media: "aspect-[4/3] md:aspect-[21/8]" },
+  everything: { cell: "md:col-span-4", media: "aspect-[16/10] md:aspect-auto md:min-h-[340px]" },
+  anywhere: { cell: "md:col-span-2 md:row-span-2", media: "aspect-[4/5] md:aspect-auto md:h-full" },
+  fresh: { cell: "md:col-span-2", media: "aspect-square md:aspect-auto md:min-h-[300px]" },
+  nomess: { cell: "md:col-span-2", media: "aspect-square md:aspect-auto md:min-h-[300px]" },
+  dawat: { cell: "md:col-span-6", media: "aspect-[4/3] md:aspect-[21/8]" },
 };
 
-const order = ["fast", "portable", "clean", "build", "flavour"];
+const order = ["everything", "anywhere", "fresh", "nomess", "dawat"];
 
 export function WhyBento() {
   const byKey = Object.fromEntries(reasons.map((r) => [r.key, r]));
@@ -30,7 +30,7 @@ export function WhyBento() {
             Why Instant Grill?
           </h2>
           <p className="mt-4 max-w-[52ch] text-lg leading-relaxed text-ash-300">
-            Everything annoying about a charcoal BBQ, fixed. The flavour stays.
+            A full BBQ for two, with nothing to buy, prep or clean up.
           </p>
         </Reveal>
 
@@ -38,7 +38,7 @@ export function WhyBento() {
           {order.map((key, i) => {
             const r = byKey[key];
             const l = layout[key];
-            const wide = key === "flavour" || key === "fast";
+            const wide = key === "dawat" || key === "everything";
             return (
               <Reveal key={key} delay={i * 0.06} className={l.cell}>
                 <article className="group relative h-full overflow-hidden rounded-[var(--radius-card)] bg-coal-850 ring-1 ring-white/[0.06]">

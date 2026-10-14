@@ -13,8 +13,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     patch.status = body.status as OrderUpdate["status"];
   }
   if (typeof body.note === "string") patch.note = body.note.slice(0, 300);
-  if (typeof body.trackingNumber === "string") patch.trackingNumber = body.trackingNumber.trim().slice(0, 60);
-  if (typeof body.courier === "string") patch.courier = body.courier.trim().slice(0, 40);
+  if (typeof body.rider === "string") patch.rider = body.rider.trim().slice(0, 60);
 
   try {
     const order = await orders().update(id, patch);

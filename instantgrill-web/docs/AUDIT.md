@@ -1,71 +1,58 @@
-# Instant Grill: website audit and target spec
+# Instant Grill: build notes and launch checklist
 
-Reviewers: CTO, web designer, QA, front-end and back-end (one pass, five hats).
+## Corrections made (from the owner's brief)
 
-## 0. Finding zero: the site did not load
+- **The live site is up.** An earlier note said instantgrill.shop did not load. That was wrong:
+  the build machine's network cannot reach outside sites. Do not change DNS.
+- **The business is a ready-to-grill BBQ box delivered in Lahore**, not a grill sold by courier.
+  The first draft's kits, prices, courier shipping and replacement policy were removed.
+- The menu, prices, contact details and delivery rules now come from the owner, in `src/lib/catalog.ts`.
 
-From the cloud test environment, `instantgrill.shop` and `www.instantgrill.shop` returned
-**"domain not found" (DNS ENOTFOUND)**. The reference `instagrill.shop` returned the same.
-Check this first, from a phone on mobile data:
+## What the site does
 
-- Is the domain still registered and paid for?
-- Do its DNS records (A / CNAME) point at the host (Shopify, Vercel, etc.)?
-- Is there an `A` or `CNAME` for both the bare domain and `www`?
+- Home: hero, promises, why us (photo bento), bestsellers, how it works, what's in every box, deals, FAQ.
+- `/menu`: sticky category tabs that follow the scroll, Boneless / Kabab / Premium filters, search,
+  quick add (boxes ask for chutney and salad inline), floating cart bar on phones.
+- `/menu/[slug]`: box builder with required chutney and salad, extra skewers, drinks, quantity, live total,
+  "what's in the box", order on WhatsApp, related boxes, Product JSON-LD.
+- Cart drawer with drink and skewer upsells.
+- `/checkout`: name, phone (PK format), Lahore area, address, landmark, delivery day and time from the
+  slot rules, COD (JazzCash and Easypaisa shown as coming soon), double-submit guard.
+- `/order/[id]`: confirmation, delivery time, "Send to WhatsApp" with the full order, grilling guide.
+- `/track`: order number + phone (phone must match), status timeline.
+- `/admin`: orders with New, Confirmed, Preparing, Out for delivery, Delivered or Cancelled; rider name;
+  delivery time per order; "due today" and "to confirm" counts; WhatsApp the customer.
 
-If customers see the same error, every rupee of ad spend is landing on nothing. Fix this
-before anything below.
+## Delivery rules (server-validated, `src/lib/delivery.ts`)
 
-Because the live site could not be opened, this audit covers why typical template stores
-"look basic" and lists what this rebuild does instead. Send screenshots of the current
-site for a line-by-line review.
+- Orders 12 PM to 5:30 PM: earliest slot 6 hours later, rounded up to 30 minutes; last slot 11:30 PM.
+- Orders after 5:30 PM: next morning, 10 AM to 12 PM.
+- Orders 12 AM to 10 AM: that morning, 10 AM to 12 PM.
+- Orders 10 AM to 12 PM (before opening): 6 hours counted from 12 PM. **Assumption, confirm.**
+- Customer can pick any later slot up to 7 days ahead. A full day = morning window + every 30 min from 12:30 PM.
 
-## 1. Why template stores look basic (and what changes)
+## QA (run on this build)
 
-| Problem on most template stores | Why it hurts | What this build does |
-|---|---|---|
-| Stock or supplier photos, mixed lighting | Looks like every other reseller, so trust drops | One art-directed photo set, dark and warm, briefs in `docs/IMAGE_BRIEF.md` |
-| Three identical icon cards for "Why choose us" | Reads as filler, nobody remembers it | Five-cell photo bento grid with different sizes, each tile a real benefit |
-| Static page, no motion | Feels cheap next to brand sites | Images clip-reveal, settle and drift with scroll; hero glow flickers like coals |
-| Default theme fonts and colours | No brand identity | Geist type, coal-black base, one ember-orange accent used only for actions |
-| Generic checkout, long forms, card-first | Pakistan buys COD; card-first forms leak orders | 5-field COD checkout, PK phone validation, city picker, WhatsApp confirm |
-| No order follow-up | High return-to-origin (RTO) on COD | Confirm-on-WhatsApp button after order + admin "Message" button per order |
-| Fake reviews or countdown timers | Customers spot them; Meta and Google can penalise them | Reviews section only renders real reviews; no fake urgency |
-| Slow pages (apps, sliders, popups) | Mobile users on 4G leave | Static pages, next/image, one font family, no third-party apps |
+- [x] 65 unit tests: every menu price, deal savings, chutney/salad rules, server pricing, all slot rules
+      (including Lahore vs UTC day boundary), validation, order status flow, file store under concurrency
+- [x] TypeScript strict, ESLint, production build
+- [x] Browser run at 375px: home, menu, builder (total Rs 3,850 correct), checkout errors, order placed,
+      WhatsApp message contains the full order, slot "today 7 PM" correct for a 12:55 PM order
+- [x] Admin walked an order New to Out for delivery; tracking shows it; wrong phone shows nothing
+- [x] No horizontal scroll at 375px and 1440px; no console errors
 
-## 2. Design review
+## [TO CONFIRM] before launch
 
-- **Direction:** premium outdoor-cooking brand, not a gadget reseller. Dark, cinematic, warm.
-- **Not like the reference:** no light layout, no generic product-card grid, no copy of their sections.
-- **Hierarchy:** one message per section. Max one accent colour. Buttons are pills, cards are 20px.
-- **Mobile first:** sticky bottom "Order now" bar, thumb-sized controls, WhatsApp button above it.
+1. Delivery fee (`delivery.fee`). While empty, checkout says the fee is confirmed on WhatsApp.
+2. The list of Lahore areas you deliver to (`delivery.areas`).
+3. Facebook Page URL (`brand.facebook`).
+4. Drink brands and flavours.
+5. Orders placed 10 AM to 12 PM: is earliest 6 PM right?
+6. Real photos (see `docs/IMAGE_BRIEF.md`). Check AI images for wrong text on the box before use.
 
-## 3. QA checklist (all checked on this build)
+## Next
 
-- [x] Production build passes, TypeScript strict, ESLint clean
-- [x] 22 unit tests: pricing, validation, order status rules, file store under concurrency
-- [x] End-to-end in Chromium: add to cart, checkout errors, place order, track, admin confirm/ship
-- [x] No horizontal scroll at 1440px and 390px
-- [x] Reduced motion: content visible, animations reduced (a hydration bug here was found and fixed)
-- [x] Server ignores client prices (tested by posting a fake price)
-- [x] Rate limit counts only valid orders (bug found and fixed: typos were locking customers out)
-- [ ] Real photos in place (see image brief)
-- [ ] Real prices, WhatsApp number, policy text (all marked `EDIT` in `src/lib/catalog.ts`)
-- [ ] Lighthouse run on the deployed domain
-
-## 4. Back-end review
-
-- Prices always computed on the server from the catalog.
-- Order lookup needs order ID **and** phone, so IDs cannot be enumerated.
-- Admin API needs a 16+ character bearer token, compared in constant time; off when unset.
-- Honeypot field and per-IP limit on orders; put Cloudflare in front for real abuse.
-- Webhook on new orders is fire-and-forget with a 5s timeout: it can never break checkout.
-- Order status moves only along allowed paths (pending, confirmed, shipped, delivered; or cancelled/returned).
-
-## 5. Next upgrades, in order
-
-1. Photos (the biggest visual jump). Then replace `src: null` in the catalog.
-2. Point `ORDER_WEBHOOK_URL` at a Google Sheet or WhatsApp agent so every order alerts the team.
-3. Meta Pixel + Conversions API purchase event on `/order/[id]` (needed to optimise ads).
-4. Courier API booking (PostEx, Leopards, TCS) from the admin "Mark shipped" button.
-5. Prepaid option (JazzCash / Easypaisa) with a small discount, to cut COD returns.
-6. Real reviews with photos after the first 50 deliveries.
+- Supabase (Postgres + Auth) for orders, editable menu and owner login; `db/schema.sql` is the start.
+- Owner alert on each order via `ORDER_WEBHOOK_URL` (email or WhatsApp).
+- Meta Pixel + Conversions API (ViewContent, AddToCart, InitiateCheckout, Purchase), GA4.
+- Pages from the brief not built yet: deals/catering enquiry form, about, contact with map, privacy, terms.

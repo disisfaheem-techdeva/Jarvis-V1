@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { clientIp, notifyNewOrder, placeOrder, publicOrder, rateLimited } from "@/lib/orders";
+import { isSlotAvailable } from "@/lib/delivery";
 import { PricingError } from "@/lib/pricing";
 import { validateOrder } from "@/lib/validation";
 
@@ -23,6 +24,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Too many orders from this connection. Please message us on WhatsApp." }, { status: 429 });
   }
 
+  if (!isSlotAvailable(v.slot)) {
+    return NextResponse.json(
+      { error: "That delivery time is no longer available. Please pick another.", fields: { slot: "Pick another time" } },
+      { status: 422 },
+    );
+  }
+
   const src = ((body as { source?: Record<string, unknown> }).source ?? {}) as Record<string, unknown>;
   const str = (x: unknown) => (typeof x === "string" ? x.slice(0, 100) : undefined);
 
@@ -30,6 +38,7 @@ export async function POST(req: Request) {
     const order = await placeOrder({
       customer: v.customer,
       cart: v.cart,
+      slot: v.slot,
       source: { utmSource: str(src.utmSource), utmCampaign: str(src.utmCampaign), referrer: str(src.referrer) },
     });
     notifyNewOrder(order);

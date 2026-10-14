@@ -25,7 +25,7 @@ export function Reviews() {
             </div>
             <blockquote className="mt-4 line-clamp-3 leading-relaxed text-ash-100">“{r.text}”</blockquote>
             <figcaption className="mt-4 text-sm text-ash-400">
-              {r.name}, {r.city}
+              {r.name}, {r.area}
             </figcaption>
           </figure>
         ))}

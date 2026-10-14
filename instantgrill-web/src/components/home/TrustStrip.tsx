@@ -1,12 +1,11 @@
-import { ArrowsClockwise, ChatCircleText, Money, Truck } from "@phosphor-icons/react/dist/ssr";
-import { shipping } from "@/lib/catalog";
+import { ChatCircleText, Clock, Money, UsersThree } from "@phosphor-icons/react/dist/ssr";
 import { Container } from "../ui";
 
 const items = [
-  { icon: Money, title: "Cash on delivery", body: "Pay when it reaches you" },
-  { icon: Truck, title: "Delivery nationwide", body: shipping.eta },
-  { icon: ArrowsClockwise, title: `${shipping.replacementDays}-day replacement`, body: "Damaged in transit? We replace it" },
-  { icon: ChatCircleText, title: "Real support", body: "A person answers on WhatsApp" },
+  { icon: Money, title: "Cash on delivery", body: "Pay the rider when it arrives" },
+  { icon: Clock, title: "Within 6 hours", body: "Or next morning, 10 AM to 12 PM" },
+  { icon: UsersThree, title: "Serves 2", body: "About 850 g meat, everything included" },
+  { icon: ChatCircleText, title: "Order on WhatsApp", body: "A person answers, 12 PM to 12 AM" },
 ];
 
 export function TrustStrip() {

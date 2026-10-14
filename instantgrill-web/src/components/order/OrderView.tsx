@@ -1,16 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle, Circle, WarningCircle, WhatsappLogo } from "@phosphor-icons/react";
+import { CheckCircle, Circle, Clock, Fire, WarningCircle, WhatsappLogo } from "@phosphor-icons/react";
+import { grillGuide } from "@/lib/catalog";
+import { describeSlot } from "@/lib/delivery";
 import type { PublicOrder } from "@/lib/orders";
 import { formatPKR } from "@/lib/pricing";
 import { Button, buttonClass } from "../ui";
 import { whatsappLink } from "../WhatsAppFab";
 
 const TIMELINE = [
-  { status: "pending", label: "Order placed" },
+  { status: "new", label: "Order placed" },
   { status: "confirmed", label: "Confirmed" },
-  { status: "shipped", label: "Shipped" },
+  { status: "preparing", label: "Preparing" },
+  { status: "out_for_delivery", label: "Out for delivery" },
   { status: "delivered", label: "Delivered" },
 ] as const;
 
@@ -18,25 +21,29 @@ const fieldClass =
   "h-12 w-full rounded-[var(--radius-field)] border border-coal-600 bg-coal-850 px-4 text-ash-50 placeholder:text-ash-400 focus:border-ember-500 focus:outline-none";
 
 function Timeline({ order }: { order: PublicOrder }) {
-  if (order.status === "cancelled" || order.status === "returned") {
+  if (order.status === "cancelled") {
     return (
       <p className="flex items-center gap-2 rounded-[var(--radius-field)] bg-coal-850 p-4 text-ash-300">
         <WarningCircle size={20} className="text-danger" />
-        This order was {order.status}. Message us on WhatsApp if that is unexpected.
+        This order was cancelled. Message us on WhatsApp if that is unexpected.
       </p>
     );
   }
   const reached = TIMELINE.findIndex((t) => t.status === order.status);
   return (
-    <ol className="grid grid-cols-4 gap-2">
+    <ol className="grid grid-cols-5 gap-2">
       {TIMELINE.map((t, i) => {
         const done = i <= reached;
         const at = order.history.find((h) => h.status === t.status)?.at;
         return (
           <li key={t.status} className="flex flex-col gap-2">
             <span className={`h-1 rounded-full ${done ? "bg-ember-500" : "bg-coal-700"}`} />
-            <span className={`flex items-center gap-1.5 text-sm ${done ? "text-ash-50" : "text-ash-400"}`}>
-              {done ? <CheckCircle size={16} weight="fill" className="text-ember-400" /> : <Circle size={16} />}
+            <span className={`flex items-start gap-1.5 text-xs sm:text-sm ${done ? "text-ash-50" : "text-ash-400"}`}>
+              {done ? (
+                <CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-ember-400" />
+              ) : (
+                <Circle size={16} className="mt-0.5 shrink-0" />
+              )}
               {t.label}
             </span>
             {at && (
@@ -52,7 +59,13 @@ function Timeline({ order }: { order: PublicOrder }) {
 }
 
 export function OrderDetails({ order, fresh = false }: { order: PublicOrder; fresh?: boolean }) {
-  const confirmText = `Assalam o Alaikum, I just placed order ${order.id} for ${formatPKR(order.total)}. Please confirm.`;
+  const confirmText = [
+    `Assalam o Alaikum, I just placed order ${order.id}:`,
+    ...order.lines.map((l) => `${l.qty} × ${l.name}${l.chutney ? ` (${l.chutney}, ${l.salad} salad)` : ""}`),
+    `Total ${formatPKR(order.total)}${order.deliveryFee === null ? " + delivery" : ""}`,
+    `Delivery: ${describeSlot(order.slot)}, ${order.area}`,
+    `Please confirm.`,
+  ].join("\n");
   return (
     <div className="space-y-8">
       {fresh && (
@@ -62,8 +75,8 @@ export function OrderDetails({ order, fresh = false }: { order: PublicOrder; fre
             Thank you, {order.firstName}. Order received.
           </h1>
           <p className="mt-3 max-w-[52ch] text-ash-300">
-            Your order number is <span className="font-mono text-ash-50">{order.id}</span>. Confirm it on WhatsApp
-            now and we dispatch it faster.
+            Your order number is <span className="font-mono text-ash-50">{order.id}</span>. Send it to us on WhatsApp
+            and we confirm it right away.
           </p>
           <a
             href={whatsappLink(confirmText)}
@@ -71,7 +84,7 @@ export function OrderDetails({ order, fresh = false }: { order: PublicOrder; fre
             rel="noopener noreferrer"
             className={buttonClass("primary", "lg", "mt-6")}
           >
-            <WhatsappLogo size={20} weight="fill" /> Confirm on WhatsApp
+            <WhatsappLogo size={20} weight="fill" /> Send to WhatsApp
           </a>
         </div>
       )}
@@ -80,34 +93,50 @@ export function OrderDetails({ order, fresh = false }: { order: PublicOrder; fre
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="font-mono text-lg text-ash-50">{order.id}</h2>
           <span className="text-sm text-ash-400">
-            {order.city}, {order.phoneMasked}
+            {order.area}, {order.phoneMasked}
           </span>
         </div>
+        <p className="flex items-center gap-2 text-sm text-ash-100">
+          <Clock size={18} className="text-ember-400" /> Delivery {describeSlot(order.slot)}
+        </p>
         <Timeline order={order} />
-        {order.trackingNumber && (
-          <p className="text-sm text-ash-300">
-            Courier: {order.courier ?? "Courier"}, tracking number{" "}
-            <span className="font-mono text-ash-50">{order.trackingNumber}</span>
-          </p>
-        )}
         <ul className="space-y-2 border-t border-white/[0.06] pt-5 text-sm">
           {order.lines.map((l) => (
-            <li key={l.bundleId} className="flex justify-between">
+            <li key={`${l.slug}-${l.chutney}-${l.salad}`} className="flex justify-between">
               <span className="text-ash-100">
                 {l.name} <span className="text-ash-400">× {l.qty}</span>
+                {l.chutney && (
+                  <span className="block text-xs text-ash-400">
+                    {l.chutney}, {l.salad} salad
+                  </span>
+                )}
               </span>
               <span className="font-mono">{formatPKR(l.lineTotal)}</span>
             </li>
           ))}
           <li className="flex justify-between text-ash-400">
             <span>Delivery</span>
-            <span className="font-mono">{order.shipping ? formatPKR(order.shipping) : "Free"}</span>
+            <span>{order.deliveryFee === null ? "Confirmed on WhatsApp" : formatPKR(order.deliveryFee)}</span>
           </li>
           <li className="flex justify-between pt-2 text-base font-semibold text-ash-50">
             <span>Cash on delivery</span>
             <span className="font-mono text-ember-400">{formatPKR(order.total)}</span>
           </li>
         </ul>
+      </div>
+
+      <div className="rounded-[var(--radius-card)] bg-coal-900 p-6 ring-1 ring-white/[0.06] md:p-8">
+        <h2 className="flex items-center gap-2 text-lg font-semibold text-ash-50">
+          <Fire size={20} weight="fill" className="text-ember-400" /> How to grill it
+        </h2>
+        <ol className="mt-4 space-y-3">
+          {grillGuide.map((g, i) => (
+            <li key={g} className="flex gap-3 text-ash-300">
+              <span className="font-mono text-ember-400">{i + 1}</span> {g}
+            </li>
+          ))}
+        </ol>
+        <p className="mt-4 text-sm text-ash-400">Outdoor or open-air use only. Never indoors. Keep children away.</p>
       </div>
     </div>
   );
