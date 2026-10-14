@@ -8,7 +8,7 @@ import type { Store } from "./types";
 let instance: Store | undefined;
 
 /**
- * DATABASE_URL set (e.g. the Supabase Postgres connection string): Postgres.
+ * DATABASE_URL set (your VPS Postgres, or any hosted Postgres): Postgres.
  * Otherwise JSON files under DATA_DIR (default ./data), for local dev.
  */
 export function store(): Store {
@@ -18,8 +18,12 @@ export function store(): Store {
           new Pool({
             connectionString: process.env.DATABASE_URL,
             max: 5,
-            // Supabase and most hosted Postgres require TLS.
-            ssl: process.env.DATABASE_URL.includes("localhost") ? undefined : { rejectUnauthorized: false },
+            // TLS only when asked for: a Postgres container on the same Docker network
+            // (the VPS setup) has none; hosted Postgres uses ?sslmode=require or DATABASE_SSL=true.
+            ssl:
+              process.env.DATABASE_SSL === "true" || /sslmode=require/.test(process.env.DATABASE_URL)
+                ? { rejectUnauthorized: false }
+                : undefined,
           }),
         )
       : fileStore(process.env.DATA_DIR ?? path.join(process.cwd(), "data"));
