@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
-import { clientIp, notifyNewOrder, placeOrder, publicOrder, rateLimited } from "@/lib/orders";
+import { sendPurchase } from "@/lib/capi";
+import { notifyNewOrder } from "@/lib/notify";
+import { clientIp, placeOrder, publicOrder, rateLimited } from "@/lib/orders";
 import { isSlotAvailable } from "@/lib/delivery";
 import { PricingError } from "@/lib/pricing";
+import { getMenu } from "@/lib/menu";
 import { validateOrder } from "@/lib/validation";
 
 export async function POST(req: Request) {
@@ -15,7 +18,11 @@ export async function POST(req: Request) {
   // Honeypot: real customers never see or fill this field.
   if ((body as { website?: string })?.website) return NextResponse.json({ error: "Invalid request" }, { status: 400 });
 
-  const v = validateOrder(body);
+  const menu = await getMenu();
+  const v = validateOrder(
+    body,
+    menu.areas.map((a) => a.name),
+  );
   if (!v.ok) return NextResponse.json({ error: "Please fix the highlighted fields", fields: v.errors }, { status: 422 });
 
   // Counted only for valid orders, so a customer fixing typos is never locked out.
@@ -42,6 +49,7 @@ export async function POST(req: Request) {
       source: { utmSource: str(src.utmSource), utmCampaign: str(src.utmCampaign), referrer: str(src.referrer) },
     });
     notifyNewOrder(order);
+    sendPurchase(order, req);
     return NextResponse.json({ order: publicOrder(order) }, { status: 201 });
   } catch (err) {
     if (err instanceof PricingError) return NextResponse.json({ error: err.message, fields: { cart: err.message } }, { status: 422 });

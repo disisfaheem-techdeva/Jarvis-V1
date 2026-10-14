@@ -48,9 +48,12 @@ export const brand = {
 
 export const delivery = {
   city: "Lahore",
-  /** Rupees, or null until confirmed. While null, checkout says the fee is confirmed on WhatsApp. [TO CONFIRM] */
+  /**
+   * Default fee for every area until the owner sets per-area fees in /admin/menu.
+   * null = confirmed on WhatsApp. [TO CONFIRM]
+   */
   fee: null as number | null,
-  /** [TO CONFIRM] the areas you actually deliver to. "Other" lets the team confirm by phone. */
+  /** Default areas until edited in /admin/menu. [TO CONFIRM] "Other" lets the team confirm by phone. */
   areas: [
     "Baghbanpura",
     "Shalimar",
@@ -161,15 +164,6 @@ export function findProduct(slug: string): Product | undefined {
   return products.find((p) => p.slug === slug);
 }
 
-/** Saving versus buying the contained boxes separately. null when contents are not fixed. */
-export function savingFor(p: Product): number | null {
-  if (!p.contains) return null;
-  const separate = p.contains.reduce((s, slug) => s + (findProduct(slug)?.price ?? 0), 0);
-  // Half/half mix boxes are one box, not two, so "separately" does not apply.
-  if (p.category === "mix") return null;
-  return separate > p.price ? separate - p.price : null;
-}
-
 export const BESTSELLERS = ["chicken-tikka", "malai-boti", "beef-bihari-boti", "trio-mix"];
 
 export const images = {
@@ -189,7 +183,17 @@ export const images = {
   stepDeliver: img("Rider handing over a sealed Instant Grill box", "Sealed white box being handed over at a door. 4:3."),
   stepLight: img("Lighting the coal in the box's disposable grill", "Match lighting the coal in the grill tray, first flames. 4:3."),
   stepGrill: img("Skewers sizzling on the Instant Grill", "Close-up of tikka and seekh sizzling on the grill, light smoke. 4:3."),
+  kitchen: img("The Instant Grill kitchen in Baghbanpura", "Real photo of the kitchen: marination and packing station, clean steel. 4:3."),
+  team: img("The Instant Grill team", "Real photo of the team packing boxes. 4:3."),
 } satisfies Record<string, ImageSlot>;
+
+/** Short how-it-works / unboxing video. Set src to "/media/unboxing.mp4" (and a .webm) once made. */
+export const media = {
+  unboxing: { mp4: null as string | null, webm: null as string | null, poster: images.hero },
+};
+
+export const mapEmbedUrl = "https://www.google.com/maps?q=Orange+Square+Baghbanpura+Lahore&output=embed";
+export const mapLinkUrl = "https://www.google.com/maps/search/?api=1&query=Orange+Square+Baghbanpura+Lahore";
 
 export const reasons = [
   { key: "everything", title: "Everything in one box", body: "Grill, coal, tong, marinated meat, pita, hummus, chutney and salad. Nothing to buy, nothing to prep.", image: "everything" },

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { FileOrderRepository } from "@/lib/store/file";
+import { FileOrderRepository, fileStore } from "@/lib/store/file";
 import { applyUpdate, type Order } from "@/lib/store/types";
 
 function order(id: string, createdAt = new Date().toISOString()): Order {
@@ -56,5 +56,25 @@ describe("FileOrderRepository", () => {
     expect(await repo.list({ status: "confirmed" })).toHaveLength(1);
     expect(await repo.update("IG-NOPE00", { status: "confirmed" })).toBeNull();
     await expect(repo.create(order("IG-000001"))).rejects.toThrow();
+  });
+});
+
+describe("file store: inboxes and settings", () => {
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("keeps enquiries newest first and merges menu overrides", async () => {
+    dir = mkdtempSync(path.join(tmpdir(), "ig-"));
+    const s = fileStore(dir);
+    await s.enquiries.create({ id: "1", createdAt: "2026-10-01T00:00:00Z", type: "event", name: "A", phone: "03001234567" });
+    await s.enquiries.create({ id: "2", createdAt: "2026-10-02T00:00:00Z", type: "bulk", name: "B", phone: "03001234567" });
+    expect((await s.enquiries.list()).map((e) => e.id)).toEqual(["2", "1"]);
+
+    expect(await s.settings.getAreas()).toBeNull();
+    await s.settings.setOverride("chicken-tikka", { price: 3100 });
+    const o = await s.settings.setOverride("chicken-tikka", { soldOut: true });
+    expect(o["chicken-tikka"]).toEqual({ price: 3100, soldOut: true });
+    await s.settings.setAreas([{ name: "Gulberg", fee: 200, active: true }]);
+    expect(await s.settings.getAreas()).toEqual([{ name: "Gulberg", fee: 200, active: true }]);
   });
 });

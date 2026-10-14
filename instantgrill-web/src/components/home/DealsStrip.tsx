@@ -1,17 +1,19 @@
 import Link from "next/link";
 import { ArrowRight } from "@phosphor-icons/react/dist/ssr";
-import { products, savingFor } from "@/lib/catalog";
+import { getMenu } from "@/lib/menu";
+import { savingIn } from "@/lib/menu-types";
 import { formatPKR } from "@/lib/pricing";
 import { Reveal } from "../Reveal";
 import { Container } from "../ui";
 
-export function DealsStrip() {
-  const family = products.filter((p) => p.category === "family");
-  const deals = products.filter((p) => p.category === "deal");
+export async function DealsStrip() {
+  const menu = await getMenu();
+  const family = menu.products.filter((p) => p.category === "family");
+  const deals = menu.products.filter((p) => p.category === "deal");
   const familyFrom = Math.min(...family.map((p) => p.price));
   const tiles = [
-    { href: "/menu#cat-family", name: "Family boxes", serves: 4, price: `From ${formatPKR(familyFrom)}`, saving: null as number | null },
-    ...deals.map((d) => ({ href: `/menu/${d.slug}`, name: d.name, serves: d.serves!, price: formatPKR(d.price), saving: savingFor(d) })),
+    { href: "/deals", name: "Family boxes", serves: 4, price: `From ${formatPKR(familyFrom)}`, saving: null as number | null },
+    ...deals.map((d) => ({ href: `/menu/${d.slug}`, name: d.name, serves: d.serves!, price: formatPKR(d.price), saving: savingIn(menu, d) })),
   ];
   return (
     <section id="deals" className="scroll-mt-16 py-24 md:py-32">

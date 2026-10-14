@@ -1,27 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { track } from "@/lib/analytics";
 import { useRouter } from "next/navigation";
 import { CheckCircle, Minus, Plus, WhatsappLogo } from "@phosphor-icons/react";
-import {
-  BOX_INCLUDES,
-  CHUTNEYS,
-  SALADS,
-  isBox,
-  products,
-  savingFor,
-  type Chutney,
-  type Product,
-  type Salad,
-} from "@/lib/catalog";
+import { BOX_INCLUDES, CHUTNEYS, SALADS, isBox, type Chutney, type Product, type Salad } from "@/lib/catalog";
+import { savingIn } from "@/lib/menu-types";
 import { MAX_QTY_PER_LINE, formatPKR } from "@/lib/pricing";
 import { useCart } from "../cart/CartProvider";
 import { Button } from "../ui";
-import { whatsappLink } from "../WhatsAppFab";
+import { whatsappLink } from "@/lib/whatsapp";
 import { ChoicePills } from "./ChoicePills";
+import { useMenu } from "./MenuProvider";
 import { productMeta } from "./ProductCard";
-
-const ADDONS = products.filter((p) => p.category === "extra" || p.category === "drink");
 
 function Stepper({ value, onChange, label, min = 0 }: { value: number; onChange: (n: number) => void; label: string; min?: number }) {
   return (
@@ -53,6 +44,8 @@ function Stepper({ value, onChange, label, min = 0 }: { value: number; onChange:
 
 export function BoxBuilder({ product: p }: { product: Product }) {
   const cart = useCart();
+  const menu = useMenu();
+  const ADDONS = menu.products.filter((a) => (a.category === "extra" || a.category === "drink") && !a.soldOut);
   const router = useRouter();
   const box = isBox(p);
   const [chutney, setChutney] = useState<Chutney>();
@@ -60,7 +53,11 @@ export function BoxBuilder({ product: p }: { product: Product }) {
   const [qty, setQty] = useState(1);
   const [addons, setAddons] = useState<Record<string, number>>({});
   const [tried, setTried] = useState(false);
-  const saving = savingFor(p);
+  const saving = savingIn(menu, p);
+
+  useEffect(() => {
+    track("ViewContent", { value: p.price, items: [{ id: p.slug, name: p.name, price: p.price, qty: 1 }] });
+  }, [p.slug, p.name, p.price]);
 
   const addonTotal = ADDONS.reduce((s, a) => s + a.price * (addons[a.slug] ?? 0), 0);
   const total = p.price * qty + addonTotal;

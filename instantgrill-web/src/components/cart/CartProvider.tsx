@@ -1,8 +1,10 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer } from "react";
-import { delivery, findProduct } from "@/lib/catalog";
+import { findIn } from "@/lib/menu-types";
 import { MAX_QTY_PER_LINE, lineKey, type CartLine } from "@/lib/pricing";
+import { track } from "@/lib/analytics";
+import { useMenu } from "../menu/MenuProvider";
 
 type State = { lines: CartLine[]; open: boolean; hydrated: boolean };
 type Action =
@@ -45,10 +47,8 @@ type CartContext = {
   open: boolean;
   hydrated: boolean;
   count: number;
-  /** Display estimate only. The server re-prices every order from the catalog. */
+  /** Display estimate only. The server re-prices every order against the live menu. */
   subtotal: number;
-  deliveryFee: number | null;
-  total: number;
   add: (line: CartLine, opts?: { open?: boolean }) => void;
   setQty: (key: string, qty: number) => void;
   remove: (key: string) => void;
@@ -61,6 +61,7 @@ const Ctx = createContext<CartContext | null>(null);
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, { lines: [], open: false, hydrated: false });
   const { hydrated } = state;
+  const menu = useMenu();
 
   // The cart is a per-browser convenience; storage can be missing or blocked.
   useEffect(() => {
@@ -68,7 +69,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       const parsed = raw ? (JSON.parse(raw) as CartLine[]) : [];
-      if (Array.isArray(parsed)) saved = parsed.filter((l) => findProduct(l?.slug) && l.qty > 0);
+      // Drop items that left the menu since the cart was saved.
+      if (Array.isArray(parsed)) saved = parsed.filter((l) => findIn(menu, l?.slug) && l.qty > 0);
     } catch {
       /* start with an empty cart */
     }
@@ -89,7 +91,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       /* ignore */
     }
     dispatch({ type: "hydrate", lines: saved });
-  }, []);
+  }, [menu]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -101,8 +103,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, [state.lines, hydrated]);
 
   const add = useCallback(
-    (line: CartLine, opts?: { open?: boolean }) => dispatch({ type: "add", line, open: opts?.open ?? true }),
-    [],
+    (line: CartLine, opts?: { open?: boolean }) => {
+      dispatch({ type: "add", line, open: opts?.open ?? true });
+      const p = findIn(menu, line.slug);
+      if (p) track("AddToCart", { value: p.price * line.qty, items: [{ id: p.slug, name: p.name, price: p.price, qty: line.qty }] });
+    },
+    [menu],
   );
   const setQty = useCallback((key: string, qty: number) => dispatch({ type: "set", key, qty }), []);
   const remove = useCallback((key: string) => dispatch({ type: "remove", key }), []);
@@ -110,22 +116,20 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const setOpen = useCallback((open: boolean) => dispatch({ type: "open", open }), []);
 
   const value = useMemo<CartContext>(() => {
-    const subtotal = state.lines.reduce((s, l) => s + (findProduct(l.slug)?.price ?? 0) * l.qty, 0);
+    const subtotal = state.lines.reduce((s, l) => s + (findIn(menu, l.slug)?.price ?? 0) * l.qty, 0);
     return {
       lines: state.lines,
       open: state.open,
       hydrated,
       count: state.lines.reduce((s, l) => s + l.qty, 0),
       subtotal,
-      deliveryFee: delivery.fee,
-      total: subtotal + (delivery.fee ?? 0),
       add,
       setQty,
       remove,
       clear,
       setOpen,
     };
-  }, [state, hydrated, add, setQty, remove, clear, setOpen]);
+  }, [state, hydrated, menu, add, setQty, remove, clear, setOpen]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

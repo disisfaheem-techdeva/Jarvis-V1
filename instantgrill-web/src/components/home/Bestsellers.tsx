@@ -1,10 +1,13 @@
-import { BESTSELLERS, findProduct } from "@/lib/catalog";
+import { BESTSELLERS } from "@/lib/catalog";
+import { getMenu } from "@/lib/menu";
+import { findIn } from "@/lib/menu-types";
 import { ProductCard } from "../menu/ProductCard";
 import { Reveal } from "../Reveal";
 import { ButtonLink, Container } from "../ui";
 
-export function Bestsellers() {
-  const items = BESTSELLERS.map(findProduct).filter((p) => p !== undefined);
+export async function Bestsellers() {
+  const menu = await getMenu();
+  const items = BESTSELLERS.map((s) => findIn(menu, s)).filter((p) => p !== undefined);
   return (
     <section className="py-24 md:py-32">
       <Container>

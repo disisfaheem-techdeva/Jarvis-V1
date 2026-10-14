@@ -7,15 +7,15 @@ import { ButtonLink, Container } from "./ui";
 
 const nav = [
   { href: "/menu", label: "Menu" },
-  { href: "/#deals", label: "Deals" },
-  { href: "/#how", label: "How it works" },
+  { href: "/deals", label: "Deals" },
+  { href: "/how-it-works", label: "How it works" },
   { href: "/track", label: "Track order" },
 ];
 
 export function Header() {
   const { count, setOpen, hydrated } = useCart();
   return (
-    <header className="sticky top-0 z-30 border-b border-white/[0.06] bg-coal-950/75 backdrop-blur-xl">
+    <header className="sticky top-0 z-30 print:hidden border-b border-white/[0.06] bg-coal-950/75 backdrop-blur-xl">
       <Container className="flex h-16 items-center justify-between gap-6">
         <Link href="/" className="flex items-center gap-2 text-[15px] font-semibold tracking-tight text-ash-50">
           <span className="grid size-8 place-items-center rounded-full bg-ember-500 text-coal-950">

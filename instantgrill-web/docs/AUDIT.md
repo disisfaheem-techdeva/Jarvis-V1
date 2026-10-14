@@ -41,10 +41,37 @@
 - [x] Admin walked an order New to Out for delivery; tracking shows it; wrong phone shows nothing
 - [x] No horizontal scroll at 375px and 1440px; no console errors
 
+## Added in the third pass
+
+- Pages: `/deals` (family, Dawat, Party with savings from live prices + catering enquiry form),
+  `/how-it-works` (4 steps, safety, storage, video slot), `/about` (story, values, map),
+  `/faq` (accordion + FAQPage JSON-LD), `/contact` (WhatsApp, form, map, Restaurant JSON-LD),
+  `/privacy`, `/terms`. Header and footer link to all of them.
+- Owner admin with email + password login (signed httpOnly cookie, same-origin check on writes,
+  login rate limit): Dashboard, Orders (status/date filters, rider, printable kitchen slip),
+  Menu & areas (price, sold out, hide; per-area delivery fees), Customers, Enquiries.
+- Owner edits apply everywhere at once: menu, product pages, cart, checkout and server pricing.
+- Supabase-ready Postgres store and migration with row-level security (verified: the `anon`
+  role is denied); file store for local dev.
+- Owner alerts: email via Resend and an optional webhook, for orders, enquiries and messages.
+- Meta Pixel + Conversions API (Purchase deduplicated by order number, phone hashed) and GA4.
+- Share images (site and per product), Roman Urdu keywords, full sitemap.
+- `npm run media`: photos to WebP, unboxing frames to one MP4/WebM under 2 MB, logo under 30 KB.
+
+## QA, third pass
+
+- [x] 79 unit tests + 3 Postgres integration tests against a real Postgres 16
+- [x] Browser run, 31 checks, on both file storage and Postgres: every page 200 with no sideways
+      scroll at 375px; wrong password refused; price edit and sold-out show on the menu; Gulberg fee
+      Rs 200 added (server total Rs 3,350); order walked to Preparing with rider; slip prints items,
+      choices and rider; dashboard revenue; enquiry and contact forms land in admin; cross-site write
+      with a valid owner cookie refused; admin API refused without a session; share image renders
+- [x] Fixed during QA: admin switch knob drawn outside its track; WhatsApp button covering admin controls
+
 ## [TO CONFIRM] before launch
 
-1. Delivery fee (`delivery.fee`). While empty, checkout says the fee is confirmed on WhatsApp.
-2. The list of Lahore areas you deliver to (`delivery.areas`).
+1. Delivery areas and fees: set them in `/admin` > Menu & areas. Empty fee = confirmed on WhatsApp.
+2. Kitchen map coordinates for the JSON-LD `geo` field, and the About page story wording.
 3. Facebook Page URL (`brand.facebook`).
 4. Drink brands and flavours.
 5. Orders placed 10 AM to 12 PM: is earliest 6 PM right?
@@ -52,7 +79,5 @@
 
 ## Next
 
-- Supabase (Postgres + Auth) for orders, editable menu and owner login; `db/schema.sql` is the start.
-- Owner alert on each order via `ORDER_WEBHOOK_URL` (email or WhatsApp).
-- Meta Pixel + Conversions API (ViewContent, AddToCart, InitiateCheckout, Purchase), GA4.
-- Pages from the brief not built yet: deals/catering enquiry form, about, contact with map, privacy, terms.
+- See `docs/LAUNCH.md` for Supabase, Vercel, domain, photos and the pre-launch check.
+- Live order status on the tracking page without refresh (Supabase Realtime), if wanted.

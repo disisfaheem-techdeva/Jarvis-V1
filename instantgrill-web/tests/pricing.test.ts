@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { findProduct, products, savingFor } from "@/lib/catalog";
-import { MAX_QTY_PER_LINE, PricingError, quote } from "@/lib/pricing";
+import { findProduct, products } from "@/lib/catalog";
+import { applyOverrides } from "@/lib/menu";
+import { savingIn, type MenuData } from "@/lib/menu-types";
+import { MAX_QTY_PER_LINE, PricingError, quote as quoteWith, type CartLine } from "@/lib/pricing";
+
+const menu: MenuData = {
+  products,
+  areas: [
+    { name: "Gulberg", fee: 250, active: true },
+    { name: "DHA", fee: null, active: true },
+  ],
+};
+const quote = (cart: CartLine[], area?: string) => quoteWith(cart, menu, area);
+const savingFor = (p: (typeof products)[number]) => savingIn(menu, p);
 
 const box = { chutney: "Imli" as const, salad: "Fresh" as const };
 
@@ -42,6 +54,20 @@ describe("quote", () => {
     expect(q.subtotal).toBe(2 * 3000 + 650 + 250);
     expect(q.deliveryFee).toBeNull();
     expect(q.total).toBe(q.subtotal);
+  });
+
+  it("adds the area's delivery fee, or leaves it to confirm", () => {
+    const cart = [{ slug: "drink-500", qty: 1 }];
+    expect(quote(cart, "Gulberg")).toMatchObject({ deliveryFee: 250, total: 400 });
+    expect(quote(cart, "DHA")).toMatchObject({ deliveryFee: null, total: 150 });
+  });
+
+  it("uses the owner's price edits and refuses sold-out items", () => {
+    const edited: MenuData = { ...menu, products: applyOverrides(products, { "chicken-tikka": { price: 3200 }, "malai-boti": { soldOut: true } }) };
+    expect(quoteWith([{ slug: "chicken-tikka", qty: 1, ...box }], edited).subtotal).toBe(3200);
+    expect(() => quoteWith([{ slug: "malai-boti", qty: 1, ...box }], edited)).toThrow(/sold out/);
+    // A price edit flows into deal savings too.
+    expect(savingIn(edited, findProduct("dawat-deal")!)).toBe(3200 + 3500 + 4200 - 10000);
   });
 
   it("merges identical lines but keeps different choices apart", () => {

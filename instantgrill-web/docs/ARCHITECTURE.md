@@ -13,16 +13,21 @@
              │  /checkout    COD + slot  │  GET  /api/orders/:id?phone │
              │  /order/:id   thank you   │  GET  /api/admin/orders     │
              │  /track       lookup      │  PATCH /api/admin/orders/:id│
-             │  /admin       ops         │                             │
+             │  /deals       + enquiry   │  POST /api/enquiries        │
+             │  /contact     + form      │  POST /api/contact          │
+             │  /about /faq /how-it-works│  POST /api/admin/login      │
+             │  /admin/*     owner panel │  PATCH /api/admin/menu/:slug│
+             │                           │  PUT  /api/admin/areas      │
              └───────────────────────────┴──────────────┬──────────────┘
                                                         │
-                       OrderRepository ◄────────────────┤
-                        ├─ PostgresOrderRepository  (DATABASE_URL set)
-                        └─ FileOrderRepository      (dev / single server)
+                 Store { orders, enquiries, messages, settings }
+                        ├─ Postgres / Supabase  (DATABASE_URL set, RLS on)
+                        └─ JSON files           (local dev)
                                                         │
-                       ORDER_WEBHOOK_URL ◄──────────────┘  order.created
-                        ├─ Google Sheet (Apps Script)
-                        └─ WhatsApp / email owner alert
+                 notify ◄───────────────────────────────┤  order / enquiry / contact
+                        ├─ Resend email to OWNER_EMAIL
+                        └─ ORDER_WEBHOOK_URL (Sheet, Zapier, WhatsApp agent)
+                 capi   ◄───────────────────────────────┘  Meta Conversions API Purchase
 
  Customer ──wa.me──► WhatsApp 0335 4693665: full order prefilled
  Owner    ──/admin─► confirm, preparing, out for delivery (rider), delivered
@@ -32,16 +37,21 @@
 
 | Path | Role |
 |---|---|
-| `src/lib/catalog.ts` | Single source of truth: menu, prices, contact, delivery areas, FAQ, image slots |
+| `src/lib/catalog.ts` | Base menu, prices, contact, default areas, FAQ, image slots |
+| `src/lib/menu.ts` | Live menu = catalog + owner edits (prices, sold out, hidden, areas) from the store |
+| `src/lib/auth.ts` | Owner login: env credentials, signed session cookie, same-origin check |
+| `src/lib/notify.ts`, `src/lib/capi.ts`, `src/lib/analytics.ts` | Owner alerts, Meta CAPI, Pixel + GA4 events |
+| `src/lib/admin-stats.ts` | Dashboard numbers and customers, derived from orders |
 | `src/lib/delivery.ts` | Delivery slot rules (Asia/Karachi), shared by checkout and the API |
 | `src/lib/pricing.ts` | Server-side cart pricing with chutney/salad rules |
 | `src/lib/validation.ts` | Order validation, Pakistani mobile normalisation |
-| `src/lib/orders.ts` | Place order, public view, webhook, admin auth, rate limit |
+| `src/lib/orders.ts` | Place order, public view, rate limit |
 | `src/lib/store/*` | Repository interface, Postgres and file implementations, status rules |
 | `src/components/home/*` | One file per home section |
 | `src/components/MotionImage.tsx` | Animated image (reveal, settle, parallax) used for every photo |
 | `src/components/ImageSlot.tsx` | Renders a photo or a labelled placeholder until it exists |
-| `db/schema.sql` | Postgres table and indexes |
+| `db/migrations/001_init.sql` | Supabase/Postgres schema, customers view, RLS |
+| `scripts/optimize-media.mjs` | `npm run media`: WebP photos, unboxing video, logo |
 | `tests/*` | Vitest unit tests |
 
 ## Data model

@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { track } from "@/lib/analytics";
 import { CheckCircle, Circle, Clock, Fire, WarningCircle, WhatsappLogo } from "@phosphor-icons/react";
 import { grillGuide } from "@/lib/catalog";
 import { describeSlot } from "@/lib/delivery";
 import type { PublicOrder } from "@/lib/orders";
 import { formatPKR } from "@/lib/pricing";
 import { Button, buttonClass } from "../ui";
-import { whatsappLink } from "../WhatsAppFab";
+import { whatsappLink } from "@/lib/whatsapp";
 
 const TIMELINE = [
   { status: "new", label: "Order placed" },
@@ -210,6 +211,21 @@ export function OrderConfirmation({ id }: { id: string }) {
     }
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reading browser-only storage after mount
     setOrder(found);
+    // Fire Purchase once per order, even if the thank-you page is reloaded.
+    if (found) {
+      try {
+        if (!sessionStorage.getItem(`ig.tracked.${found.id}`)) {
+          sessionStorage.setItem(`ig.tracked.${found.id}`, "1");
+          track("Purchase", {
+            value: found.total,
+            orderId: found.id,
+            items: found.lines.map((l) => ({ id: l.slug, name: l.name, price: l.unitPrice, qty: l.qty })),
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+    }
   }, [id]);
 
   if (order === undefined) return <div className="h-80 animate-pulse rounded-[var(--radius-card)] bg-coal-900" />;

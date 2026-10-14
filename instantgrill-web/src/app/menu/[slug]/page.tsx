@@ -4,14 +4,16 @@ import { BoxBuilder } from "@/components/menu/BoxBuilder";
 import { ProductCard } from "@/components/menu/ProductCard";
 import { MotionImage } from "@/components/MotionImage";
 import { Container } from "@/components/ui";
-import { brand, findProduct, isBox, products } from "@/lib/catalog";
+import { brand, isBox, products as catalogProducts } from "@/lib/catalog";
+import { getMenu } from "@/lib/menu";
+import { findIn } from "@/lib/menu-types";
 
 export function generateStaticParams() {
-  return products.map((p) => ({ slug: p.slug }));
+  return catalogProducts.map((p) => ({ slug: p.slug }));
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
-  const p = findProduct((await params).slug);
+  const p = findIn(await getMenu(), (await params).slug);
   if (!p) return {};
   return {
     title: `${p.name} BBQ box`,
@@ -21,7 +23,9 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 }
 
 export default async function ProductPage({ params }: { params: Promise<{ slug: string }> }) {
-  const p = findProduct((await params).slug);
+  const menu = await getMenu();
+  const { products } = menu;
+  const p = findIn(menu, (await params).slug);
   if (!p) notFound();
 
   const related = products

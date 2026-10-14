@@ -3,10 +3,13 @@ import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { MotionProvider } from "@/components/MotionProvider";
 import { CartProvider } from "@/components/cart/CartProvider";
+import { MenuProvider } from "@/components/menu/MenuProvider";
+import { getMenu } from "@/lib/menu";
 import { CartDrawer } from "@/components/cart/CartDrawer";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { WhatsAppFab } from "@/components/WhatsAppFab";
+import { Analytics } from "@/components/Analytics";
 import { brand } from "@/lib/catalog";
 import "./globals.css";
 
@@ -28,6 +31,18 @@ export const metadata: Metadata = {
     description: "Pakistan's first ready-to-grill BBQ box, delivered across Lahore.",
   },
   twitter: { card: "summary_large_image" },
+  keywords: [
+    "BBQ box Lahore",
+    "ready to grill BBQ",
+    "BBQ delivery Lahore",
+    "BBQ ghar pe",
+    "tikka boti delivery Lahore",
+    "seekh kabab box",
+    "disposable grill BBQ Pakistan",
+    "family BBQ deal Lahore",
+    "dawat BBQ Lahore",
+    "Instant Grill",
+  ],
   alternates: { canonical: "/" },
 };
 
@@ -36,11 +51,13 @@ export const viewport: Viewport = {
   colorScheme: "dark",
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const menu = await getMenu();
   return (
     <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`}>
       <body className="grain min-h-[100dvh] antialiased">
         <MotionProvider>
+          <MenuProvider menu={menu}>
           <CartProvider>
             <a
               href="#main"
@@ -54,7 +71,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             <CartDrawer />
             <WhatsAppFab />
           </CartProvider>
+          </MenuProvider>
         </MotionProvider>
+        <Analytics />
       </body>
     </html>
   );

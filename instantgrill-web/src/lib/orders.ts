@@ -1,6 +1,7 @@
 import "server-only";
-import { randomInt, timingSafeEqual } from "node:crypto";
+import { randomInt } from "node:crypto";
 import type { SlotChoice } from "./delivery";
+import { getMenu } from "./menu";
 import { quote } from "./pricing";
 import { orders, type Order } from "./store";
 import type { CartLine } from "./pricing";
@@ -21,7 +22,7 @@ export async function placeOrder(input: {
   slot: SlotChoice;
   source?: Order["source"];
 }): Promise<Order> {
-  const q = quote(input.cart);
+  const q = quote(input.cart, await getMenu(), input.customer.area);
   const now = new Date().toISOString();
   const order: Order = {
     id: newOrderId(),
@@ -39,25 +40,6 @@ export async function placeOrder(input: {
   };
   await orders().create(order);
   return order;
-}
-
-/**
- * Forwards a new order to ORDER_WEBHOOK_URL (Google Sheet script, WhatsApp
- * agent, Slack, owner email...). Fire-and-forget: a slow or broken
- * webhook must never fail a customer's checkout.
- */
-export function notifyNewOrder(order: Order): void {
-  const url = process.env.ORDER_WEBHOOK_URL;
-  if (!url) return;
-  fetch(url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(process.env.ORDER_WEBHOOK_SECRET ? { "x-webhook-secret": process.env.ORDER_WEBHOOK_SECRET } : {}),
-    },
-    body: JSON.stringify({ event: "order.created", order }),
-    signal: AbortSignal.timeout(5000),
-  }).catch((err) => console.error("order webhook failed", order.id, err));
 }
 
 /** Public view for the confirmation and tracking pages: area only, masked phone. */
@@ -79,15 +61,6 @@ export function publicOrder(o: Order) {
 }
 
 export type PublicOrder = ReturnType<typeof publicOrder>;
-
-export function isAdmin(req: Request): boolean {
-  const expected = process.env.ADMIN_TOKEN;
-  if (!expected || expected.length < 16) return false; // admin is off until a strong token is set
-  const given = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
-  const a = Buffer.from(given);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
 
 /** Small in-memory fixed-window limiter. Per instance; put a CDN/WAF rule in front for real abuse. */
 const hits = new Map<string, { count: number; reset: number }>();

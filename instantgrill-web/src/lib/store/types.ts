@@ -76,3 +76,53 @@ export function applyUpdate(order: Order, patch: OrderUpdate, now = new Date()):
   if (patch.rider !== undefined) next.rider = patch.rider || undefined;
   return next;
 }
+
+// ---- Enquiries, contact messages, menu overrides, delivery areas ----
+
+export type Enquiry = {
+  id: string;
+  createdAt: string;
+  type: "bulk" | "corporate" | "event";
+  name: string;
+  phone: string;
+  date?: string;
+  people?: number;
+  area?: string;
+  message?: string;
+};
+
+export type ContactMessage = {
+  id: string;
+  createdAt: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  message: string;
+};
+
+/** Owner edits on top of the catalog. Missing fields keep the catalog value. */
+export type ProductOverride = { price?: number; soldOut?: boolean; active?: boolean };
+export type MenuOverrides = Record<string, ProductOverride>;
+
+/** fee null = not confirmed yet; the team confirms it on the call. */
+export type DeliveryArea = { name: string; fee: number | null; active: boolean };
+
+export interface InboxRepository<T> {
+  create(item: T): Promise<void>;
+  list(limit?: number): Promise<T[]>;
+}
+
+export interface SettingsRepository {
+  getOverrides(): Promise<MenuOverrides>;
+  setOverride(slug: string, patch: ProductOverride): Promise<MenuOverrides>;
+  /** null = never edited; callers fall back to the catalog defaults. */
+  getAreas(): Promise<DeliveryArea[] | null>;
+  setAreas(areas: DeliveryArea[]): Promise<void>;
+}
+
+export type Store = {
+  orders: OrderRepository;
+  enquiries: InboxRepository<Enquiry>;
+  messages: InboxRepository<ContactMessage>;
+  settings: SettingsRepository;
+};

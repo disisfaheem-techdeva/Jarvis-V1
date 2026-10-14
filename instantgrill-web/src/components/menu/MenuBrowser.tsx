@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { MagnifyingGlass, X } from "@phosphor-icons/react";
-import { CATEGORIES, products, type Category } from "@/lib/catalog";
+import { CATEGORIES, type Category } from "@/lib/catalog";
 import { formatPKR } from "@/lib/pricing";
 import { useCart } from "../cart/CartProvider";
 import { Container, buttonClass } from "../ui";
+import { useMenu } from "./MenuProvider";
 import { ProductCard } from "./ProductCard";
 
 const FILTERS = [
@@ -22,6 +23,7 @@ export function MenuBrowser() {
   const [query, setQuery] = useState("");
   const tabsRef = useRef<HTMLDivElement>(null);
   const cart = useCart();
+  const { products } = useMenu();
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -30,7 +32,7 @@ export function MenuBrowser() {
         (!q || p.name.toLowerCase().includes(q)) &&
         filters.every((f) => p.tags?.includes(f)),
     );
-  }, [filters, query]);
+  }, [filters, query, products]);
 
   const sections = CATEGORIES.map((c) => ({ ...c, items: visible.filter((p) => p.category === c.id) })).filter(
     (s) => s.items.length > 0,

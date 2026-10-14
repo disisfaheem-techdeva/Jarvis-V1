@@ -4,15 +4,17 @@ import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Handbag, Minus, Plus, Trash, X } from "@phosphor-icons/react";
-import { findProduct, products } from "@/lib/catalog";
+import { findIn } from "@/lib/menu-types";
 import { formatPKR, lineKey } from "@/lib/pricing";
 import { useCart } from "./CartProvider";
+import { useMenu } from "../menu/MenuProvider";
 import { buttonClass } from "../ui";
 
 const UPSELL = ["drink-500", "drink-1-5l", "extra-chicken-skewer", "extra-beef-skewer"];
 
 export function CartDrawer() {
   const cart = useCart();
+  const menu = useMenu();
   const reduce = useReducedMotion();
   const panel = useRef<HTMLDivElement>(null);
   const { open, setOpen } = cart;
@@ -29,7 +31,7 @@ export function CartDrawer() {
     };
   }, [open, setOpen]);
 
-  const upsell = products.filter((p) => UPSELL.includes(p.slug));
+  const upsell = menu.products.filter((p) => UPSELL.includes(p.slug) && !p.soldOut);
 
   return (
     <AnimatePresence>
@@ -81,7 +83,7 @@ export function CartDrawer() {
                 <div className="flex-1 overflow-y-auto px-6 py-6">
                   <ul className="space-y-4">
                     {cart.lines.map((line) => {
-                      const p = findProduct(line.slug);
+                      const p = findIn(menu, line.slug);
                       if (!p) return null;
                       const key = lineKey(line);
                       return (
@@ -157,7 +159,7 @@ export function CartDrawer() {
                     </div>
                     <div className="flex justify-between text-ash-300">
                       <dt>Delivery</dt>
-                      <dd>{cart.deliveryFee === null ? "Calculated at checkout" : formatPKR(cart.deliveryFee)}</dd>
+                      <dd>Calculated at checkout</dd>
                     </div>
                   </dl>
                   <Link href="/checkout" onClick={() => setOpen(false)} className={buttonClass("primary", "lg", "w-full")}>

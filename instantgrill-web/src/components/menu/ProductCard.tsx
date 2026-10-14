@@ -3,12 +3,14 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Check, Plus } from "@phosphor-icons/react";
-import { CHUTNEYS, SALADS, isBox, savingFor, type Chutney, type Product, type Salad } from "@/lib/catalog";
+import { CHUTNEYS, SALADS, isBox, type Chutney, type Product, type Salad } from "@/lib/catalog";
+import { savingIn } from "@/lib/menu-types";
 import { formatPKR } from "@/lib/pricing";
 import { useCart } from "../cart/CartProvider";
 import { MotionImage } from "../MotionImage";
 import { Button } from "../ui";
 import { ChoicePills } from "./ChoicePills";
+import { useMenu } from "./MenuProvider";
 
 export function productMeta(p: Product): string {
   const parts: string[] = [];
@@ -29,7 +31,7 @@ export function ProductCard({ product: p, priority = false }: { product: Product
   const [chutney, setChutney] = useState<Chutney>();
   const [salad, setSalad] = useState<Salad>();
   const [added, setAdded] = useState(false);
-  const saving = savingFor(p);
+  const saving = savingIn(useMenu(), p);
 
   function add(line: Parameters<typeof cart.add>[0]) {
     cart.add(line, { open: false });

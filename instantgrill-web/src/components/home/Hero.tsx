@@ -6,7 +6,7 @@ import { WhatsappLogo } from "@phosphor-icons/react";
 import { brand, images } from "@/lib/catalog";
 import { MotionImage } from "../MotionImage";
 import { ButtonLink, Container, buttonClass } from "../ui";
-import { whatsappLink } from "../WhatsAppFab";
+import { whatsappLink } from "@/lib/whatsapp";
 
 const ease = [0.16, 1, 0.3, 1] as const;
 

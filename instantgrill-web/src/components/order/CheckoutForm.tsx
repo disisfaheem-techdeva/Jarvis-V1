@@ -1,14 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { track } from "@/lib/analytics";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Clock, LockSimple, WarningCircle } from "@phosphor-icons/react";
-import { delivery, findProduct } from "@/lib/catalog";
+import { delivery } from "@/lib/catalog";
+import { findIn } from "@/lib/menu-types";
 import { availableSlots, describeSlot } from "@/lib/delivery";
 import { formatPKR } from "@/lib/pricing";
 import type { FieldErrors } from "@/lib/validation";
 import { useCart } from "../cart/CartProvider";
+import { useMenu } from "../menu/MenuProvider";
 import { Button, buttonClass } from "../ui";
 
 const fieldClass =
@@ -48,7 +51,26 @@ function Field({
 
 export function CheckoutForm() {
   const cart = useCart();
+  const menu = useMenu();
   const router = useRouter();
+  const [areaName, setAreaName] = useState("");
+  const area = menu.areas.find((a) => a.name === areaName);
+  // Fee is known only once an area with a confirmed fee is picked.
+  const deliveryFee = area ? area.fee : null;
+  const total = cart.subtotal + (deliveryFee ?? 0);
+
+  const checkoutTracked = useRef(false);
+  useEffect(() => {
+    if (!cart.hydrated || cart.lines.length === 0 || checkoutTracked.current) return;
+    checkoutTracked.current = true;
+    track("InitiateCheckout", {
+      value: cart.subtotal,
+      items: cart.lines.flatMap((l) => {
+        const p = findIn(menu, l.slug);
+        return p ? [{ id: p.slug, name: p.name, price: p.price, qty: l.qty }] : [];
+      }),
+    });
+  }, [cart.hydrated, cart.lines, cart.subtotal, menu]);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -143,12 +165,15 @@ export function CheckoutForm() {
           <input id="phone" name="phone" type="tel" inputMode="tel" autoComplete="tel" placeholder="0300 1234567" required aria-invalid={!!errors.phone} aria-describedby={describedBy("phone", true)} className={`${fieldClass} ${border("phone")}`} />
         </Field>
         <Field id="area" label={`Area in ${delivery.city}`} error={errors.area}>
-          <select id="area" name="area" required defaultValue="" aria-invalid={!!errors.area} aria-describedby={describedBy("area")} className={`${fieldClass} ${border("area")}`}>
+          <select id="area" name="area" required value={areaName} onChange={(e) => setAreaName(e.target.value)} aria-invalid={!!errors.area} aria-describedby={describedBy("area")} className={`${fieldClass} ${border("area")}`}>
             <option value="" disabled>
               Select your area
             </option>
-            {delivery.areas.map((a) => (
-              <option key={a}>{a}</option>
+            {menu.areas.map((a) => (
+              <option key={a.name} value={a.name}>
+                {a.name}
+                {a.fee !== null ? ` (delivery ${formatPKR(a.fee)})` : ""}
+              </option>
             ))}
           </select>
         </Field>
@@ -218,7 +243,8 @@ export function CheckoutForm() {
         <h2 className="text-xl font-semibold text-ash-50">Order summary</h2>
         <ul className="space-y-3">
           {cart.lines.map((l) => {
-            const p = findProduct(l.slug)!;
+            const p = findIn(menu, l.slug);
+            if (!p) return null;
             return (
               <li key={`${l.slug}-${l.chutney}-${l.salad}`} className="flex justify-between gap-4 text-sm">
                 <span className="text-ash-100">
@@ -241,11 +267,13 @@ export function CheckoutForm() {
           </div>
           <div className="flex justify-between gap-4 text-ash-300">
             <dt>Delivery</dt>
-            <dd className="text-right">{cart.deliveryFee === null ? "Confirmed on WhatsApp" : formatPKR(cart.deliveryFee)}</dd>
+            <dd className="text-right">
+              {!area ? "Choose your area" : deliveryFee === null ? "Confirmed on WhatsApp" : formatPKR(deliveryFee)}
+            </dd>
           </div>
           <div className="flex justify-between pt-2 text-lg font-semibold text-ash-50">
-            <dt>Pay on delivery{cart.deliveryFee === null && <span className="block text-xs font-normal text-ash-400">plus delivery fee</span>}</dt>
-            <dd className="font-mono text-ember-400">{formatPKR(cart.total)}</dd>
+            <dt>Pay on delivery{deliveryFee === null && <span className="block text-xs font-normal text-ash-400">plus delivery fee</span>}</dt>
+            <dd className="font-mono text-ember-400">{formatPKR(total)}</dd>
           </div>
         </dl>
         {day && chosenSlot && (
