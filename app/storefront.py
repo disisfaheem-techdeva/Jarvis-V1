@@ -9,7 +9,12 @@ storefront; any client with a website can connect the same way.
                                    ▼
                      storefront_orders / storefront_inbox   (RLS, tenant-scoped)
                                    │
-                                   ├─ revenue_events row when an order is delivered
+                                   ├─ the platform's own Orders (orders, source 'website'):
+                                   │    same order number, status follows the site, and on
+                                   │    delivery an invoice + cash payment (COD), so Revenue,
+                                   │    Daily Closing and P&L count it like any other sale
+                                   ├─ enquiries and contact messages become Leads
+                                   ├─ revenue_events row when an order is delivered (attribution)
                                    └─ platform events  storefront.order.created,
                                       storefront.order.status_changed,
                                       storefront.enquiry.created, storefront.contact.created
@@ -194,6 +199,163 @@ RETURNING id, status, total, revenue_event_id
 """
 
 
+# ------------------------------------------------------- into the platform's Orders
+# A website order is also an ordinary platform order (app/orders.py), so it shows
+# on the dashboard's Orders page next to WhatsApp and walk-in orders, and its
+# money reaches Revenue, Daily Closing and P&L through the usual invoice and
+# payment. The website stays in charge of it: its status follows the site, and
+# the dashboard's order buttons refuse it (orders.website_owned).
+SITE_TO_ORDER = {"new": "new", "confirmed": "confirmed", "preparing": "confirmed",
+                 "out_for_delivery": "out_for_delivery", "delivered": "delivered", "cancelled": "cancelled"}
+_LADDER = ("new", "confirmed", "out_for_delivery", "delivered")
+_STAMP = {"confirmed": "confirmed_at", "out_for_delivery": "dispatched_at", "delivered": "delivered_at"}
+SITE_ACTOR = "website"
+
+
+def _slot_text(slot: SFSlot | None) -> str:
+    """'Tue 20 Oct, 7:30 PM' (or the morning window) from the site's date + HH:MM."""
+    if not slot or not slot.date:
+        return ""
+    try:
+        day = datetime.strptime(slot.date, "%Y-%m-%d").strftime("%a %d %b").replace(" 0", " ")
+    except ValueError:
+        day = slot.date
+    if not slot.slot:
+        return day
+    if slot.slot == "morning":
+        return f"{day}, 10 AM to 12 PM"
+    try:
+        t = datetime.strptime(slot.slot, "%H:%M")
+        return f"{day}, {t.hour % 12 or 12}:{t.minute:02d} {'PM' if t.hour >= 12 else 'AM'}"
+    except ValueError:
+        return f"{day}, {slot.slot}"
+
+
+def _site_customer(cur, name: str, phone: str):
+    """The business's customer with this phone (last 10 digits), or a new one."""
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    if len(digits) < 7:
+        return None
+    cur.execute("SELECT id FROM customers WHERE right(regexp_replace(coalesce(phone, ''), '\\D', '', 'g'), 10) "
+                "= right(%s, 10) ORDER BY created_at LIMIT 1", (digits,))
+    row = cur.fetchone()
+    if row:
+        return row["id"]
+    cur.execute("INSERT INTO customers (tenant_id, name, phone, source) VALUES (current_tenant(), %s, %s, 'order:website') "
+                "RETURNING id", (name[:120], phone[:40]))
+    return cur.fetchone()["id"]
+
+
+def _create_platform_order(cur, o: SFOrder) -> dict:
+    from .orders import _event, catalogue, match_item
+    c = o.customer
+    address = ", ".join(x for x in (c.address, c.landmark, c.area) if x)
+    notes = []
+    when = _slot_text(o.slot)
+    if when:
+        notes.append(f"Delivery slot: {when}")
+    if o.deliveryFee is None:
+        notes.append("Delivery charge to be confirmed with the customer.")
+    if c.notes:
+        notes.append(f"Customer note: {c.notes}")
+    cid = _site_customer(cur, c.name, c.phone)
+    cur.execute("""INSERT INTO orders (tenant_id, number, customer_id, customer_name, customer_phone, status, fulfilment,
+                                       address, subtotal, delivery_fee, discount, total, source, source_ref, notes,
+                                       created_by, created_by_type, created_at)
+                   VALUES (current_tenant(), %s, %s, %s, %s, 'new', 'delivery', %s, %s, %s, 0, %s, 'website', %s, %s,
+                           %s, 'system', %s)
+                   RETURNING *""",
+                (o.id, cid, c.name[:120], c.phone[:40], address[:500], o.subtotal, o.deliveryFee or 0, o.total,
+                 "website:" + o.id, "\n".join(notes)[:2000], SITE_ACTOR, o.createdAt))
+    row = dict(cur.fetchone())
+    cat = catalogue(cur)
+    for line in o.lines:
+        extras = ", ".join(x for x in (line.chutney and f"{line.chutney} chutney", line.salad and f"{line.salad} salad") if x)
+        match = match_item(cat, line.name)
+        cur.execute("""INSERT INTO order_items (tenant_id, order_id, product_id, service_id, description, quantity,
+                                                unit_price, line_total)
+                       VALUES (current_tenant(), %s, %s, %s, %s, %s, %s, %s)""",
+                    (row["id"], match["id"] if match and match["kind"] == "product" else None,
+                     match["id"] if match and match["kind"] == "service" else None,
+                     (line.name + (f" ({extras})" if extras else ""))[:200], line.qty, line.unitPrice, line.lineTotal))
+    _event(cur, row["id"], SITE_ACTOR, "system", "created",
+           "Order placed on the website" + (f" for {when}" if when else ""))
+    return row
+
+
+def _follow_site_status(cur, row: dict, o: SFOrder) -> None:
+    """Move the platform order to where the website says it is. Forward only."""
+    from .audit import record
+    from .operations import _paid_so_far, _settle
+    from .orders import _ensure_invoice, _event, _recognise
+    target = SITE_TO_ORDER[o.status]
+    if row["status"] == target or row["status"] in ("delivered", "cancelled"):
+        return
+    if target == "cancelled":
+        if row["invoice_id"] and _paid_so_far(cur, row["invoice_id"]) > 0:
+            _event(cur, row["id"], SITE_ACTOR, "system", "check",
+                   "Cancelled on the website, but money was already recorded here. Check it.")
+            return
+        if row["invoice_id"]:
+            cur.execute("UPDATE invoices SET voided_at = now(), void_reason = %s, status = 'void', updated_at = now() "
+                        "WHERE id = %s AND voided_at IS NULL", (f"Order {row['number']} cancelled on the website",
+                                                                 row["invoice_id"]))
+        cur.execute("UPDATE orders SET status = 'cancelled', cancelled_at = now(), cancel_reason = %s, updated_at = now() "
+                    "WHERE id = %s", ("Cancelled on the website", row["id"]))
+        _event(cur, row["id"], SITE_ACTOR, "system", "cancelled", "Cancelled on the website")
+        record(cur, action="order.cancelled", resource="orders", resource_id=str(row["id"]), actor=SITE_ACTOR,
+               actor_type="system", detail={"number": row["number"], "from": row["status"]})
+        return
+    for step in _LADDER[_LADDER.index(row["status"]) + 1:_LADDER.index(target) + 1]:
+        cur.execute(f"UPDATE orders SET status = %s, {_STAMP[step]} = now(), updated_at = now() WHERE id = %s",
+                    (step, row["id"]))
+        detail = f"Rider: {o.rider}" if step == "out_for_delivery" and o.rider else "Updated on the website"
+        _event(cur, row["id"], SITE_ACTOR, "system", step, detail)
+        record(cur, action="order." + step, resource="orders", resource_id=str(row["id"]), actor=SITE_ACTOR,
+               actor_type="system", detail={"number": row["number"], "from": row["status"]})
+        row["status"] = step
+    if row["status"] == "delivered":
+        # Cash on delivery: marked delivered on the website means the cash was collected.
+        inv = _ensure_invoice(cur, row, SITE_ACTOR)
+        owed = round(float(row["total"]) - _paid_so_far(cur, inv), 2)
+        if owed > 0:
+            cur.execute("""INSERT INTO payments (tenant_id, invoice_id, customer_id, amount, method, reference, notes)
+                           VALUES (current_tenant(), %s, %s, %s, 'cash', %s, %s)""",
+                        (inv, row["customer_id"], owed, row["number"],
+                         f"Order {row['number']}: cash on delivery, marked delivered on the website"))
+            _settle(cur, inv, SITE_ACTOR)
+            _event(cur, row["id"], SITE_ACTOR, "system", "payment",
+                   "Rs {:,.0f} cash on delivery (marked delivered on the website). Fully paid.".format(owed))
+        _recognise(cur, row, SITE_ACTOR, "system")
+
+
+def mirror_order(cur, o: SFOrder) -> None:
+    """Create or update the platform order for a website order. Idempotent."""
+    cur.execute("SELECT * FROM orders WHERE source_ref = %s FOR UPDATE", ("website:" + o.id,))
+    row = cur.fetchone()
+    row = dict(row) if row else _create_platform_order(cur, o)
+    _follow_site_status(cur, row, o)
+
+
+def _site_lead(cur, kind: str, item: SFInboxItem, payload: dict) -> None:
+    """A catering enquiry or contact message becomes a Lead, so it is followed up
+    like every other enquiry. No automation is started from here."""
+    if kind == "enquiry":
+        people = payload.get("people")
+        service = "Catering / event" + (f" ({people} people)" if people else "")
+        bits = [payload.get("type"), payload.get("date") and f"date {payload.get('date')}", payload.get("area"),
+                payload.get("budget") and f"budget {payload.get('budget')}", payload.get("notes") or payload.get("message")]
+        tags = ["website", "catering"]
+    else:
+        service = "Website message"
+        bits = [payload.get("subject"), payload.get("message")]
+        tags = ["website", "message"]
+    notes = " · ".join(str(b) for b in bits if b)
+    cur.execute("""INSERT INTO leads (tenant_id, name, phone, email, service, source, tags, notes, created_by)
+                   VALUES (current_tenant(), %s, %s, %s, %s, 'api', %s, %s, %s)""",
+                (item.name, item.phone, item.email, service[:120], tags, notes[:2000] or None, SITE_ACTOR))
+
+
 def ingest_order(tenant_id: str, o: SFOrder) -> dict:
     """Upsert one order. Returns what changed, for event emission. Idempotent."""
     slot = o.slot or SFSlot()
@@ -238,6 +400,11 @@ def ingest_order(tenant_id: str, o: SFOrder) -> dict:
             )
             revenue_id = cur.fetchone()["id"]
             cur.execute("UPDATE storefront_orders SET revenue_event_id = %s WHERE id = %s", (revenue_id, row["id"]))
+        try:
+            with cur.connection.transaction():  # a savepoint: the website order is kept even if this fails
+                mirror_order(cur, o)
+        except Exception:
+            log.exception("storefront: order %s not copied into Orders for %s (a re-send retries it)", o.id, tenant_id)
     return {
         "applied": True,
         "created": prev is None,
@@ -256,7 +423,14 @@ def ingest_inbox(tenant_id: str, kind: str, item: SFInboxItem, raw: dict) -> boo
                ON CONFLICT (tenant_id, external_id) DO NOTHING RETURNING id""",
             (item.id, kind, item.name, item.phone, item.email, Json(payload), item.createdAt),
         )
-        return cur.fetchone() is not None
+        created = cur.fetchone() is not None
+        if created:
+            try:
+                with cur.connection.transaction():
+                    _site_lead(cur, kind, item, payload)
+            except Exception:
+                log.exception("storefront: %s %s not added to Leads for %s", kind, item.id, tenant_id)
+        return created
 
 
 def _money(n: int | None) -> str:

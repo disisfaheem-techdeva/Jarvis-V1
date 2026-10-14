@@ -7845,6 +7845,8 @@ function ordDetailView(id){
     if (n === 'cancelled' && !isOwner()) return;
     acts += '<button class="btn' + (n === 'cancelled' ? '' : ' primary') + '" data-omove="' + n + '">' + esc(NAMES[n] || n) + '</button>';
   });
+  // A website order follows the website: its status and cash-on-delivery payment arrive from there.
+  if (o.website_owned) acts = '<span class="card-note">Change this order in your website admin; it updates here by itself.</span>';
   var who = '<div style="display:grid;gap:4px"><div><b>' + esc(o.customer_name || 'No name') + '</b>' + (o.customer_phone ? ' · ' + esc(o.customer_phone) : '') + '</div>' +
     '<div>' + (o.fulfilment === 'pickup' ? 'Pickup from the shop' : 'Delivery to: ' + esc(o.address || '(no address yet: ask the customer)')) + '</div>' +
     '<div class="card-note">From ' + esc(ORD_SRC[o.source] || o.source) + (o.created_by_type === 'agent' ? ' (taken by your WhatsApp agent)' : '') + ' · ' + when(o.created_at) +
@@ -7859,14 +7861,15 @@ function ordDetailView(id){
     '<tr><td colspan="3"><b>Total</b></td><td><b>' + money(o.total) + '</b></td></tr></tbody></table></div>';
   out += panel('Items', items);
   var payBox = '<div style="display:grid;gap:6px"><div>Paid: <b>' + money(o.paid) + '</b> · Still owed: <b>' + money(o.balance) + '</b></div>';
-  if (o.status !== 'cancelled' && o.balance > 0) payBox += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
+  if (o.website_owned) payBox += '<div class="card-note">Cash on delivery: recorded here automatically when the website marks the order delivered.</div>';
+  else if (o.status !== 'cancelled' && o.balance > 0) payBox += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
     '<input class="fld" id="op_amt" type="number" min="1" placeholder="Amount" value="' + esc(ORD.payAmt || o.balance) + '" style="width:140px">' +
     '<select class="fld" id="op_m">' + ['cash', 'bank', 'online', 'card', 'other'].map(function(m){ return '<option value="' + m + '"' + (ORD.payMethod === m ? ' selected' : '') + '>' + ({ cash: 'Cash', bank: 'Bank transfer', online: 'JazzCash / EasyPaisa / online', card: 'Card', other: 'Other' })[m] + '</option>'; }).join('') + '</select>' +
     '<button class="btn primary" id="op_pay"' + (ORD.busy ? ' disabled' : '') + '>Record payment</button></div>';
   out += panel('Payment', payBox + '</div>');
   out += panel('Timeline', '<div style="display:grid;gap:6px">' + (o.timeline || []).map(function(e){
     var lab = { created: 'Order placed', confirmed: 'Confirmed', out_for_delivery: 'Out for delivery', delivered: 'Delivered', cancelled: 'Cancelled', payment: 'Payment', recognised: 'Counted as a sale', check: 'Check' }[e.event] || e.event;
-    return '<div><span class="card-note">' + when(e.at) + '</span> · <b>' + esc(lab) + '</b>' + (e.actor_type === 'agent' ? ' <span class="card-note">(WhatsApp agent)</span>' : '') + (e.detail ? ' — ' + esc(e.detail) : '') + '</div>';
+    return '<div><span class="card-note">' + when(e.at) + '</span> · <b>' + esc(lab) + '</b>' + (e.actor_type === 'agent' ? ' <span class="card-note">(WhatsApp agent)</span>' : '') + (e.actor_type === 'system' && o.source === 'website' ? ' <span class="card-note">(website)</span>' : '') + (e.detail ? ' — ' + esc(e.detail) : '') + '</div>';
   }).join('') + '</div>');
   setTimeout(ordWire, 0);
   return out;
