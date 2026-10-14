@@ -44,7 +44,7 @@ export default async function SlipPage({ params }: { params: Promise<{ id: strin
               <p>
                 {o.customer.address}, {o.customer.area}
               </p>
-              {o.customer.landmark && <p>Near: {o.customer.landmark}</p>}
+              {o.customer.landmark && <p>Landmark: {o.customer.landmark}</p>}
               {o.customer.notes && <p>Note: {o.customer.notes}</p>}
               <hr className="my-4 border-dashed border-black" />
               <p className="text-base font-bold">

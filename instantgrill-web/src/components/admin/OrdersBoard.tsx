@@ -119,7 +119,7 @@ export function OrdersBoard({ initialStatus }: { initialStatus?: OrderStatus }) 
                   </p>
                   <p className="mt-1 max-w-xl text-sm text-ash-400">
                     {o.customer.address}, {o.customer.area}
-                    {o.customer.landmark ? ` (near ${o.customer.landmark})` : ""}
+                    {o.customer.landmark ? ` (${/^near\b/i.test(o.customer.landmark) ? "" : "near "}${o.customer.landmark})` : ""}
                     {o.customer.notes ? `. Note: ${o.customer.notes}` : ""}
                   </p>
                   <p className="mt-1 text-sm font-medium text-ember-300">Deliver {describeSlot(o.slot)}</p>

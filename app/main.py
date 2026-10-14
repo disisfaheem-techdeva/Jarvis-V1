@@ -44,6 +44,7 @@ from .provisioning import make_provisioning_router
 from .plans import make_plans_router
 from .pins import make_pins_router
 from . import trial
+from .storefront import make_storefront_router
 
 # API docs (/docs, /redoc, /openapi.json) hand anyone on the internet the
 # full route surface and request/response schema. Off by default; set
@@ -116,6 +117,8 @@ app.include_router(make_orders_router())
 from .voice import make_voice_router
 app.include_router(make_voice_router())
 trial.install(app)
+# Storefront: orders, enquiries and messages from a tenant's own website (docs/STOREFRONT.md)
+app.include_router(make_storefront_router(P))
 
 # The two client-facing pages. The API image is built from ./app, so web/ is
 # mounted in (see docker-compose.yml) rather than baked into the image; WEB_DIR
@@ -634,6 +637,15 @@ def dashboard_page():
     auth.resolve_scope(). A tenant id supplied by the browser is ignored.
     """
     return _page("dashboard.html")
+
+
+@app.get("/orders-view", include_in_schema=False)
+@app.get("/storefront-view", include_in_schema=False)
+def storefront_page():
+    """Online orders dashboard (website orders, upcoming deliveries, sales, sources).
+    Like /dashboard it carries no tenant identity; every figure comes from
+    /storefront/* which resolves the tenant from the signed session."""
+    return _page("storefront.html")
 
 
 @app.get("/assets/td.css", include_in_schema=False)

@@ -19,20 +19,29 @@ About an hour, in this order. Nothing here needs code changes.
    - `NEXT_PUBLIC_META_PIXEL_ID`, `META_CAPI_TOKEN`, `NEXT_PUBLIC_GA4_ID`
 3. Deploy. Open `/admin`, sign in, and in **Menu & areas** set the delivery areas and fees.
 
-## 3. Domain
+## 3. TechDeva dashboard
+
+On the platform, sign in as the Instant Grill owner, open `/orders-view` and press
+**Connect website**. Put the two values it shows into Vercel as `PLATFORM_WEBHOOK_URL`
+and `PLATFORM_WEBHOOK_SECRET`, redeploy, then press **Sync to TechDeva** in `/admin`.
+From then on every order, status change, enquiry and message appears on the platform
+live. Details: `docs/STOREFRONT.md` in the platform repo.
+
+## 4. Domain
 
 Vercel > Project > Domains > add `instantgrill.shop` and `www.instantgrill.shop`, then set the DNS
 records Vercel shows at your domain registrar. Keep the old site live until the new one checks out.
 
-## 4. Photos and video
+## 5. Photos and video
 
 Put originals in `assets-original/photos` (large), `assets-original/cards` (menu cards),
 `assets-original/unboxing` (the ezgif frames) and `assets-original/logo.png|svg`, then run
 `npm run media`. It writes light WebP files and one unboxing video, and prints the weight saved.
 Set each slot's `src` in `src/lib/catalog.ts` (and `media.unboxing` for the video).
 
-## 5. Check before switching DNS
+## 6. Check before switching DNS
 
-- Place a test order on a phone: it appears in `/admin/orders`, the email arrives, WhatsApp opens with the order.
+- Place a test order on a phone: it appears in `/admin/orders` and on the platform's `/orders-view`,
+  the email arrives, WhatsApp opens with the order.
 - Meta Events Manager > Test events (`META_CAPI_TEST_CODE`): Purchase arrives from browser and server, deduplicated.
 - Run Lighthouse (mobile) on the home and menu pages.

@@ -105,3 +105,8 @@ Behavior, verified:
 - Point `HERMES_URL` at the real bot on the VPS/desktop.
 - Make CRM + Reporting compute real ROAS/CPL/bookings from `revenue_events` + `campaigns`.
 - Phase D: onboard a 2nd tenant with only a `tenant_config` row — the moment TechDeva becomes a product.
+
+## Storefront orders (tenant websites)
+Client websites push signed order, enquiry and message events to
+`POST /storefront/webhook/{tenant_id}`; owners see them on `/orders-view`.
+Instant Grill is the first. See `docs/STOREFRONT.md`.

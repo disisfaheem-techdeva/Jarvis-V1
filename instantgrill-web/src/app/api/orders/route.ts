@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { sendPurchase } from "@/lib/capi";
 import { notifyNewOrder } from "@/lib/notify";
 import { clientIp, placeOrder, publicOrder, rateLimited } from "@/lib/orders";
@@ -48,8 +48,7 @@ export async function POST(req: Request) {
       slot: v.slot,
       source: { utmSource: str(src.utmSource), utmCampaign: str(src.utmCampaign), referrer: str(src.referrer) },
     });
-    notifyNewOrder(order);
-    sendPurchase(order, req);
+    after(() => Promise.allSettled([notifyNewOrder(order), sendPurchase(order, req)]));
     return NextResponse.json({ order: publicOrder(order) }, { status: 201 });
   } catch (err) {
     if (err instanceof PricingError) return NextResponse.json({ error: err.message, fields: { cart: err.message } }, { status: 422 });

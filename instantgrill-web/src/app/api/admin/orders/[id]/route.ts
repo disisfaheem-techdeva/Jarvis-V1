@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
+import { notifyOrderUpdated } from "@/lib/notify";
 import { isAdminRequest } from "@/lib/auth";
 import { ORDER_STATUSES, orders, type OrderUpdate } from "@/lib/store";
 
@@ -18,6 +19,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   try {
     const order = await orders().update(id, patch);
     if (!order) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    after(() => notifyOrderUpdated(order));
     return NextResponse.json({ order });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 409 });

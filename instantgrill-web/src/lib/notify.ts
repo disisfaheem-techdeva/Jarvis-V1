@@ -1,5 +1,6 @@
 import "server-only";
 import { describeSlot } from "./delivery";
+import { sendToPlatform } from "./platform";
 import { formatPKR } from "./pricing";
 import type { ContactMessage, Enquiry, Order } from "./store/types";
 
@@ -14,11 +15,11 @@ type Event =
   | { event: "enquiry.created"; enquiry: Enquiry }
   | { event: "contact.created"; message: ContactMessage };
 
-function email(subject: string, text: string) {
+async function email(subject: string, text: string): Promise<void> {
   const key = process.env.RESEND_API_KEY;
   const to = process.env.OWNER_EMAIL;
   if (!key || !to) return;
-  fetch("https://api.resend.com/emails", {
+  await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
     body: JSON.stringify({ from: process.env.RESEND_FROM ?? "Instant Grill <orders@instantgrill.shop>", to: [to], subject, text }),
@@ -28,10 +29,10 @@ function email(subject: string, text: string) {
     .catch((err) => console.error("resend failed", err));
 }
 
-function webhook(payload: Event) {
+async function webhook(payload: Event): Promise<void> {
   const url = process.env.ORDER_WEBHOOK_URL;
   if (!url) return;
-  fetch(url, {
+  await fetch(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -52,29 +53,46 @@ export function orderEmailText(o: Order): string {
     `Total COD: ${formatPKR(o.total)}${o.deliveryFee === null ? " + delivery (confirm fee)" : ""}`,
     "",
     `${o.customer.name}  ${o.customer.phone}`,
-    `${o.customer.address}, ${o.customer.area}${o.customer.landmark ? ` (near ${o.customer.landmark})` : ""}`,
+    `${o.customer.address}, ${o.customer.area}${o.customer.landmark ? ` (${/^near\b/i.test(o.customer.landmark) ? "" : "near "}${o.customer.landmark})` : ""}`,
     o.customer.notes ? `Note: ${o.customer.notes}` : "",
     "",
     `WhatsApp: https://wa.me/92${o.customer.phone.slice(1)}`,
   ].join("\n");
 }
 
-export function notifyNewOrder(order: Order) {
-  email(`New order ${order.id}: ${formatPKR(order.total)}, ${order.customer.area}`, orderEmailText(order));
-  webhook({ event: "order.created", order });
+/**
+ * Everything that should happen after a new order, as one promise that never
+ * rejects. Routes pass it to next/server after() so it finishes even on
+ * serverless hosts that freeze the function once the response is sent.
+ */
+export async function notifyNewOrder(order: Order): Promise<void> {
+  await Promise.allSettled([
+    email(`New order ${order.id}: ${formatPKR(order.total)}, ${order.customer.area}`, orderEmailText(order)),
+    webhook({ event: "order.created", order }),
+    sendToPlatform("order.created", { order }),
+  ]);
 }
 
-export function notifyEnquiry(e: Enquiry) {
-  email(
-    `Event enquiry: ${e.name}${e.people ? `, ${e.people} people` : ""}`,
-    [`${e.type} enquiry`, `${e.name}  ${e.phone}`, e.date && `Date: ${e.date}`, e.people && `People: ${e.people}`, e.area && `Area: ${e.area}`, e.message]
-      .filter(Boolean)
-      .join("\n"),
-  );
-  webhook({ event: "enquiry.created", enquiry: e });
+/** Status, rider or any other change made in the site admin. */
+export async function notifyOrderUpdated(order: Order): Promise<void> {
+  await sendToPlatform("order.updated", { order });
 }
 
-export function notifyContact(m: ContactMessage) {
-  email(`Website message from ${m.name}`, [m.name, m.phone, m.email, "", m.message].filter((x) => x !== undefined).join("\n"));
-  webhook({ event: "contact.created", message: m });
+export async function notifyEnquiry(e: Enquiry): Promise<void> {
+  const text = [`${e.type} enquiry`, `${e.name}  ${e.phone}`, e.date && `Date: ${e.date}`, e.people && `People: ${e.people}`, e.area && `Area: ${e.area}`, e.message]
+    .filter(Boolean)
+    .join("\n");
+  await Promise.allSettled([
+    email(`Event enquiry: ${e.name}${e.people ? `, ${e.people} people` : ""}`, text),
+    webhook({ event: "enquiry.created", enquiry: e }),
+    sendToPlatform("enquiry.created", { enquiry: e }),
+  ]);
+}
+
+export async function notifyContact(m: ContactMessage): Promise<void> {
+  await Promise.allSettled([
+    email(`Website message from ${m.name}`, [m.name, m.phone, m.email, "", m.message].filter((x) => x !== undefined).join("\n")),
+    webhook({ event: "contact.created", message: m }),
+    sendToPlatform("contact.created", { message: m }),
+  ]);
 }

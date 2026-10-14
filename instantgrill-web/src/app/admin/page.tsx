@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { AdminPage } from "@/components/admin/gate";
+import { PlatformSync } from "@/components/admin/PlatformSync";
+import { platformConfigured } from "@/lib/platform";
 import { dashboardStats } from "@/lib/admin-stats";
 import { formatPKR } from "@/lib/pricing";
 import { ORDER_STATUSES, STATUS_LABEL, store } from "@/lib/store";
@@ -63,6 +65,11 @@ export default function AdminHome() {
                 )}
               </section>
             </div>
+
+            <section className="rounded-[var(--radius-card)] bg-coal-900 p-6 ring-1 ring-white/[0.06]">
+              <h2 className="mb-3 text-lg font-semibold text-ash-50">TechDeva dashboard</h2>
+              <PlatformSync configured={platformConfigured()} />
+            </section>
 
             <section className="rounded-[var(--radius-card)] bg-coal-900 p-6 ring-1 ring-white/[0.06]">
               <div className="flex items-center justify-between">

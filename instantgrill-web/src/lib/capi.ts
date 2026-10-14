@@ -40,11 +40,11 @@ export function purchaseEvent(order: Order, req: Request) {
 }
 
 /** Server-side Purchase, so ad attribution survives ad blockers. Fire-and-forget. */
-export function sendPurchase(order: Order, req: Request) {
+export async function sendPurchase(order: Order, req: Request): Promise<void> {
   const pixel = process.env.NEXT_PUBLIC_META_PIXEL_ID;
   const token = process.env.META_CAPI_TOKEN;
   if (!pixel || !token) return;
-  fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(pixel)}/events?access_token=${encodeURIComponent(token)}`, {
+  await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(pixel)}/events?access_token=${encodeURIComponent(token)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({

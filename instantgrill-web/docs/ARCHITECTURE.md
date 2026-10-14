@@ -27,7 +27,9 @@
                  notify ◄───────────────────────────────┤  order / enquiry / contact
                         ├─ Resend email to OWNER_EMAIL
                         └─ ORDER_WEBHOOK_URL (Sheet, Zapier, WhatsApp agent)
-                 capi   ◄───────────────────────────────┘  Meta Conversions API Purchase
+                 capi   ◄───────────────────────────────┤  Meta Conversions API Purchase
+                 platform ◄─────────────────────────────┘  signed events to TechDeva /storefront/webhook
+                          (orders, status changes, enquiries, messages; "Sync to TechDeva" resends all)
 
  Customer ──wa.me──► WhatsApp 0335 4693665: full order prefilled
  Owner    ──/admin─► confirm, preparing, out for delivery (rider), delivered
@@ -41,6 +43,7 @@
 | `src/lib/menu.ts` | Live menu = catalog + owner edits (prices, sold out, hidden, areas) from the store |
 | `src/lib/auth.ts` | Owner login: env credentials, signed session cookie, same-origin check |
 | `src/lib/notify.ts`, `src/lib/capi.ts`, `src/lib/analytics.ts` | Owner alerts, Meta CAPI, Pixel + GA4 events |
+| `src/lib/platform.ts` | Signed delivery of events to the TechDeva platform, with retries |
 | `src/lib/admin-stats.ts` | Dashboard numbers and customers, derived from orders |
 | `src/lib/delivery.ts` | Delivery slot rules (Asia/Karachi), shared by checkout and the API |
 | `src/lib/pricing.ts` | Server-side cart pricing with chutney/salad rules |

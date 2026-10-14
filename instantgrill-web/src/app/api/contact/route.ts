@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { notifyContact } from "@/lib/notify";
 import { clientIp, rateLimited } from "@/lib/orders";
 import { store, type ContactMessage } from "@/lib/store";
@@ -15,6 +15,6 @@ export async function POST(req: Request) {
   }
   const message: ContactMessage = { id: randomUUID(), createdAt: new Date().toISOString(), ...v.data };
   await store().messages.create(message);
-  notifyContact(message);
+  after(() => notifyContact(message));
   return NextResponse.json({ ok: true }, { status: 201 });
 }
