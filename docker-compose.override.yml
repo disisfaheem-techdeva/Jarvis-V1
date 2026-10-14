@@ -38,6 +38,34 @@ services:
       - traefik.http.services.techdeva-web.loadbalancer.server.port=3000
     networks:
       - default
+  # Instant Grill new website, PREVIEW only (new.instantgrill.shop, noindex).
+  # Source: git worktree of branch claude/relaxed-brown-mq7qmz. Secrets: IG_* in .env.
+  instantgrill-new:
+    build:
+      context: ../instantgrill-preview/instantgrill-web
+      args:
+        NEXT_PUBLIC_META_PIXEL_ID: ""
+        NEXT_PUBLIC_GA4_ID: ""
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://instantgrill_app:${IG_DB_PASSWORD}@db:5432/instantgrill
+      ADMIN_EMAIL: info@instantgrill.shop
+      ADMIN_PASSWORD: ${IG_ADMIN_PASSWORD}
+      ADMIN_SESSION_SECRET: ${IG_ADMIN_SESSION_SECRET}
+      # Existing platform tenant "Instant GRill"; stays silent until the secret is set.
+      PLATFORM_WEBHOOK_URL: http://api:8000/storefront/webhook/9c3e853c-568b-4f31-8324-5246e8cfd269
+      PLATFORM_WEBHOOK_SECRET: ${IG_PLATFORM_WEBHOOK_SECRET:-}
+      OWNER_EMAIL: info@instantgrill.shop
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.instantgrill-new.rule=Host(`new.instantgrill.shop`)"
+      - traefik.http.routers.instantgrill-new.entrypoints=websecure
+      - traefik.http.routers.instantgrill-new.tls.certresolver=letsencrypt
+      - traefik.http.routers.instantgrill-new.middlewares=instantgrill-new-noindex
+      - "traefik.http.middlewares.instantgrill-new-noindex.headers.customresponseheaders.X-Robots-Tag=noindex, nofollow"
+      - traefik.http.services.instantgrill-new.loadbalancer.server.port=3000
+    networks:
+      - default
 
 networks:
   hermes_net:
