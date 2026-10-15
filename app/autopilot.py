@@ -326,12 +326,18 @@ def _post_view(r):
 
 # ------------------------------------------------------------------- insights
 def _graph_get(path, params):
+    """GET from Meta. A refusal is logged (path and Meta's reason, never the token)
+    so a missing permission or an expired login shows up in the API logs."""
     try:
         r = requests.get(GRAPH + path, params=params, timeout=20)
         body = r.json()
-    except (requests.RequestException, ValueError):
+    except (requests.RequestException, ValueError) as e:
+        print("[autopilot] meta read %s failed: %s" % (path, e.__class__.__name__), flush=True)
         return None
     if r.status_code >= 400 or "error" in body:
+        err = body.get("error") or {}
+        print("[autopilot] meta read %s refused (%s): %s" % (path, err.get("code") or r.status_code,
+                                                            str(err.get("message") or "")[:160]), flush=True)
         return None
     return body
 

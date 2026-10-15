@@ -1,6 +1,6 @@
 """Storefront orders: the website -> platform webhook and the orders dashboard API.
 
-Needs the database with db/29_storefront_orders.sql and db/30_seed_instant_grill.sql
+Needs the database with db/29_storefront_orders.sql and tests/fixtures/storefront_test_tenant.sql
 applied, like the other API tests.
 """
 import json

@@ -1,3 +1,6 @@
+-- TEST FIXTURE ONLY. Never apply to production: it creates a test tenant
+-- (33333333-...) that tests/test_storefront.py posts orders to. It lives here, not in
+-- db/, so deploy scripts that run every db/*.sql can never pick it up.
 -- ============================================================================
 -- 30_seed_instant_grill.sql · Tenant: Instant Grill (food delivery, Lahore)
 --
