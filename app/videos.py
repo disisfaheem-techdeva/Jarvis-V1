@@ -129,7 +129,8 @@ def cleanup(force=False):
     _CLEANED[0] = time.time()
     with tenant_session(None, "techdeva_admin") as cur:
         cur.execute("""DELETE FROM social_videos v
-                        WHERE NOT EXISTS (SELECT 1 FROM social_posts p WHERE p.video_token = v.token
+                        WHERE NOT v.in_library
+                          AND NOT EXISTS (SELECT 1 FROM social_posts p WHERE p.video_token = v.token
                                              AND p.status IN ('draft','scheduled','publishing','failed'))
                           AND (v.created_at < now() - interval '30 days'
                                OR (v.created_at < now() - interval '2 days'

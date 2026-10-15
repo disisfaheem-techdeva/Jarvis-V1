@@ -8066,6 +8066,288 @@ window.addEventListener('hashchange', function(){
   if (typeof IBX !== 'undefined') { IBX.data = undefined; }
   S.navOpen = false; if (S.me) renderShell();
 });
+
+/* ======================================================== Content Autopilot
+   A month of Facebook/Instagram posts (app/autopilot.py): the photo and video
+   library, "Plan my month" (the AI writes drafts with proposed times from the
+   business's own facts), a week-by-week calendar with "Approve this week", and
+   the results read back from Meta. Approving a week turns its drafts into
+   ordinary scheduled posts (the Posts page and its scheduler do the posting). */
+var AP = { up: null, msg: null, weekMsg: {}, form: { days: 30, posts_per_week: 7, language: 'mix', goal: '', offers: '', starts_on: '' },
+           edit: {}, poll: null };
+function apDay(iso){ var d = new Date(iso); return d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Asia/Karachi' }); }
+function apTime(iso){ var d = new Date(iso); return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Karachi' }); }
+function apPkDate(d){ return new Date(d.getTime() + 5 * 3600e3).toISOString().slice(0, 10); }   // a Date as YYYY-MM-DD in Pakistan
+function apMonday(){ var now = new Date(Date.now() + 5 * 3600e3); var wd = (now.getUTCDay() + 6) % 7; now.setUTCDate(now.getUTCDate() - wd); return now.toISOString().slice(0, 10); }
+function apReload(which){
+  (which || ['ap_media', 'ap_plans', 'ap_cal', 'ap_res']).forEach(function(k){ S[k] = undefined; LOADING[k] = false; });
+  renderShell();
+}
+function apStatus(p){
+  var m = { draft: ['Waiting for approval', ''], scheduled: ['Approved, will post', 'ok'], publishing: ['Posting…', 'ok'],
+            published: ['Posted', 'ok'], partial: ['Posted on one platform', 'warn'], failed: ['Failed', 'bad'] }[p.status] || [p.status, ''];
+  return '<span class="tag' + (m[1] ? ' ' + m[1] : '') + '">' + esc(m[0]) + '</span>';
+}
+function apThumb(p){
+  if (p.video_token) return '<div class="ap-thumb ap-vid">🎬<span>Reel</span></div>';
+  var u = (p.image_urls || [])[0];
+  return u ? '<img class="ap-thumb" src="' + esc(u) + '" alt="" loading="lazy">' + ((p.image_urls || []).length > 1 ? '<span class="ap-more">+' + ((p.image_urls || []).length - 1) + '</span>' : '')
+           : '<div class="ap-thumb ap-vid">✍️<span>Text</span></div>';
+}
+function apPostRow(p, own){
+  var ed = AP.edit[p.id];
+  var nums = p.numbers ? '<div class="card-note">👁 ' + esc(p.numbers.reach) + ' · ❤️ ' + esc(p.numbers.likes) + ' · 💬 ' + esc(p.numbers.comments) +
+      ' · ↗ ' + esc(p.numbers.shares) + ' · 🔖 ' + esc(p.numbers.saves) + '</div>' : '';
+  var check = (p.check && p.check.length) ? '<div class="ap-check">⚠️ Check before approving: ' + esc(p.check.map(function(c){
+        return c.replace('price not in config:', 'price not in your price list:').replace('offer not in config:', 'offer you did not add:')
+                .replace('unsourced figure:', 'number not in your details:').replace('unverifiable promise:', 'promise you never made:'); }).join('; ')) +
+      '. These are not in your prices or offers, so this post is held back until you fix the text.</div>' : '';
+  var editable = own && (p.status === 'draft' || p.status === 'failed');
+  var body = ed
+    ? '<textarea class="fld" rows="6" data-apcap="' + esc(p.id) + '" style="width:100%">' + esc(ed.caption) + '</textarea>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center">' +
+        '<input class="fld" type="date" data-apd="' + esc(p.id) + '" value="' + esc(ed.date) + '" style="max-width:160px">' +
+        '<input class="fld" type="time" data-apt="' + esc(p.id) + '" value="' + esc(ed.time) + '" style="max-width:120px">' +
+        '<button class="btn primary" data-apsave="' + esc(p.id) + '">Save</button><button class="btn" data-apx="' + esc(p.id) + '">Cancel</button></div>'
+    : '<div class="ap-cap">' + esc(p.caption) + '</div>';
+  return '<div class="ap-row">' +
+    '<div class="ap-when"><b>' + esc(apDay(p.at)) + '</b><span>' + esc(apTime(p.at)) + '</span></div>' +
+    '<div class="ap-media">' + apThumb(p) + '</div>' +
+    '<div class="ap-body">' + body + check + nums +
+      '<div class="card-note" style="margin-top:4px">' + apStatus(p) + ' ' + esc((p.platforms || []).map(function(x){ return x === 'facebook' ? 'Facebook' : 'Instagram'; }).join(' + ')) +
+        (p.theme ? ' · ' + esc(p.theme) : '') + '</div>' +
+      (editable && !ed ? '<div style="display:flex;gap:6px;margin-top:6px"><button class="btn" data-ape="' + esc(p.id) + '">Edit</button>' +
+         '<button class="btn" data-apdel="' + esc(p.id) + '">Remove</button></div>' : '') +
+      (own && p.status === 'scheduled' ? '<div style="margin-top:6px"><button class="btn" data-apun="' + esc(p.id) + '">Take back to draft</button></div>' : '') +
+    '</div></div>';
+}
+VIEWS.autopilot = function(){
+  var own = isOwner();
+  var out = '<h1>Content Autopilot</h1><p class="sub">A month of Facebook and Instagram posts, written from your own photos, prices and offers. ' +
+    'You approve one week at a time; approved posts go out by themselves.</p>';
+  var ok = need('social_acc', '/social/accounts') & need('ap_media', '/autopilot/media') & need('ap_plans', '/autopilot/plans') &
+           need('ap_cal', '/autopilot/calendar?start=' + apMonday() + '&days=35') & need('ap_res', '/autopilot/results?days=30');
+  if (!ok) return out + loading('Loading your content plan...');
+  if (AP.msg) out += '<div class="card-note" style="margin:6px 0 12px;color:' + (AP.msg.bad ? 'var(--danger)' : 'var(--growth)') + '">' + esc(AP.msg.text) + '</div>';
+  var acc = S.social_acc || {};
+  if (!acc.connected) out += '<div class="bil-note">Facebook and Instagram are not connected yet. You can build the library and plan now; ' +
+    'approving needs the connection. <a href="#/posts">Connect on the Posts page</a>.</div>';
+
+  // ---- results ----
+  var r = S.ap_res;
+  if (r) {
+    var fb = r.by_platform.facebook || {}, ig = r.by_platform.instagram || {}, fo = r.followers || {};
+    var fol = function(p){ var f = fo[p]; return f ? f.now.toLocaleString('en-US') + (f.gained ? ' (' + (f.gained > 0 ? '+' : '') + f.gained + ')' : '') : null; };
+    out += '<div class="grid">' +
+      metric('Posted, 30 days', r.counts.published) + metric('Approved, coming up', r.counts.scheduled) +
+      metric('Waiting for your approval', r.counts.waiting) +
+      metric('People reached', (fb.reach || 0) + (ig.reach || 0), 'Facebook ' + (fb.reach || 0) + ' · Instagram ' + (ig.reach || 0)) +
+      metric('Likes, comments, shares, saves', (fb.likes || 0) + (ig.likes || 0) + (fb.comments || 0) + (ig.comments || 0) + (fb.shares || 0) + (ig.shares || 0) + (ig.saves || 0)) +
+      metric('Facebook followers', fol('facebook')) + metric('Instagram followers', fol('instagram')) +
+    '</div>';
+    if (r.top.length) out += panel('What worked best (30 days)', '<div class="tbl-wrap"><table><tbody>' + r.top.map(function(t){
+      return '<tr><td style="width:64px">' + (t.image ? '<img class="ap-thumb" src="' + esc(t.image) + '" alt="">' : '') + '</td><td>' + esc(t.caption.slice(0, 140)) +
+        '<div class="card-note">' + esc(t.theme || '') + '</div></td><td class="card-note">👁 ' + esc(t.reach) + '<br>❤️ ' + esc(t.likes) + ' · 💬 ' + esc(t.comments) + '</td></tr>';
+    }).join('') + '</tbody></table></div>' + (r.themes.length ? '<div class="card-note" style="padding:10px 16px">Best kinds of post: ' +
+      r.themes.slice(0, 4).map(function(t){ return esc(t.theme) + ' (' + esc(t.posts) + ')'; }).join(', ') + '. The next plan does more of these.</div>' : ''));
+  }
+
+  // ---- calendar, week by week ----
+  var posts = (S.ap_cal && S.ap_cal.posts) || [];
+  var weeks = {};
+  posts.forEach(function(p){
+    var d = new Date(new Date(p.at).getTime() + 5 * 3600e3); var wd = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - wd);
+    var k = d.toISOString().slice(0, 10); (weeks[k] = weeks[k] || []).push(p);
+  });
+  var keys = Object.keys(weeks).sort();
+  var plans = (S.ap_plans && S.ap_plans.plans) || [];
+  var busy = plans.some(function(p){ return p.status === 'generating'; });
+  if (busy) out += '<div class="bil-note"><span class="spin"></span> Writing your plan: ' + esc(plans[0].drafted) + ' posts so far. ' +
+    'It takes a few minutes; posts appear below as each week is written.</div>';
+  var lastFail = plans[0] && plans[0].status === 'failed' ? plans[0] : null;
+  if (lastFail) out += '<div class="bil-note" style="border-left-color:var(--danger)">The last plan did not finish: ' + esc(lastFail.error || 'unknown error') + '</div>';
+  if (!keys.length) out += panel('Your calendar', empty('No posts planned yet', 'Add photos to the library, then press Plan my month below.'));
+  keys.forEach(function(k){
+    var list = weeks[k], waiting = list.filter(function(p){ return p.status === 'draft' && new Date(p.at) > new Date(); });
+    var flagged = waiting.filter(function(p){ return p.check && p.check.length; }).length;
+    var end = new Date(k + 'T00:00:00Z'); end.setUTCDate(end.getUTCDate() + 6);
+    var title = 'Week of ' + apDay(k + 'T12:00:00+05:00') + ' – ' + apDay(end.toISOString().slice(0, 10) + 'T12:00:00+05:00');
+    var right = own && waiting.length ? '<button class="btn primary" data-apweek="' + k + '"' + (acc.connected ? '' : ' disabled title="Connect Facebook first"') + '>Approve this week (' +
+      (waiting.length - flagged) + ')</button>' : '<span class="pill count">' + list.length + '</span>';
+    var note = AP.weekMsg[k] ? '<div class="card-note" style="padding:8px 16px;color:var(--growth)">' + esc(AP.weekMsg[k]) + '</div>' : '';
+    out += panel(title, note + list.map(function(p){ return apPostRow(p, own); }).join(''), right);
+  });
+
+  // ---- plan my month ----
+  if (own) {
+    var f = AP.form;
+    var tomorrow = apPkDate(new Date(Date.now() + 864e5));
+    out += panel('Plan my month', '<div style="padding:14px 16px;display:grid;gap:10px">' +
+      '<div class="card-note">The AI writes every post from your business details, prices and the offers below, picks a photo or video from your library for each, ' +
+        'and proposes the best times. Nothing goes out until you approve the week. Captions with a price or promise you never gave are held back for you to fix.</div>' +
+      '<div class="fgrid">' +
+        '<div><label>Start on</label><input class="fld" type="date" id="ap_start" value="' + esc(f.starts_on || tomorrow) + '"></div>' +
+        '<div><label>Days</label><input class="fld" type="number" id="ap_days" min="1" max="31" value="' + esc(f.days) + '"></div>' +
+        '<div><label>Posts a week</label><input class="fld" type="number" id="ap_ppw" min="1" max="14" value="' + esc(f.posts_per_week) + '"></div>' +
+        '<div><label>Language</label><select class="fld" id="ap_lang">' + [['mix', 'English + Roman Urdu'], ['english', 'English'], ['urdu', 'Roman Urdu']].map(function(o){
+          return '<option value="' + o[0] + '"' + (f.language === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
+      '</div>' +
+      '<div><label>Goal for the month</label><input class="fld" id="ap_goal" maxlength="600" placeholder="e.g. More weekend orders and new followers in DHA and Gulberg" value="' + esc(f.goal) + '" style="width:100%"></div>' +
+      '<div><label>Offers the posts may mention (exact wording; leave empty for none)</label><textarea class="fld" id="ap_offers" rows="2" maxlength="1200" placeholder="e.g. Free delivery on Family boxes this Friday to Sunday" style="width:100%">' + esc(f.offers) + '</textarea></div>' +
+      '<div><button class="btn primary" id="ap_plan"' + (busy ? ' disabled' : '') + '>✨ Plan my month</button></div></div>');
+  }
+
+  // ---- library ----
+  var items = (S.ap_media && S.ap_media.items) || [];
+  out += panel('Photo & video library (' + items.length + ')', '<div style="padding:14px 16px">' +
+    (own ? '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">' +
+      '<label class="btn primary" style="cursor:pointer">📷 Add photos<input type="file" id="ap_files" accept="image/jpeg,image/png,image/webp,image/heic" multiple style="display:none"></label>' +
+      '<label class="btn" style="cursor:pointer">🎬 Add a video<input type="file" id="ap_vfile" accept="video/mp4,video/quicktime,.mp4,.mov" style="display:none"></label>' +
+      (AP.up ? '<span class="card-note"><span class="spin"></span> ' + esc(AP.up) + '</span>' : '') +
+      '<span class="card-note">Give each a short name (what is in it). The planner uses the names to pick the right photo.</span></div>' : '') +
+    (items.length ? '<div class="ap-lib">' + items.map(function(it){
+      return '<div class="ap-item">' + (it.kind === 'video' ? '<div class="ap-thumb ap-vid big">🎬<span>' + esc(Math.round(it.duration)) + 's</span></div>' : '<img class="ap-thumb big" src="' + esc(it.url) + '" alt="" loading="lazy">') +
+        (own ? '<input class="fld" data-aplabel="' + esc(it.kind + '/' + it.id) + '" value="' + esc(it.label) + '" placeholder="Name it" maxlength="120">' : '<div>' + esc(it.label) + '</div>') +
+        '<div class="card-note">' + (it.used ? 'used ' + esc(it.used) + '×' : 'not used yet') + (own ? ' · <a href="#/autopilot" data-aprm="' + esc(it.kind + '/' + it.id) + '">remove</a>' : '') + '</div></div>';
+    }).join('') + '</div>' : empty('The library is empty', 'Add the photos and videos you want posted this month.')) + '</div>');
+  return out;
+};
+function apWire(){
+  if (currentView() !== 'autopilot') return;
+  var g = function(id){ return document.getElementById(id); };
+  var say = function(t, bad){ AP.msg = { text: t, bad: !!bad }; renderShell(); };
+  // poll while a plan is being written
+  var plans = (S.ap_plans && S.ap_plans.plans) || [];
+  if (plans.some(function(p){ return p.status === 'generating'; })) {
+    if (!AP.poll) AP.poll = setTimeout(function(){ AP.poll = null; if (currentView() === 'autopilot') apReload(['ap_plans', 'ap_cal']); }, 6000);
+  }
+  ['ap_start', 'ap_days', 'ap_ppw', 'ap_lang', 'ap_goal', 'ap_offers'].forEach(function(id){
+    var el = g(id); if (!el) return;
+    el.oninput = el.onchange = function(){ var k = { ap_start: 'starts_on', ap_days: 'days', ap_ppw: 'posts_per_week', ap_lang: 'language', ap_goal: 'goal', ap_offers: 'offers' }[id]; AP.form[k] = el.value; };
+  });
+  if (g('ap_plan')) g('ap_plan').onclick = function(){
+    var f = AP.form; f.starts_on = g('ap_start').value; f.days = g('ap_days').value; f.posts_per_week = g('ap_ppw').value; f.language = g('ap_lang').value;
+    f.goal = g('ap_goal').value; f.offers = g('ap_offers').value;
+    g('ap_plan').disabled = true;
+    api('/autopilot/plan', { method: 'POST', body: { starts_on: f.starts_on, days: Number(f.days), posts_per_week: Number(f.posts_per_week),
+      language: f.language, goal: f.goal, offers: f.offers } }).then(function(res){
+      if (res.ok) { AP.msg = { text: 'Writing your plan now. Posts appear in the calendar as each week is written.' }; apReload(['ap_plans', 'ap_cal']); }
+      else say((res.data && res.data.detail) || 'The plan could not start.', true);
+    });
+  };
+  // library: photos (converted to JPEG, the only kind Instagram takes), then kept in the library
+  if (g('ap_files')) g('ap_files').onchange = function(){
+    var files = Array.prototype.slice.call(g('ap_files').files || []), done = 0, failed = 0;
+    if (!files.length) return;
+    var next = function(){
+      if (!files.length) { AP.up = null; AP.msg = { text: done + ' photo' + (done === 1 ? '' : 's') + ' added.' + (failed ? ' ' + failed + ' could not be added.' : '') , bad: !!failed && !done }; apReload(['ap_media']); return; }
+      var file = files.shift(); AP.up = 'Adding photo ' + (done + failed + 1) + '…'; renderShell();
+      jvToJpeg(file).then(function(data){
+        return api('/social/media', { method: 'POST', body: { image: data } });
+      }).then(function(res){
+        if (!res.ok) throw new Error((res.data && res.data.detail) || 'not saved');
+        var label = file.name.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').replace(/^(img|dsc|pxl|whatsapp image)\s*[\d\s]*$/i, '').slice(0, 120);
+        return api('/autopilot/media/photo/' + res.data.id, { method: 'PATCH', body: { in_library: true, label: label } });
+      }).then(function(){ done++; next(); }, function(){ failed++; next(); });
+    };
+    next();
+  };
+  if (g('ap_vfile')) g('ap_vfile').onchange = function(){
+    var file = g('ap_vfile').files[0]; if (!file) return;
+    var type = file.type || (/\.mov$/i.test(file.name) ? 'video/quicktime' : 'video/mp4');
+    if (!/^video\/(mp4|quicktime)$/.test(type)) return say('Choose an MP4 or MOV video.', true);
+    if (file.size > 100 * 1024 * 1024) return say('That video is larger than 100 MB. Trim or compress it on your phone first.', true);
+    var x = new XMLHttpRequest();
+    x.open('POST', '/social/video'); x.withCredentials = true; x.setRequestHeader('Content-Type', type);
+    x.upload.onprogress = function(e){ if (e.lengthComputable) { AP.up = 'Uploading video ' + Math.round(100 * e.loaded / e.total) + '%'; renderShell(); } };
+    x.onload = function(){
+      var d = null; try { d = JSON.parse(x.responseText); } catch (e) {}
+      if (x.status >= 200 && x.status < 300 && d && d.token) {
+        api('/autopilot/media/video/' + d.token + '/keep', { method: 'POST', body: { label: file.name.replace(/\.[a-z0-9]+$/i, '').slice(0, 120) } }).then(function(){
+          AP.up = null; AP.msg = { text: 'Video added to the library.' }; apReload(['ap_media']);
+        });
+      } else { AP.up = null; say((d && d.detail) || 'The video was not saved.', true); }
+    };
+    x.onerror = function(){ AP.up = null; say('The upload stopped. Check the connection and try again.', true); };
+    x.send(file);
+  };
+  document.querySelectorAll('[data-aplabel]').forEach(function(inp){
+    inp.onchange = function(){ api('/autopilot/media/' + inp.getAttribute('data-aplabel'), { method: 'PATCH', body: { label: inp.value } }); };
+  });
+  document.querySelectorAll('[data-aprm]').forEach(function(a){
+    a.onclick = function(e){ e.preventDefault(); api('/autopilot/media/' + a.getAttribute('data-aprm'), { method: 'PATCH', body: { in_library: false } }).then(function(){ apReload(['ap_media']); }); };
+  });
+  // calendar actions
+  document.querySelectorAll('[data-apweek]').forEach(function(b){
+    b.onclick = function(){
+      var k = b.getAttribute('data-apweek'); b.disabled = true;
+      api('/autopilot/approve-week', { method: 'POST', body: { week_start: k } }).then(function(res){
+        if (res.ok) {
+          var d = res.data;
+          AP.weekMsg[k] = d.scheduled + ' post' + (d.scheduled === 1 ? '' : 's') + ' approved: they go out by themselves at their times.' +
+            (d.held && d.held.length ? ' ' + d.held.length + ' held back: fix the text marked ⚠️ and approve again.' : '') +
+            (d.past ? ' ' + d.past + ' had a time already passed; move them and approve again.' : '');
+          apReload(['ap_cal', 'ap_res']);
+        } else say((res.data && res.data.detail) || 'That week could not be approved.', true);
+      });
+    };
+  });
+  document.querySelectorAll('[data-ape]').forEach(function(b){
+    b.onclick = function(){
+      var id = b.getAttribute('data-ape'), p = ((S.ap_cal && S.ap_cal.posts) || []).filter(function(x){ return x.id === id; })[0]; if (!p) return;
+      var pk = new Date(new Date(p.at).getTime() + 5 * 3600e3).toISOString();
+      AP.edit[id] = { caption: p.caption, date: pk.slice(0, 10), time: pk.slice(11, 16), at: p.at }; renderShell();
+    };
+  });
+  document.querySelectorAll('[data-apx]').forEach(function(b){ b.onclick = function(){ delete AP.edit[b.getAttribute('data-apx')]; renderShell(); }; });
+  document.querySelectorAll('[data-apcap]').forEach(function(t){ t.oninput = function(){ var e = AP.edit[t.getAttribute('data-apcap')]; if (e) e.caption = t.value; }; });
+  document.querySelectorAll('[data-apd]').forEach(function(t){ t.onchange = function(){ var e = AP.edit[t.getAttribute('data-apd')]; if (e) e.date = t.value; }; });
+  document.querySelectorAll('[data-apt]').forEach(function(t){ t.onchange = function(){ var e = AP.edit[t.getAttribute('data-apt')]; if (e) e.time = t.value; }; });
+  document.querySelectorAll('[data-apsave]').forEach(function(b){
+    b.onclick = function(){
+      var id = b.getAttribute('data-apsave'), e = AP.edit[id]; if (!e) return; b.disabled = true;
+      var pk = new Date(new Date(e.at).getTime() + 5 * 3600e3).toISOString();
+      var moved = e.date !== pk.slice(0, 10) || e.time !== pk.slice(11, 16);
+      api('/social/posts/' + id, { method: 'PATCH', body: { caption: e.caption } }).then(function(r1){
+        if (!r1.ok) throw r1;
+        return moved ? api('/autopilot/posts/' + id + '/time', { method: 'PATCH', body: { date: e.date, time: e.time } }) : { ok: true };
+      }).then(function(r2){
+        if (!r2.ok) throw r2;
+        delete AP.edit[id]; AP.msg = { text: 'Saved.' }; apReload(['ap_cal']);
+      }, function(r){ b.disabled = false; say((r && r.data && r.data.detail) || 'That did not save.', true); });
+    };
+  });
+  document.querySelectorAll('[data-apdel]').forEach(function(b){
+    b.onclick = function(){ if (!confirm('Remove this post from the plan?')) return;
+      api('/social/posts/' + b.getAttribute('data-apdel'), { method: 'DELETE' }).then(function(){ apReload(['ap_cal', 'ap_res']); }); };
+  });
+  document.querySelectorAll('[data-apun]').forEach(function(b){
+    b.onclick = function(){ api('/social/posts/' + b.getAttribute('data-apun') + '/unschedule', { method: 'POST' }).then(function(){ apReload(['ap_cal', 'ap_res']); }); };
+  });
+}
+(function(){
+  NAV.forEach(function(g){
+    var i = -1; g.items.forEach(function(it, k){ if (it.id === 'posts' || it.id === 'marketing') i = k; });
+    if (g.label === 'Marketing' && !g.items.some(function(it){ return it.id === 'autopilot'; }))
+      g.items.splice(i + 1, 0, { id: 'autopilot', icon: '✨', name: 'Content Autopilot', sub: false });
+  });
+  var _apRender = renderShell;
+  renderShell = function(){ _apRender(); apWire(); };
+  window.addEventListener('hashchange', function(){ AP.msg = null; AP.weekMsg = {}; });
+  var st = document.createElement('style');
+  st.textContent = '.ap-row{display:grid;grid-template-columns:92px 72px 1fr;gap:12px;padding:12px 16px;border-top:1px solid var(--line);align-items:start}' +
+    '.ap-row:first-child{border-top:0}.ap-when{display:grid;font-size:13px}.ap-when span{color:var(--muted,#999)}' +
+    '.ap-media{position:relative}.ap-thumb{width:72px;height:72px;object-fit:cover;border-radius:10px;display:grid;place-items:center;background:var(--accent-tint,#222)}' +
+    '.ap-thumb.big{width:100%;height:120px}.ap-vid{font-size:22px;text-align:center;line-height:1.1}.ap-vid span{display:block;font-size:11px}' +
+    '.ap-more{position:absolute;right:4px;bottom:4px;font-size:11px;background:rgba(0,0,0,.65);color:#fff;border-radius:6px;padding:1px 5px}' +
+    '.ap-cap{white-space:pre-wrap;font-size:14px;line-height:1.45;max-height:9.5em;overflow:auto}' +
+    '.ap-check{margin-top:6px;padding:8px 10px;border:1px solid var(--warn,#d9a400);border-radius:8px;font-size:13px}' +
+    '.ap-lib{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}.ap-item{display:grid;gap:6px}' +
+    '.tag.ok{border-color:var(--growth)}.tag.bad{border-color:var(--danger)}.tag.warn{border-color:var(--warn,#d9a400)}' +
+    '@media(max-width:640px){.ap-row{grid-template-columns:64px 1fr}.ap-media{grid-row:span 2}.ap-when{grid-column:2}.ap-thumb{width:60px;height:60px}}';
+  document.head.appendChild(st);
+})();
+
 boot();
 </script>
 </body>

@@ -116,6 +116,8 @@ app.include_router(make_orders_router())
 # Voice: the AI phone agent's call log and number settings (calls answered by app/voice_bridge.py)
 from .voice import make_voice_router
 app.include_router(make_voice_router())
+from .autopilot import make_autopilot_router
+app.include_router(make_autopilot_router())
 trial.install(app)
 # Storefront: orders, enquiries and messages from a tenant's own website (docs/STOREFRONT.md)
 app.include_router(make_storefront_router(P))

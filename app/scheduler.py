@@ -61,6 +61,14 @@ class Scheduler:
         except Exception as e:
             print(f"[scheduler] scheduled posts skipped: {e}", flush=True)
 
+        # Content autopilot: read each recent post's results back from Meta
+        # (reach, likes, comments, shares, saves) and follower counts. Throttled inside.
+        try:
+            from .autopilot import run_due as autopilot_due
+            emitted += autopilot_due()
+        except Exception as e:
+            print(f"[scheduler] post results skipped: {e}", flush=True)
+
         # Ad autopilot (growth planner): auto-pause over the owner's limit, and
         # the weekly launch within the owner's daily cap. Throttled inside.
         try:
