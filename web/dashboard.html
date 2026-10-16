@@ -4947,6 +4947,8 @@ function jvYesNo(msg){
   var m = String(msg).toLowerCase().replace(/[.!,?؟۔]/g, ' ').replace(/\s+/g, ' ').trim();
   if (m.length > 40) return null;
   if (/^(yes|yeah|yep|yup|sure|ok|okay|confirm|go ahead|do it|haan|han|ha|haa|ji|jee|g|theek|thik|kar do|kardo|bilkul|ہاں|جی|ٹھیک|بالکل)( |$)/.test(m)) return 'yes';
+  if (/^(post it|post kar|post karo|post kardo|post now|publish|share it|daal do|dal do|پوسٹ کر)/.test(m)) return 'yes';
+  if (/^(keep (it )?(as )?(a )?draft|draft|baad me|baad mein|abhi nahi|later)( |$)/.test(m)) return 'no';
   if (/^(no|nope|cancel|stop|dont|don't|leave it|nahi|nahin|nai|na|mat|نہیں|نہ)( |$)/.test(m)) return 'no';
   return null;
 }
@@ -4968,7 +4970,7 @@ function jvConfirm(yes){
   var p = JV.pending; JV.pending = null;
   if (!p) return;
   try { if (JV.rec) JV.rec.abort(); } catch (e) {}
-  if (!yes) { jvHist('user', 'No'); jvLocal('Okay, I\'ve left it as it is.'); return; }
+  if (!yes) { jvHist('user', 'No'); jvLocal(p.no || 'Okay, I\'ve left it as it is.'); return; }
   consoleSend({ confirm: p.confirm, label: 'Yes' });
 }
 function jvLocal(reply){
@@ -4980,10 +4982,38 @@ function jvFreshData(){
   Object.keys(NEEDED).forEach(function(k){ S[k] = undefined; LOADING[k] = false; });
   if (typeof APT !== 'undefined') { APT.data = undefined; }
 }
+/* Jarvis designs the post: its headline and line go on the first picture (or
+   on the brand colour when there is none) with the logo, using the Posts
+   designer's own painter, and the result replaces that picture in the draft.
+   Resolves with the designed picture's link, or null when nothing changed. */
+function jvDesignDraft(post, design, srcs){
+  if (!post || !design || !(design.head || design.sub)) return Promise.resolve(null);
+  var first = srcs && srcs[0];
+  var st = { img: null, img2: null, size: 'square', zoom: 1, ox: 0, oy: 0, head: design.head || '', sub: design.sub || '',
+             pos: first ? 'bottom' : 'center', band: !!first, bg: edBrandColor(), fg: '#ffffff', logo: false, tpl: '' };
+  return (first ? edLoadImg(first).then(function(i){ st.img = i; }) : Promise.resolve())
+    .then(edLogo).then(function(logo){
+      st.logo = !!logo;
+      var cv = document.createElement('canvas'); edPaint(cv, st);
+      return api('/social/media', { method: 'POST', body: { image: cv.toDataURL('image/jpeg', 0.9) } });
+    }).then(function(r){
+      if (!r || !r.ok) throw new Error('upload');
+      var urls = (post.image_urls || []).slice();
+      if (first) urls[0] = r.data.url; else urls = [r.data.url];
+      return api('/social/posts/' + post.id, { method: 'PATCH', body: { image_urls: urls, platforms: design.platforms || post.platforms } })
+        .then(function(p){ if (!p || !p.ok) throw new Error('save'); return r.data.url; });
+    }).catch(function(){ return null; });   // the plain draft is still there
+}
 function consoleSend(opt){
   var box = document.getElementById('con-in');
   if (JV.state === 'processing') return;
   var body, msg;
+  if (opt && opt.confirm && JV.designing) {
+    // a "post it" before the designed picture is in the draft waits for it
+    jvSet('processing', 'Finishing the design…');
+    JV.designing.then(function(){ jvSet('idle', ''); consoleSend(opt); });
+    return;
+  }
   if (opt && opt.confirm) { body = { confirm: opt.confirm }; msg = opt.label || 'Yes'; }
   else {
     if (!box || !box.value.trim()) return;
@@ -4992,7 +5022,7 @@ function consoleSend(opt){
     if (JV.pending) {
       var p = JV.pending, yn = jvYesNo(msg); JV.pending = null;
       if (yn === 'yes') { box.value = ''; return consoleSend({ confirm: p.confirm, label: msg }); }
-      if (yn === 'no') { box.value = ''; jvHist('user', msg); return jvLocal('Okay, I\'ve left it as it is.'); }
+      if (yn === 'no') { box.value = ''; jvHist('user', msg); return jvLocal(p.no || 'Okay, I\'ve left it as it is.'); }
     }
     body = { message: msg, history: JV.hist.slice(-8) };
     if (jvImgUrls().length) body.image_urls = jvImgUrls();
@@ -5017,8 +5047,22 @@ function consoleSend(opt){
         if (d.kind === 'teach') { extra = '<div class="jv-x">Your agent will now follow: <em>' + esc(d.lesson || '') + '</em></div>'; loadLessons(); }
         if (d.kind === 'dashboard') { PREFS = d.prefs || PREFS; applyBrand(); }
         if (d.kind === 'post') {
-          extra = '<div class="jv-x">Nothing is public yet. <a href="#/needshuman">Review it in Needs Human</a></div>';
-          JV.imgs = []; jvRenderAttach(); loadPosts();
+          var srcs = jvImgs().map(function(m){ return m.src; });
+          JV.imgs = []; jvRenderAttach();
+          if (d.confirm) JV.pending = { confirm: d.confirm, no: d.no_reply };
+          extra = '<div class="jv-x"><div id="jv-prev" class="jv-prev">' + (d.design ? '<span class="card-note">Designing the picture…</span>' : '') + '</div>' +
+                  (d.confirm ? '<button class="btn primary" type="button" onclick="jvConfirm(true)">Post it now</button> ' +
+                               '<button class="btn" type="button" onclick="jvConfirm(false)">Keep as draft</button> ' : '') +
+                  '<a class="btn" href="#/posts">Edit on Posts</a></div>';
+          JV.designing = jvDesignDraft(d.post, d.design, srcs).then(function(url){
+            JV.designing = null;
+            var pv = document.getElementById('jv-prev');
+            var show = url || (d.post && (d.post.image_urls || [])[0]);
+            JV.extra = JV.extra.replace(/<div id="jv-prev" class="jv-prev">[\s\S]*?<\/div>/,
+              '<div id="jv-prev" class="jv-prev">' + (show ? '<img src="' + esc(show) + '" alt="The post picture">' : '') + '</div>');
+            if (pv) pv.innerHTML = show ? '<img src="' + esc(show) + '" alt="The post picture">' : '';
+            if (typeof loadPosts === 'function') loadPosts();
+          });
         }
         if (d.kind === 'business') { need('biz_' + d.resource, '/business/' + d.resource, true); }
         if (d.kind === 'confirm') {
@@ -5117,6 +5161,7 @@ VIEWS.console = function(){
     '.jv-b.me{align-self:flex-end;background:var(--accent);color:var(--fg-on-accent);border-bottom-right-radius:4px}' +
     '.jv-b.ai{align-self:flex-start;background:var(--panel2,rgba(127,127,127,.12));border:1px solid var(--line);border-bottom-left-radius:4px}' +
     '.jv-x{margin-top:8px;font-size:13px;white-space:normal}.jv-x a{color:inherit;font-weight:600}' +
+    '.jv-prev img{display:block;max-width:220px;width:100%;border-radius:10px;margin:6px 0 8px}.jv-x .btn{margin:2px 4px 2px 0}' +
     '.jv-typing span{display:inline-block;width:6px;height:6px;margin:0 2px;border-radius:50%;background:currentColor;opacity:.4;animation:jvdot 1s infinite}' +
     '.jv-typing span:nth-child(2){animation-delay:.15s}.jv-typing span:nth-child(3){animation-delay:.3s}' +
     '@keyframes jvdot{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:.9;transform:translateY(-3px)}}' +
@@ -6301,8 +6346,9 @@ function edCover(x, img, dx, dy, dw, dh, zoom, ox, oy){
   var sx = dx + (dw - w) / 2 + (w - dw) / 2 * (ox || 0), sy = dy + (dh - h) / 2 + (h - dh) / 2 * (oy || 0);
   x.save(); x.beginPath(); x.rect(dx, dy, dw, dh); x.clip(); x.drawImage(img, sx, sy, w, h); x.restore();
 }
-function edDraw(){
-  var cv = document.getElementById('ed_cv'); if (!cv || !ED) return;
+function edDraw(){ var cv = document.getElementById('ed_cv'); if (cv && ED) edPaint(cv, ED); }
+// Paints one design (the editor's ED, or Jarvis's own) onto a canvas.
+function edPaint(cv, ED){
   var sz = ED_SIZES[ED.size], W = sz.w, H = sz.h, x = cv.getContext('2d');
   cv.width = W; cv.height = H;
   x.fillStyle = ED.bg; x.fillRect(0, 0, W, H);

@@ -79,7 +79,9 @@ Fields:
             complete_appointment (mark done), add_customer, add_lead,
             add_expense, schedule_post (a post to go out at a later time),
             update_order (confirm / out for delivery / delivered),
-            record_order_payment, cancel_order
+            record_order_payment, cancel_order,
+            publish_post (post a draft that is already made: "post it",
+            "post kar do", "publish it", with no new post content)
   "args": if kind is action, an object:
             navigate: section (a section id from the list below)
             book_appointment: name, phone, date (YYYY-MM-DD), time (HH:MM
@@ -101,6 +103,7 @@ Fields:
             record_order_payment: order_id, amount (number, PKR), method
                 (cash, bank, online, card, other)
             cancel_order: order_id, reason
+            publish_post: nothing (the latest draft is posted)
           order_id must be the "id" of one of orders.recent_and_open in BUSINESS
           FACTS (match the customer's name, phone or order number). Questions
           about orders, sales or what is owed are kind "question", answered
@@ -154,13 +157,17 @@ Fields:
             both if the owner did not say
   "image_url": if kind is post and the owner gave an https picture link, that
             link, otherwise empty
+  "headline": if kind is post, the words printed ON the picture: the item or
+            offer in 2 to 6 words (a price only if the owner said it)
+  "subline": if kind is post, one short line under the headline (up to 8
+            words), or empty
   "reply": what you say back. Sound like a warm, switched-on human assistant
            who knows this business, not a machine: natural, friendly, brief
            (one or two sentences), contractions welcome, vary your wording,
            never start with "Sure" or "Certainly" every time. Mention the
            specifics (name, day, time, amount) so they can hear it is right.
-           For add_expense, cancel_appointment and schedule_post, ask for a
-           yes first ("Shall I record 5,000 for the electricity bill?").
+           For add_expense, cancel_appointment, schedule_post and publish_post,
+           ask for a yes first ("Shall I record 5,000 for the electricity bill?").
            Every OTHER action is carried out at once, so its reply says it is
            done ("Booked Ayesha for tomorrow at 4."), never asks.
            No emoji, no markdown.
@@ -189,7 +196,8 @@ list, hours or rules there and Jarvis fills the dashboard).
 
 "Open/show/go to <page>" is action navigate. Booking, moving, cancelling or
 finishing an appointment, adding a customer, a lead or an expense, and posting
-at a LATER time are "action". Posting now or "make a post" is "post".
+at a LATER time are "action". "Make / design a post" is "post". "Post it" about
+a post already drafted (no new content) is action publish_post.
 
 If the instruction changes a real fact about the business itself -- a
 price, a service, a staff member, opening hours, a policy, a location, a
@@ -283,15 +291,19 @@ def _attached_images(body):
 # checks and saves. Nothing is saved to services from here.
 _MENU_WORDS = re.compile(r"menu|price|rate|list|card|service|treatment|package|course|fee|read|parh|"
                          r"\u0645\u06cc\u0646\u0648|\u0631\u06cc\u0679|\u0642\u06cc\u0645\u062a|\u0644\u0633\u0679|\u067e\u0691\u06be", re.I)
-_POST_WORDS = re.compile(r"\bpost|caption|publish|schedule|instagram|facebook|\bstory|\breel|\bads?\b|"
-                         r"\u067e\u0648\u0633\u0679", re.I)
+_POST_WORDS = re.compile(r"\bpost|caption|publish|schedule|instagram|facebook|\binsta\b|\bfb\b|\bstory|\breel|\bads?\b|"
+                         r"design|\bbana|\bbna|\bdaal|\bdal\b|\bdalo|share|upload|promot|offer|\bdeal|discount|"
+                         r"\u067e\u0648\u0633\u0679|\u0688\u06cc\u0632\u0627\u0626\u0646", re.I)
 MENU_PHOTOS_MAX = 3          # pages of one menu read per message
 
 
 def _wants_menu_read(message, attached):
+    """Pictures are for a post unless the words are about a menu or price list
+    and not about a post. (It used to be the other way round: pictures sent
+    with "is ka design bana do" were read as a menu and never reached a post.)"""
     if not attached:
         return False
-    return bool(_MENU_WORDS.search(message)) or not _POST_WORDS.search(message)
+    return bool(_MENU_WORDS.search(message)) and not _POST_WORDS.search(message)
 
 
 def _read_menu_photos(tid, role, urls):
@@ -361,6 +373,22 @@ def _post_platforms(platforms, images):
         plats = [p for p in plats if p != "instagram"] or ["facebook"]
         return plats, " Instagram needs a picture, so this one is for Facebook only. Attach a picture if you want it on Instagram too."
     return plats, ""
+
+
+_NUM = re.compile(r"\d[\d,.]*")
+
+
+def _design_text(out, said):
+    """The headline and line Jarvis prints on the post's picture. Short, and
+    a number (a price, a discount) only if the owner said that number."""
+    heard = {n.replace(",", "") for n in _NUM.findall(said or "")}
+    def clean(v, most):
+        v = re.sub(r"\s+", " ", str(v or "")).strip().strip('"')
+        if any(n.replace(",", "") not in heard for n in _NUM.findall(v)):
+            return ""
+        return v[:most].strip()
+    head, sub = clean(out.get("headline"), 48), clean(out.get("subline"), 70)
+    return {"head": head, "sub": sub} if head or sub else None
 
 
 # ------------------------------------------------------------------ facts
@@ -634,6 +662,8 @@ def _done_text(action, args):
         return "Done, %s%s is recorded." % (amt, " for " + what if what else "")
     if action == "schedule_post":
         return "Done, the post will go out %s." % (args.get("at_words") or "at the time you picked")
+    if action == "publish_post":
+        return "Done, it's posted."
     if action == "update_order":
         return "Done, the order is updated."
     if action == "record_order_payment":
@@ -810,19 +840,32 @@ def make_console_router():
         if kind == "post":
             if role not in ("owner", "techdeva_admin"):
                 raise HTTPException(403, "Only the business owner can post for the business.")
-            from .social import create_draft
+            from .social import _clean_platforms, create_draft
             # Pictures the owner attached in Jarvis win over any link the
             # model extracted; only links this platform issued are attached.
             images = attached or ([out["image_url"]] if out.get("image_url") else [])
             plats, note = _post_platforms(out.get("platforms"), images)
+            design = _design_text(out, message)
+            if design:
+                # the dashboard lays these words on the first picture (or on the
+                # brand colour when there is none) and swaps it into the draft;
+                # with a picture, Instagram can take it after all
+                design["platforms"] = _clean_platforms(out.get("platforms"))
+                note = ""
             with tenant_session(tid, role) as cur:
                 draft = create_draft(cur, tid, uid, _tidy_caption(out.get("caption") or message),
                                      plats, image_urls=images)
             n = len(images)
-            return {"kind": "post", "post": draft,
-                    "reply": "I drafted this post" + (" with your %d pictures" % n if n > 1 else
-                                                      " with your picture" if n else "") +
-                             ". Check it, then press Approve & post." + note}
+            made = "I designed and drafted this post" if design else "I drafted this post"
+            made += (" with your %d pictures" % n if n > 1 else " with your picture" if n else "")
+            res = {"kind": "post", "post": draft, "design": design}
+            if founder:
+                return dict(res, reply=made + ". It's in the client's drafts for them to approve." + note)
+            # posting is public: ask, and a "yes" (or "post it") redeems
+            # exactly this draft through the same sealed confirmation
+            return dict(res, reply=made + ". It's saved in your drafts. Shall I post it now?" + note,
+                        confirm=ja.seal(tid, uid, role, "publish_post", {"post_id": str(draft["id"])}),
+                        no_reply="Okay, it stays in your drafts on the Posts page. Say \"post it\" when you want it out.")
         if kind == "business":
             if role not in ("owner", "techdeva_admin"):
                 raise HTTPException(403, "Only the business owner can change business details.")
