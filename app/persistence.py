@@ -13,7 +13,7 @@ import redis
 from psycopg.types.json import Json
 from .db import tenant_session
 from .learning import summarise as summarise_learning, WINDOW as LEARNING_WINDOW
-from .crypto import decrypt_json, encrypt_json, CryptoError
+from .crypto import decrypt_json, CryptoError
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 EVENTS_Q = "events:queue"

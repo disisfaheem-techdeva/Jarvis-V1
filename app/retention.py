@@ -262,6 +262,9 @@ def make_retention_router():
         with tenant_session(None, "techdeva_admin") as cur:
             cur.execute("INSERT INTO platform_settings (key, value) VALUES (%s, %s) "
                         "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (SERVER_ALERT_KEY, str(at)))
+            record(cur, action="techdeva.setting", resource="platform_settings", resource_id=SERVER_ALERT_KEY,
+                   actor=str(uid or "founder"), actor_type="human", status="ok",
+                   detail={"server_alert_at": at}, error=None)
         return {"ok": True, "server_alert_at": at}
 
     # ---- the server's provisioning job removes deleted businesses' agents

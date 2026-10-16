@@ -21,7 +21,6 @@ never written to from here.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 
 from fastapi import APIRouter, Body, Cookie, Header, HTTPException, Request
