@@ -128,7 +128,7 @@ def _profile_name(page, platform, person_id):
 def _settings(cur):
     cur.execute("SELECT enabled, reply_comments, alert_email FROM social_agent_settings WHERE tenant_id = current_tenant()")
     row = cur.fetchone()
-    return dict(row) if row else {"enabled": True, "reply_comments": True, "alert_email": None}
+    return dict(row) if row else {"enabled": False, "reply_comments": True, "alert_email": None}   # opt-in
 
 
 def _page(cur, tid, page_id):
@@ -152,9 +152,13 @@ def refresh_pages(force=False) -> int:
         _LAST_PAGES[0] = time.time()
         from .social import _meta_pages
         with tenant_session(None, "techdeva_admin") as cur:
-            # oldest connection first, so a Page in two businesses' logins goes to the newest
-            cur.execute("""SELECT tenant_id::text AS tid FROM integrations
-                            WHERE provider = 'meta' AND status = 'connected' ORDER BY connected_at NULLS FIRST""")
+            # oldest connection first, so a Page in two businesses' logins goes to the newest.
+            # Only businesses where the agent is switched on: a business that is off has
+            # its Page left alone, so Meta sends us none of its customers' messages.
+            cur.execute("""SELECT i.tenant_id::text AS tid FROM integrations i
+                             JOIN social_agent_settings s ON s.tenant_id = i.tenant_id AND s.enabled
+                            WHERE i.provider = 'meta' AND i.status = 'connected'
+                            ORDER BY i.connected_at NULLS FIRST""")
             tids = [r["tid"] for r in cur.fetchall()]
         n = 0
         for tid in tids:
@@ -675,10 +679,10 @@ def make_social_inbox_router():
                            VALUES (current_tenant(), %s, %s, %s, now())
                            ON CONFLICT (tenant_id) DO UPDATE SET enabled = EXCLUDED.enabled,
                              reply_comments = EXCLUDED.reply_comments, alert_email = EXCLUDED.alert_email, updated_at = now()""",
-                        (bool(body.get("enabled", True)), bool(body.get("reply_comments", True)), email))
+                        (bool(body.get("enabled", False)), bool(body.get("reply_comments", True)), email))
             record(cur, action="social.agent_settings", resource="social_agent_settings", resource_id=None,
                    actor=str(uid), actor_type="human", status="ok",
-                   detail={"enabled": bool(body.get("enabled", True)), "reply_comments": bool(body.get("reply_comments", True))},
+                   detail={"enabled": bool(body.get("enabled", False)), "reply_comments": bool(body.get("reply_comments", True))},
                    error=None)
         return {"ok": True}
 

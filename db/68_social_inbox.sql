@@ -34,10 +34,11 @@ CREATE POLICY admin_only ON meta_pages USING (is_admin()) WITH CHECK (is_admin()
 CREATE POLICY tenant_read ON meta_pages FOR SELECT USING (tenant_id = current_tenant());
 GRANT SELECT, INSERT, UPDATE, DELETE ON meta_pages TO techdeva_app;
 
--- per business: on unless the owner switches it off
+-- per business: OFF until the owner (or TechDeva) switches it on. The AI answers
+-- a business's customers only once someone has chosen that for that business.
 CREATE TABLE IF NOT EXISTS social_agent_settings (
   tenant_id        uuid PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
-  enabled          boolean NOT NULL DEFAULT true,
+  enabled          boolean NOT NULL DEFAULT false,
   reply_comments   boolean NOT NULL DEFAULT true,
   alert_email      text CHECK (alert_email IS NULL OR length(alert_email) <= 160),
   updated_at       timestamptz NOT NULL DEFAULT now()

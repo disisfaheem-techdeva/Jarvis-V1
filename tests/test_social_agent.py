@@ -8,9 +8,14 @@ import hmac
 import json
 import uuid
 
+import os
+
 import pytest
 from psycopg.types.json import Json
 from starlette.testclient import TestClient
+
+if "@db:" in os.environ.get("DATABASE_URL", ""):
+    pytest.skip("refusing to run against the compose (production) database", allow_module_level=True)
 
 from app import account, ai, crypto, oauth, social_agent
 from app.db import tenant_session
@@ -57,6 +62,8 @@ def env(monkeypatch):
                        ON CONFLICT (tenant_id, provider) DO UPDATE SET status = 'connected', credentials = EXCLUDED.credentials,
                          connected_at = now()""", (Json(crypto.encrypt_json(creds, CLINIC, "meta")),))
         cur.execute("DELETE FROM social_agent_settings")
+        # opt-in: the agent answers only for a business where it was switched on
+        cur.execute("INSERT INTO social_agent_settings (tenant_id, enabled) VALUES (current_tenant(), true)")
     with tenant_session(None, "techdeva_admin") as cur:
         cur.execute("DELETE FROM meta_pages WHERE page_id = %s OR ig_id = %s", (PAGE, IG))
     social_agent.refresh_pages(force=True)
@@ -207,3 +214,33 @@ def test_other_business_cannot_read_threads(client, env):
     other = {"X-Tenant-Id": "22222222-2222-2222-2222-222222222222", "X-Role": "owner"}
     assert client.get(f"/social-inbox/threads/{th['id']}", headers=other).status_code == 404
     assert all(t["id"] != str(th["id"]) for t in client.get("/social-inbox/threads", headers=other).json()["threads"])
+
+
+def test_off_unless_switched_on():
+    """A business with no settings row is off: the AI does not answer its customers."""
+    with tenant_session(None, "techdeva_admin") as cur:
+        cur.execute("INSERT INTO tenants (name, industry, is_test) VALUES ('social-agent-optin-test', 'test', true) "
+                    "RETURNING id::text AS id")
+        other = cur.fetchone()["id"]
+    try:
+        with tenant_session(other, "owner") as cur:
+            assert social_agent._settings(cur)["enabled"] is False
+            cur.execute("INSERT INTO social_agent_settings (tenant_id) VALUES (current_tenant()) RETURNING enabled")
+            assert cur.fetchone()["enabled"] is False          # the column default is off too
+    finally:
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("DELETE FROM tenants WHERE id = %s", (other,))
+
+
+def test_a_business_that_is_off_keeps_its_page_untouched(env):
+    """Off means Meta is not even asked to send that Page's messages here."""
+    with tenant_session(CLINIC, "owner") as cur:
+        cur.execute("UPDATE social_agent_settings SET enabled = false")
+    with tenant_session(None, "techdeva_admin") as cur:
+        cur.execute("DELETE FROM meta_pages WHERE page_id = %s OR ig_id = %s", (PAGE, IG))
+    env["sent"].clear()
+    social_agent.refresh_pages(force=True)
+    assert not [p for p, _ in env["sent"] if p.endswith("/subscribed_apps")]
+    with tenant_session(None, "techdeva_admin") as cur:
+        cur.execute("SELECT count(*) n FROM meta_pages WHERE page_id = %s", (PAGE,))
+        assert cur.fetchone()["n"] == 0
