@@ -8348,6 +8348,437 @@ function apWire(){
   document.head.appendChild(st);
 })();
 
+/* =====================================================================
+   Ten-module layout (approved 16 Oct 2026).
+   Same pages, same APIs: every existing menu item is kept, including the
+   ones added conditionally above (Sales, Client work, Orders, Calls...).
+   The sidebar shows ten modules; a module's pages become tabs at the top
+   of the content. Colours come from td.css, so light/dark and the
+   business's brand colour keep working.
+   ===================================================================== */
+(function(){
+  var MODS = [
+    { num:'01', name:'Dashboard',      icon:'grid',  ids:['overview','reports','alerts'] },
+    { num:'02', name:'Jarvis & AI',    icon:'spark', ids:['console','ai','hermes','bizagent','needshuman','history','tools'], sep:true },
+    { num:'03', name:'Chats',          icon:'chat',  ids:['inbox','calls'] },
+    { num:'04', name:'CRM',            icon:'users', ids:['leads','sales','clientwork','customers','pipeline','appointments','calendar'], sep:true },
+    { num:'05', name:'Marketing',      icon:'mega',  ids:['marketing','posts','autopilot','advisor','analytics'] },
+    { num:'06', name:'Business',       icon:'store', ids:['services','products','packages','deals','settings'] },
+    { num:'07', name:'Team & HR',      icon:'badge', ids:['team','attendance','hr'] },
+    { num:'08', name:'Finance',        icon:'wallet',ids:['revenue','invoices','expenses','dayclose','pnl'], sep:true },
+    { num:'09', name:'Operations',     icon:'box',   ids:['inventory','orders','dailyentry'] },
+    { num:'10', name:'Administration', icon:'shield',ids:['integrations','whatsapp','billing','permissions'] }
+  ];
+  // the pages added in this block (they are not in NAV)
+  var NEW = { alerts:'Alerts', history:'Execution History', tools:'Tools', pipeline:'Pipeline',
+              analytics:'Analytics', deals:'Deals', permissions:'Permissions' };
+  // tab names that follow the approved structure; everything else keeps its own name
+  var LABEL = { overview:'Overview', console:'Jarvis Assistant', ai:'AI Agents', needshuman:'Approval Queue',
+                marketing:'Campaigns', posts:'Social Media Publisher', autopilot:'Content Calendar',
+                advisor:'Ads & Growth', inbox:'WhatsApp Inbox', whatsapp:'WhatsApp Connection' };
+  var IC = {
+    grid:'<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+    spark:'<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16l.7 1.8 1.8.7-1.8.7L19 21l-.7-1.8-1.8-.7 1.8-.7z"/>',
+    chat:'<path d="M5 5h14a1 1 0 011 1v9a1 1 0 01-1 1H10l-4 4v-4H5a1 1 0 01-1-1V6a1 1 0 011-1z"/><path d="M8 10h8M8 13h5"/>',
+    users:'<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0111 0"/><path d="M16 5.2a3 3 0 010 5.6M17.5 14.2A5.5 5.5 0 0120.5 19"/>',
+    mega:'<path d="M4 10v4a1 1 0 001 1h2l7 4V5L7 9H5a1 1 0 00-1 1z"/><path d="M18 9a3.5 3.5 0 010 6"/>',
+    store:'<path d="M4 9l1.5-4h13L20 9"/><path d="M4 9h16v2a2.7 2.7 0 01-5.3 0 2.7 2.7 0 01-5.4 0A2.7 2.7 0 014 11z"/><path d="M5.5 13v6h13v-6"/><path d="M10 19v-4h4v4"/>',
+    badge:'<rect x="5" y="3" width="14" height="18" rx="2"/><circle cx="12" cy="10" r="2.6"/><path d="M8.5 17a3.5 3.5 0 017 0"/><path d="M10 6h4"/>',
+    wallet:'<path d="M4 7a2 2 0 012-2h11v4"/><rect x="4" y="7" width="16" height="12" rx="2"/><path d="M16 13h2"/>',
+    box:'<path d="M4 8l8-4 8 4-8 4z"/><path d="M4 8v8l8 4 8-4V8"/><path d="M12 12v8"/>',
+    shield:'<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9.5 12l2 2 3.5-4"/>',
+    back:'<path d="M15 6l-6 6 6 6"/>'
+  };
+  function svg(n){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (IC[n] || IC.grid) + '</svg>'; }
+
+  /* Every page the existing menu offers right now, honouring its own rules
+     (owner-only pages, sections the business hid, conditional items). */
+  function available(){
+    var hidden = (PREFS && PREFS.hidden_sections) || [], own = isOwner(), seen = {}, list = [];
+    NAV.forEach(function(g){ g.items.forEach(function(it){
+      var id = it.id === 'catalogue' ? 'services' : it.id;
+      if (seen[id] || !VIEWS[id]) return;
+      if (!own && OWNER_ONLY_NAV[id]) return;
+      if (id !== 'console' && hidden.indexOf(id) !== -1) return;
+      seen[id] = 1; list.push({ id: id, name: LABEL[id] || it.name });
+    }); });
+    Object.keys(NEW).forEach(function(id){
+      if (seen[id] || hidden.indexOf(id) !== -1) return;
+      if (!own && (id === 'permissions' || id === 'analytics')) return;
+      seen[id] = 1; list.push({ id: id, name: NEW[id] });
+    });
+    return list;
+  }
+  function grouped(){
+    var list = available(), byId = {}, placed = {}, out = [];
+    list.forEach(function(x){ byId[x.id] = x; });
+    MODS.forEach(function(m){
+      var items = [];
+      m.ids.forEach(function(id){ if (byId[id]) { items.push(byId[id]); placed[id] = 1; } });
+      out.push({ m: m, items: items });
+    });
+    // anything the menu has that this map does not know yet goes to Administration
+    list.forEach(function(x){ if (!placed[x.id]) out[out.length - 1].items.push(x); });
+    return out;
+  }
+  function moduleFor(view){
+    if (view === 'catalogue') view = 'services';
+    var g = grouped();
+    for (var i = 0; i < g.length; i++) for (var j = 0; j < g[i].items.length; j++)
+      if (g[i].items[j].id === view) return { g: g[i], it: g[i].items[j] };
+    return { g: g[0], it: g[0].items[0] || { id: view, name: view } };
+  }
+
+  navHTML = function(active){
+    var cur = moduleFor(active).g.m, out = '<nav class="nav tdm-nav" aria-label="Main">';
+    grouped().forEach(function(x){
+      if (!x.items.length) return;
+      var m = x.m, badge = '';
+      if (m.num === '02') {
+        var n = S.summary && S.summary.work_by_status ? S.summary.work_by_status.needs_human : null;
+        if (n) badge = '<span class="pill attn">' + esc(n) + '</span>';
+      } else if (m.num === '04' && S.leads && S.leads.length) {
+        badge = '<span class="pill count">' + esc(S.leads.length) + '</span>';
+      }
+      if (m.sep) out += '<div class="tdm-sep"></div>';
+      out += '<a href="#/' + x.items[0].id + '" class="tdm-link' + (m === cur ? ' active' : '') + '" title="' + esc(m.name) + '">' +
+        '<span class="tdm-num">' + m.num + '</span>' + svg(m.icon) + '<span class="tdm-label">' + esc(m.name) + '</span>' + badge + '</a>';
+    });
+    return out + '</nav>';
+  };
+
+  var TDM = { collapsed: false };
+  try { TDM.collapsed = localStorage.getItem('td-rail') === '1'; } catch (e) {}
+
+  function decorate(){
+    var app = root.querySelector('.app'), content = root.querySelector('.content');
+    if (!app || !content) return;
+    app.classList.toggle('tdm-collapsed', TDM.collapsed);
+    var v = currentView(), mf = moduleFor(v);
+    var tabs = '';
+    if (mf.g.items.length > 1) tabs = '<div class="tdm-tabs" role="tablist">' + mf.g.items.map(function(it){
+      var on = it.id === v || (v === 'catalogue' && it.id === 'services');
+      return '<a role="tab" aria-selected="' + on + '" href="#/' + it.id + '" class="' + (on ? 'active' : '') + '">' + esc(it.name) + '</a>';
+    }).join('') + '</div>';
+    var hd = document.createElement('div');
+    hd.className = 'tdm-head';
+    hd.innerHTML = '<div class="tdm-eyebrow">' + mf.g.m.num + ' · ' + esc(mf.g.m.name) + '</div>' + tabs;
+    content.insertBefore(hd, content.firstChild);
+    var foot = root.querySelector('.sb-foot');
+    if (foot && !foot.querySelector('.tdm-collapse')) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'tdm-collapse';
+      b.setAttribute('aria-label', TDM.collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+      b.innerHTML = svg('back') + '<span class="tdm-label">Collapse</span>';
+      b.onclick = function(){
+        TDM.collapsed = !TDM.collapsed;
+        try { localStorage.setItem('td-rail', TDM.collapsed ? '1' : '0'); } catch (e) {}
+        renderShell();
+      };
+      foot.insertBefore(b, foot.firstChild);
+    }
+  }
+  /* ---------- motion ----------
+     Motion only answers something the person did or something arriving:
+     - a violet "ink" glides from the old module to the new one in the
+       sidebar, and from the old tab to the new tab;
+     - the page that opens rises in once, in reading order (not on the
+       re-renders that happen while data loads);
+     - a number counts up the first time it arrives on a page.
+     Everything here is off when the device asks for reduced motion. */
+  var REDUCED = false;
+  try { REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+  TDM.ink = { nav: null, tab: null, tabModule: null };
+  TDM.counted = {};
+  var GLIDE_MS = 450;
+  TDM.glide = {};
+  function inkTo(holder, target, axis, prev, key){
+    if (!holder || !target) return;
+    var ink = document.createElement('span');
+    ink.className = 'tdm-ink tdm-ink-' + axis;
+    ink.setAttribute('aria-hidden', 'true');
+    holder.appendChild(ink);
+    var hr = holder.getBoundingClientRect(), tr = target.getBoundingClientRect();
+    var now = axis === 'y'
+      ? { a: tr.top - hr.top + holder.scrollTop, b: tr.height }
+      : { a: tr.left - hr.left + holder.scrollLeft, b: tr.width };
+    function place(p){
+      if (axis === 'y') { ink.style.transform = 'translateY(' + p.a + 'px)'; ink.style.height = p.b + 'px';
+        ink.style.left = (tr.left - hr.left) + 'px'; ink.style.width = tr.width + 'px'; }
+      else { ink.style.transform = 'translateX(' + p.a + 'px)'; ink.style.width = p.b + 'px'; }
+    }
+    function jump(p){ ink.classList.add('no-anim'); place(p); void ink.offsetWidth; ink.classList.remove('no-anim'); }
+    var g = TDM.glide[key], t = performance.now(), from = null, ms = GLIDE_MS;
+    if (!REDUCED && prev && (prev.a !== now.a || prev.b !== now.b)) {
+      from = prev; TDM.glide[key] = { from: prev, to: now, t0: t };
+    } else if (!REDUCED && g && t - g.t0 < GLIDE_MS && g.to.a === now.a) {
+      // the page redrew mid-glide: carry on from where the ink is now
+      var k = (t - g.t0) / GLIDE_MS, e = 1 - Math.pow(1 - k, 3);
+      from = { a: g.from.a + (g.to.a - g.from.a) * e, b: g.from.b + (g.to.b - g.from.b) * e };
+      ms = Math.max(60, GLIDE_MS - (t - g.t0));
+    }
+    if (from) {
+      jump(from);
+      ink.style.transitionDuration = ms + 'ms';
+      requestAnimationFrame(function(){ place(now); });
+    } else jump(now);
+    TDM.ink[key] = now;
+  }
+  function countUp(el, start){
+    var raw = el.textContent.trim();
+    var m = raw.match(/^([^\d\-]*)(-?\d[\d,]*(?:\.\d+)?)(.*)$/);
+    if (!m) return;
+    var target = parseFloat(m[2].replace(/,/g, ''));
+    if (!isFinite(target) || target === 0) return;
+    var dec = (m[2].split('.')[1] || '').length, grouped = m[2].indexOf(',') !== -1 || Math.abs(target) >= 1000;
+    function fmt(n){
+      var s = dec ? n.toFixed(dec) : String(Math.round(n));
+      if (grouped) { var p = s.split('.'); p[0] = Number(p[0]).toLocaleString('en-US'); s = p.join('.'); }
+      return m[1] + s + m[3];
+    }
+    var t0 = start, dur = Math.min(900, 380 + String(Math.round(Math.abs(target))).length * 70);
+    if (performance.now() - t0 >= dur) return;
+    el.textContent = fmt(0);
+    function step(t){
+      if (!el.isConnected) return;
+      var k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+      el.textContent = fmt(target * e);
+      if (k < 1) requestAnimationFrame(step); else el.textContent = raw;
+    }
+    requestAnimationFrame(step);
+  }
+  function animate(){
+    var v = currentView(), mf = moduleFor(v);
+    var viewChanged = TDM.lastView !== v;
+    TDM.lastView = v;
+    // sidebar ink
+    var nav = root.querySelector('.tdm-nav'), activeLink = nav && nav.querySelector('.tdm-link.active');
+    inkTo(nav, activeLink, 'y', viewChanged ? TDM.ink.nav : null, 'nav');
+    // tab ink, gliding only inside the same module
+    var tabs = root.querySelector('.tdm-tabs'), activeTab = tabs && tabs.querySelector('a.active');
+    var sameModule = TDM.ink.tabModule === mf.g.m.num;
+    inkTo(tabs, activeTab, 'x', viewChanged && sameModule ? TDM.ink.tab : null, 'tab');
+    TDM.ink.tabModule = mf.g.m.num;
+    if (activeTab && viewChanged) try { activeTab.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) {}
+    if (REDUCED) return;
+    var content = root.querySelector('.content');
+    if (!content) return;
+    if (viewChanged) {
+      TDM.counted = {};
+      content.classList.add('tdm-enter');
+      var kids = content.children, i, n = 0;
+      for (i = 0; i < kids.length && n < 14; i++) {
+        if (kids[i].id === 'incbar' || kids[i].classList.contains('tdm-head')) continue;
+        kids[i].style.setProperty('--tdm-i', n++);
+      }
+      content.querySelectorAll('.grid').forEach(function(g){
+        Array.prototype.forEach.call(g.children, function(c, j){ if (j < 12) c.style.setProperty('--tdm-j', j); });
+      });
+    }
+    // numbers: count each one up the first time it shows on this visit
+    content.querySelectorAll('.card').forEach(function(card){
+      var val = card.querySelector('.card-value'), lab = card.querySelector('.card-label');
+      if (!val || val.classList.contains('none')) return;
+      // keyed by label and value, with its start time, so a re-render while
+      // data loads continues the same count instead of restarting or skipping it
+      var key = (lab ? lab.textContent : '') + '|' + val.textContent.trim();
+      if (!TDM.counted[key]) TDM.counted[key] = performance.now();
+      countUp(val, TDM.counted[key]);
+    });
+  }
+
+  var _tdmShell = renderShell;
+  renderShell = function(){
+    var r = _tdmShell.apply(this, arguments);
+    try { decorate(); } catch (e) { console.error(e); }
+    try { animate(); } catch (e) { console.error(e); }
+    try { if (typeof TDM.after === 'function') { var f = TDM.after; TDM.after = null; f(); } } catch (e) { console.error(e); }
+    return r;
+  };
+
+  /* ---------- the pages that did not exist yet (existing APIs only) ---------- */
+  function hd(t, s){ return '<h1>' + esc(t) + '</h1><p class="sub">' + esc(s) + '</p>'; }
+  function tb(cols, rows){
+    return '<div class="tbl-wrap"><table><thead><tr>' + cols.map(function(c){ return '<th>' + esc(c) + '</th>'; }).join('') +
+      '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>';
+  }
+  function at(v){ return v ? esc(String(v).slice(0, 16).replace('T', ' ')) : '—'; }
+  function st(txt, cls){ return '<span class="tdm-st ' + (cls || '') + '">' + esc(txt) + '</span>'; }
+  function build(title, why, needs){
+    return '<div class="tdm-build"><h3><span class="tdm-build-tag">NEEDS BACKEND</span>' + esc(title) + '</h3><p>' + esc(why) + '</p>' +
+      (needs && needs.length ? '<ul>' + needs.map(function(n){ return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
+  }
+
+  if (!VIEWS.alerts) VIEWS.alerts = function(){
+    var out = hd('Alerts', 'Problems the platform has noticed for this business.');
+    if (!need('tdm_inc', '/incidents')) return out + panel('Open alerts', loading('Loading alerts...'));
+    if (S.tdm_inc === null) return out + panel('Open alerts', errState('The alerts service did not respond.'));
+    var list = S.tdm_inc.incidents || [];
+    if (!list.length) return out + panel('Open alerts', empty('No open alerts', 'Everything the platform watches is fine right now.'));
+    return out + panel('Open alerts', tb(['Severity', 'Alert', 'Since', 'Seen'], list.map(function(i){
+      var cls = i.severity === 'critical' ? 'bad' : (i.severity === 'warn' ? 'warn' : 'info');
+      return '<tr><td>' + st(i.severity, cls) + '</td><td style="white-space:normal"><b>' + esc(i.title) + '</b>' +
+        (i.detail ? '<div class="sub" style="margin:4px 0 0">' + esc(i.detail) + '</div>' : '') + '</td><td>' + at(i.opened_at) + '</td><td>' + esc(i.seen_count) + '</td></tr>';
+    })));
+  };
+
+  if (!VIEWS.history) VIEWS.history = function(){
+    var out = hd('Execution History', 'Every recorded action, by a person or an AI agent.');
+    if (!need('tdm_exec', '/business/executions')) return out + panel('Recorded actions', loading('Loading...'));
+    if (S.tdm_exec === null) return out + panel('Recorded actions', errState('The history service did not respond.'));
+    var items = S.tdm_exec.items || [];
+    return out + panel('Recorded actions', items.length ? tb(['When', 'By', 'Action', 'On', 'Result'], items.slice(0, 200).map(function(x){
+      return '<tr><td>' + at(x.at) + '</td><td>' + esc(x.actor_type || '—') + '</td><td>' + esc(x.action) + '</td><td>' + esc(x.resource || '—') +
+        '</td><td>' + st(x.status || '—', x.status === 'ok' ? 'ok' : 'bad') + (x.error ? '<div class="sub" style="margin:4px 0 0">' + esc(x.error) + '</div>' : '') + '</td></tr>';
+    })) : empty('No actions recorded yet', 'Saves, payments, approvals and AI actions will be listed here.'));
+  };
+
+  if (!VIEWS.pipeline) VIEWS.pipeline = function(){
+    var out = hd('Pipeline', 'Your leads by stage. Every card is a real lead.');
+    if (S.leads === null) return out + panel('Pipeline', errState('The leads service did not respond.'));
+    var stages = [['new','New'],['qualified','Qualified'],['booked','Booked'],['showed','Showed'],['sold','Sold'],['lost','Lost']];
+    return out + '<div class="tdm-board">' + stages.map(function(s){
+      var ls = (S.leads || []).filter(function(l){ return l.status === s[0]; });
+      return '<div class="tdm-col"><div class="tdm-col-head"><span>' + s[1] + '</span><span class="mono">' + ls.length + '</span></div><div class="tdm-col-body">' +
+        (ls.length ? ls.slice(0, 50).map(function(l){
+          return '<a class="tdm-card" href="#/leads"><b>' + esc(l.name || 'Unnamed') + '</b>' + esc(l.service || '') +
+            (l.est_revenue ? '<span class="sub" style="display:block;margin:2px 0 0">' + money(l.est_revenue) + '</span>' : '') + '</a>';
+        }).join('') : '<div class="sub" style="text-align:center;padding:14px 0;margin:0">No leads</div>') + '</div></div>';
+    }).join('') + '</div>';
+  };
+
+  if (!VIEWS.analytics) VIEWS.analytics = function(){
+    var out = hd('Analytics', 'Where your customers and money come from.');
+    if (!need('tdm_attr', '/attribution/report') || !need('tdm_rev', '/revenue?days=90')) return out + panel('Analytics', loading('Loading...'));
+    var a = S.tdm_attr || {}, r = S.tdm_rev || {};
+    function pk(v){ return v === null || v === undefined ? null : 'PKR ' + Number(v).toLocaleString(); }
+    out += '<div class="grid">' + metric('Ad spend', pk(a.total_spend)) + metric('Revenue (90 days)', pk(r.total)) +
+      metric('Return on ad spend', a.account_roas === null || a.account_roas === undefined ? null : a.account_roas + '×') +
+      metric('Revenue from ads', pk(a.attributed_revenue)) + '</div>';
+    var bs = r.by_source || [], max = bs.reduce(function(m, x){ return Math.max(m, Number(x.total) || 0); }, 0) || 1;
+    out += '<h2>Revenue by source (90 days)</h2>' + panel('Revenue by source', bs.length ? '<div class="tdm-bars">' + bs.map(function(x){
+      return '<div class="tdm-bar"><span>' + esc(x.source || 'unknown') + '</span><div class="tdm-track"><i style="width:' + (100 * (Number(x.total) || 0) / max).toFixed(1) + '%"></i></div><span class="mono">' + money(x.total) + '</span></div>';
+    }).join('') + '</div>' : empty('No revenue recorded in 90 days', ''));
+    var cs = a.campaigns || [];
+    if (cs.length) out += '<h2>Campaigns</h2>' + panel('Campaign results', tb(['Campaign', 'Spend', 'Leads', 'Revenue', 'ROAS', 'Cost per lead'], cs.map(function(c){
+      return '<tr><td>' + esc(c.name) + '</td><td>' + money(c.spend) + '</td><td>' + esc(c.leads === null ? '—' : c.leads) + '</td><td>' + money(c.revenue) +
+        '</td><td>' + esc(c.roas === null || c.roas === undefined ? '—' : c.roas + '×') + '</td><td>' + money(c.cpl) + '</td></tr>';
+    })));
+    return out;
+  };
+
+  if (!VIEWS.permissions) VIEWS.permissions = function(){
+    var out = hd('Permissions', 'Which AI actions need your approval. You can make a rule stricter, never looser than TechDeva’s.');
+    if (!need('tdm_pol', '/policies')) return out + panel('Approval rules', loading('Loading...'));
+    if (S.tdm_pol === null) return out + panel('Approval rules', errState('The policy service did not respond.'));
+    var ps = S.tdm_pol.policies || [];
+    out += actbar() + panel('Approval rules', ps.length ? tb(['Action', 'Risk', 'Needs your approval', 'Why'], ps.map(function(p){
+      var cls = p.risk === 'high' ? 'bad' : (p.risk === 'medium' ? 'warn' : 'ok');
+      var ctl = isOwner() && !p.requires_approval
+        ? '<button class="btn" data-tdmpol="' + esc(p.action) + '" data-risk="' + esc(p.risk) + '">Require approval</button>'
+        : (p.requires_approval ? st('Yes', 'warn') : st('No'));
+      return '<tr><td>' + esc(p.action) + '</td><td>' + st(p.risk, cls) + '</td><td>' + ctl + '</td><td style="white-space:normal">' + esc(p.reason || '') + '</td></tr>';
+    })) : empty('No rules found', ''));
+    TDM.after = function(){
+      document.querySelectorAll('[data-tdmpol]').forEach(function(b){
+        b.onclick = function(){
+          b.disabled = true;
+          act('/policies/' + encodeURIComponent(b.getAttribute('data-tdmpol')), {method:'PUT', body:{risk:b.getAttribute('data-risk'), requires_approval:true}}, 'Rule updated.')
+            .then(function(r){ if (r.ok) need('tdm_pol', '/policies', true); else b.disabled = false; });
+        };
+      });
+    };
+    return out;
+  };
+
+  if (!VIEWS.tools) VIEWS.tools = function(){
+    return hd('Tools', 'The actions your AI agents are allowed to use.') +
+      build('A tool list is not built yet', 'Your agents already act (book, reply, draft posts, run ads within your rules), but there is no page listing those tools with an on/off switch per business.',
+        ['API: list each agent’s tools, with on/off per business', 'Database: per-business tool settings', 'Tie each tool to the rules under Administration > Permissions']);
+  };
+  if (!VIEWS.deals) VIEWS.deals = function(){
+    return hd('Deals', 'Time-limited offers your AI can mention to customers.') +
+      build('Deals and offers are not built yet', 'Packages exist (Business > Packages). Offers with a discount and an end date do not.',
+        ['Database: offers with discount, applies-to and valid-until', 'API: create, edit and end an offer', 'WhatsApp agent: read active offers when replying']);
+  };
+
+  var css = document.createElement('style');
+  css.textContent =
+    '.tdm-nav{display:flex;flex-direction:column;gap:2px;padding:10px}' +
+    '.tdm-sep{height:1px;background:var(--line);margin:8px 6px}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link{display:grid;grid-template-columns:22px 20px minmax(0,1fr) auto;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;' +
+      'color:var(--fg-muted);font-weight:500;border:1px solid transparent;white-space:nowrap;text-decoration:none;justify-content:stretch;text-align:left;height:auto}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link:hover{background:var(--accent-tint);color:var(--fg)}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link.active{background:var(--accent-tint);color:var(--fg);border-color:var(--accent-line)}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link.active svg,.page-dashboard .nav.tdm-nav a.tdm-link.active .tdm-num{color:var(--accent-ink)}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link svg{width:20px;height:20px}' +
+    '.tdm-num{font-family:var(--default-mono-font-family,ui-monospace,monospace);font-size:11px;color:var(--fg-subtle)}' +
+    '.tdm-label{overflow:hidden;text-overflow:ellipsis}' +
+    '.sb-foot .tdm-collapse{display:grid;grid-template-columns:20px minmax(0,1fr);gap:10px;align-items:center;width:100%;margin-bottom:8px;padding:8px 10px;' +
+      'border:0;border-radius:10px;background:none;color:var(--fg-muted);font:inherit;cursor:pointer;text-align:left}' +
+    '.sb-foot .tdm-collapse:hover{background:var(--accent-tint);color:var(--fg)}' +
+    '.sb-foot .tdm-collapse svg{width:18px;height:18px;transition:transform .2s}' +
+    '.tdm-head{margin:0 0 18px}' +
+    '.tdm-eyebrow{font-family:var(--default-mono-font-family,ui-monospace,monospace);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent-ink);margin:0 0 6px}' +
+    '.tdm-tabs{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--line)}' +
+    '.tdm-tabs::-webkit-scrollbar{display:none}' +
+    '.tdm-tabs a{flex:none;padding:10px 14px;color:var(--fg-muted);font-weight:500;border-bottom:2px solid transparent;margin-bottom:-1px;text-decoration:none}' +
+    '.tdm-tabs a:hover{color:var(--fg)}' +
+    '.tdm-tabs a.active{color:var(--fg);border-bottom-color:var(--accent)}' +
+    '@media(min-width:901px){' +
+      '.app.tdm-collapsed .sidebar{width:72px!important;flex-basis:72px!important;min-width:72px!important}' +
+      '.app.tdm-collapsed .brand-text,.app.tdm-collapsed .tdm-label,.app.tdm-collapsed .tdm-num,.app.tdm-collapsed .tdm-link .pill,.app.tdm-collapsed .sb-foot b,.app.tdm-collapsed .sb-foot{font-size:0}' +
+      '.app.tdm-collapsed .tdm-label,.app.tdm-collapsed .tdm-num,.app.tdm-collapsed .tdm-link .pill,.app.tdm-collapsed .brand-text{display:none}' +
+      '.app.tdm-collapsed .page-dashboard .nav.tdm-nav a.tdm-link,.app.tdm-collapsed .sb-foot .tdm-collapse{grid-template-columns:20px;justify-content:center;padding-inline:0}' +
+      '.app.tdm-collapsed .sb-foot .tdm-collapse svg{transform:rotate(180deg)}' +
+      '.app.tdm-collapsed .brand{justify-content:center}' +
+    '}' +
+    '@media(max-width:900px){.tdm-collapse{display:none}}' +
+    '.tdm-st{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:99px;font-size:11px;border:1px solid var(--line-strong);color:var(--fg-muted);white-space:nowrap}' +
+    '.tdm-st::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}' +
+    '.tdm-st.ok{color:var(--success-ink,var(--growth))}.tdm-st.warn{color:var(--warning-ink,var(--warn))}' +
+    '.tdm-st.bad{color:var(--danger-ink,var(--danger))}.tdm-st.info{color:var(--info-ink,var(--accent-ink))}' +
+    '.tdm-build{border:1px dashed var(--warning-ink,var(--warn));border-radius:14px;padding:18px 20px;background:var(--warning-tint,rgba(240,185,85,.08));margin-bottom:16px}' +
+    '.tdm-build h3{margin:0 0 6px;font-size:15px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}' +
+    '.tdm-build p{margin:0 0 6px;color:var(--fg-muted);font-size:13px;max-width:72ch}.tdm-build ul{margin:0;padding-left:18px;color:var(--fg-muted);font-size:13px}' +
+    '.tdm-build-tag{font-size:10px;letter-spacing:.1em;padding:2px 7px;border-radius:4px;background:var(--warning-ink,var(--warn));color:var(--bg);font-weight:600}' +
+    '.tdm-board{display:grid;gap:12px;grid-auto-flow:column;grid-auto-columns:minmax(210px,1fr);overflow-x:auto;padding-bottom:6px}' +
+    '.tdm-col{background:var(--card,var(--panel));border:1px solid var(--line);border-radius:14px;min-height:200px;display:flex;flex-direction:column}' +
+    '.tdm-col-head{display:flex;justify-content:space-between;padding:11px 14px;border-bottom:1px solid var(--line);font-weight:600;font-size:13px}' +
+    '.tdm-col-body{padding:10px;display:flex;flex-direction:column;gap:8px}' +
+    '.tdm-card{display:block;background:var(--bg-elevated,var(--panel2));border:1px solid var(--line);border-radius:10px;padding:10px;font-size:12.5px;color:var(--fg-muted);text-decoration:none}' +
+    '.tdm-card b{display:block;font-size:13px;color:var(--fg)}' +
+    '.tdm-bars{display:grid;gap:8px;padding:16px}' +
+    '.tdm-bar{display:grid;grid-template-columns:minmax(90px,170px) minmax(0,1fr) auto;gap:10px;align-items:center;font-size:13px}' +
+    '.tdm-track{height:8px;border-radius:4px;background:var(--bg-elevated,var(--panel2));overflow:hidden}' +
+    '.tdm-track i{display:block;height:100%;background:var(--accent);border-radius:4px}' +
+    /* motion */
+    '.tdm-nav,.tdm-tabs{position:relative}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link{position:relative;z-index:1;transition:color .25s}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link.active{background:transparent;border-color:transparent}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link.active:before{display:none}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link svg{transition:transform .3s cubic-bezier(.2,.8,.2,1)}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link:hover svg{transform:translateX(2px)}' +
+    '.tdm-ink{position:absolute;top:0;left:0;pointer-events:none;z-index:0;' +
+      'transition:transform .45s cubic-bezier(.2,.8,.2,1),height .45s cubic-bezier(.2,.8,.2,1),width .45s cubic-bezier(.2,.8,.2,1)}' +
+    '.tdm-ink.no-anim{transition:none}' +
+    '.tdm-ink-y{border-radius:10px;background:var(--accent-tint);border:1px solid var(--accent-line);' +
+      'box-shadow:inset 3px 0 0 var(--accent),0 0 28px -8px var(--accent)}' +
+    '.tdm-tabs a{position:relative;z-index:1;transition:color .2s}' +
+    '.tdm-tabs a.active{border-bottom-color:transparent}' +
+    '.tdm-ink-x{top:auto;bottom:0;height:2px;border-radius:2px;background:var(--accent);box-shadow:0 0 14px var(--accent)}' +
+    '@keyframes tdmRise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}' +
+    '.tdm-enter>*:not(#incbar):not(.tdm-head){animation:tdmRise .55s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--tdm-i,0) * 50ms)}' +
+    '.tdm-enter .grid>*{animation:tdmRise .55s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--tdm-j,0) * 40ms + 90ms)}' +
+    '.page-dashboard a.card,.page-dashboard .pin-card,.tdm-card{transition:transform .25s cubic-bezier(.2,.8,.2,1),border-color .25s,box-shadow .25s}' +
+    '.page-dashboard a.card:hover,.page-dashboard .pin-card:hover,.tdm-card:hover{transform:translateY(-2px);border-color:var(--accent-line);box-shadow:0 10px 30px -14px var(--accent)}' +
+    '.page-dashboard .btn{transition:transform .12s,background-color .2s,border-color .2s}' +
+    '.page-dashboard .btn:active{transform:scale(.97)}' +
+    '.card-value{font-variant-numeric:tabular-nums}' +
+    '@media(prefers-reduced-motion:reduce){.tdm-ink,.tdm-enter *,.tdm-enter>*,.page-dashboard .btn,.tdm-card{transition:none!important;animation:none!important;transform:none!important}}';
+  document.head.appendChild(css);
+})();
+
 boot();
 </script>
 </body>
