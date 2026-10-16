@@ -8633,18 +8633,53 @@ function apWire(){
     })) : empty('No actions recorded yet', 'Saves, payments, approvals and AI actions will be listed here.'));
   };
 
+  /* Backend batch 1 may not be deployed yet: a 404/405 means "route missing", not "you did something wrong". */
+  function missing(r){ return !!r && (r.status === 405 || (r.status === 404 && r.data && r.data.detail === 'Not Found')); }
+  var STAGES = [['new','New'],['qualified','Qualified'],['booked','Booked'],['showed','Showed'],['sold','Sold'],['lost','Lost']];
+
+  function moveLead(id, to){
+    var l = (S.leads || []).filter(function(x){ return String(x.id) === String(id); })[0];
+    if (!l || l.status === to) return;
+    var from = l.status;
+    l.status = to; renderShell();                       /* optimistic: the card moves at once */
+    act('/leads/' + encodeURIComponent(id), {method:'PATCH', body:{status:to}}, 'Moved to ' + to + '.').then(function(r){
+      if (r.ok) { if (r.data && r.data.lead) Object.assign(l, r.data.lead); return; }
+      l.status = from; renderShell();                   /* put it back: the server did not save it */
+      var el = document.getElementById('actmsg');
+      if (el && missing(r)) { el.textContent = 'Moving leads needs backend batch 1 on the server. Nothing was changed.'; el.style.color = 'var(--warn)'; }
+    });
+  }
+
   if (!VIEWS.pipeline) VIEWS.pipeline = function(){
-    var out = hd('Pipeline', 'Your leads by stage. Every card is a real lead.');
+    var out = hd('Pipeline', 'Your leads by stage. Drag a card, or use its menu, to move it.');
     if (S.leads === null) return out + panel('Pipeline', errState('The leads service did not respond.'));
-    var stages = [['new','New'],['qualified','Qualified'],['booked','Booked'],['showed','Showed'],['sold','Sold'],['lost','Lost']];
-    return out + '<div class="tdm-board">' + stages.map(function(s){
+    out += actbar() + '<div class="tdm-board">' + STAGES.map(function(s){
       var ls = (S.leads || []).filter(function(l){ return l.status === s[0]; });
-      return '<div class="tdm-col"><div class="tdm-col-head"><span>' + s[1] + '</span><span class="mono">' + ls.length + '</span></div><div class="tdm-col-body">' +
+      return '<div class="tdm-col" data-stage="' + s[0] + '"><div class="tdm-col-head"><span>' + s[1] + '</span><span class="mono">' + ls.length + '</span></div><div class="tdm-col-body">' +
         (ls.length ? ls.slice(0, 50).map(function(l){
-          return '<a class="tdm-card" href="#/leads"><b>' + esc(l.name || 'Unnamed') + '</b>' + esc(l.service || '') +
-            (l.est_revenue ? '<span class="sub" style="display:block;margin:2px 0 0">' + money(l.est_revenue) + '</span>' : '') + '</a>';
-        }).join('') : '<div class="sub" style="text-align:center;padding:14px 0;margin:0">No leads</div>') + '</div></div>';
+          return '<div class="tdm-card" draggable="true" data-lead="' + esc(l.id) + '"><b>' + esc(l.name || 'Unnamed') + '</b>' + esc(l.service || '') +
+            (l.est_revenue ? '<span class="sub" style="display:block;margin:2px 0 0">' + money(l.est_revenue) + '</span>' : '') +
+            '<select class="tdm-move" data-lead="' + esc(l.id) + '" aria-label="Move ' + esc(l.name || 'lead') + '">' +
+            STAGES.map(function(o){ return '<option value="' + o[0] + '"' + (o[0] === s[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') +
+            '</select></div>';
+        }).join('') : '<div class="sub tdm-none" style="text-align:center;padding:14px 0;margin:0">No leads</div>') + '</div></div>';
     }).join('') + '</div>';
+    TDM.after = function(){
+      document.querySelectorAll('.tdm-card[data-lead]').forEach(function(c){
+        c.ondragstart = function(e){ e.dataTransfer.setData('text/plain', c.getAttribute('data-lead')); e.dataTransfer.effectAllowed = 'move'; c.classList.add('dragging'); };
+        c.ondragend = function(){ c.classList.remove('dragging'); };
+      });
+      document.querySelectorAll('.tdm-col[data-stage]').forEach(function(col){
+        col.ondragover = function(e){ e.preventDefault(); col.classList.add('over'); };
+        col.ondragleave = function(e){ if (!col.contains(e.relatedTarget)) col.classList.remove('over'); };
+        col.ondrop = function(e){ e.preventDefault(); col.classList.remove('over'); moveLead(e.dataTransfer.getData('text/plain'), col.getAttribute('data-stage')); };
+      });
+      document.querySelectorAll('select.tdm-move').forEach(function(sel){
+        sel.onclick = function(e){ e.stopPropagation(); };
+        sel.onchange = function(){ moveLead(sel.getAttribute('data-lead'), sel.value); };
+      });
+    };
+    return out;
   };
 
   if (!VIEWS.analytics) VIEWS.analytics = function(){
@@ -8696,10 +8731,95 @@ function apWire(){
       build('A tool list is not built yet', 'Your agents already act (book, reply, draft posts, run ads within your rules), but there is no page listing those tools with an on/off switch per business.',
         ['API: list each agent’s tools, with on/off per business', 'Database: per-business tool settings', 'Tie each tool to the rules under Administration > Permissions']);
   };
+  function offerText(o){ return o.discount_type === 'percent' ? Number(o.discount_value) + '% off' : money(o.discount_value) + ' off'; }
+  function offerState(o){
+    var today = new Date().toISOString().slice(0, 10);
+    if (!o.active) return ['Ended', ''];
+    if (o.ends_on && o.ends_on < today) return ['Expired', 'bad'];
+    if (o.starts_on && o.starts_on > today) return ['Scheduled', 'info'];
+    return ['Live', 'ok'];
+  }
   if (!VIEWS.deals) VIEWS.deals = function(){
-    return hd('Deals', 'Time-limited offers your AI can mention to customers.') +
-      build('Deals and offers are not built yet', 'Packages exist (Business > Packages). Offers with a discount and an end date do not.',
-        ['Database: offers with discount, applies-to and valid-until', 'API: create, edit and end an offer', 'WhatsApp agent: read active offers when replying']);
+    var out = hd('Deals', 'Time-limited offers your AI can mention to customers.');
+    if (!need('tdm_offers', '/business/offers')) return out + panel('Offers', loading('Loading offers...'));
+    if (S.tdm_offers === null) {
+      if (S.tdm_offers_status === 404) return out + build('Offers are not on the server yet', 'The page is ready. It starts working when backend batch 1 (the offers table and API) is deployed.',
+        ['Database: db/29_offers.sql', 'API: "offers" added to /business resources']);
+      return out + panel('Offers', errState('The offers service did not respond.'));
+    }
+    var items = S.tdm_offers.items || [], own = isOwner();
+    if (own) out += '<div class="panel"><div class="panel-head"><div class="panel-title">New offer</div></div>' +
+      '<form id="tdm-offer" class="tdm-form">' +
+      '<label>Title<input name="title" required maxlength="120" placeholder="e.g. Eid facial special"></label>' +
+      '<label>Discount<span class="tdm-pair"><input name="discount_value" type="number" min="0.01" step="0.01" required>' +
+      '<select name="discount_type"><option value="percent">%</option><option value="amount">PKR</option></select></span></label>' +
+      '<label>Starts<input name="starts_on" type="date"></label><label>Ends<input name="ends_on" type="date"></label>' +
+      '<label class="wide">Details<input name="description" maxlength="400" placeholder="What the customer gets, any conditions"></label>' +
+      '<div class="wide"><button class="btn primary" type="submit">Save offer</button></div></form></div>';
+    out += actbar() + panel('Offers', items.length ? tb(['Offer', 'Discount', 'Runs', 'Status', ''], items.map(function(o){
+      var stt = offerState(o);
+      return '<tr><td style="white-space:normal"><b>' + esc(o.title) + '</b>' + (o.description ? '<div class="sub" style="margin:4px 0 0">' + esc(o.description) + '</div>' : '') +
+        '</td><td>' + offerText(o) + '</td><td>' + esc((o.starts_on || 'now') + ' → ' + (o.ends_on || 'no end')) + '</td><td>' + st(stt[0], stt[1]) + '</td><td>' +
+        (own && o.active ? '<button class="btn" data-tdmend="' + esc(o.id) + '">End offer</button>' : '') + '</td></tr>';
+    })) : empty('No offers yet', own ? 'Add one above. Your AI only mentions offers that are live.' : 'The owner has not added any offers.'));
+    TDM.after = function(){
+      var f = document.getElementById('tdm-offer');
+      if (f) f.onsubmit = function(e){
+        e.preventDefault();
+        var d = new FormData(f), body = {};
+        ['title','description','discount_type','starts_on','ends_on'].forEach(function(k){ var v = String(d.get(k) || '').trim(); if (v) body[k] = v; });
+        body.discount_value = Number(d.get('discount_value'));
+        if (body.ends_on && body.starts_on && body.ends_on < body.starts_on) { var m = document.getElementById('actmsg'); m.textContent = 'The end date is before the start date.'; m.style.color = 'var(--danger)'; return; }
+        f.querySelector('button').disabled = true;
+        act('/business/offers', {method:'POST', body:body}, 'Offer saved.').then(function(r){
+          if (r.ok) need('tdm_offers', '/business/offers', true); else f.querySelector('button').disabled = false;
+        });
+      };
+      document.querySelectorAll('[data-tdmend]').forEach(function(b){
+        b.onclick = function(){
+          b.disabled = true;
+          act('/business/offers/' + encodeURIComponent(b.getAttribute('data-tdmend')), {method:'PATCH', body:{active:false}}, 'Offer ended.')
+            .then(function(r){ if (r.ok) need('tdm_offers', '/business/offers', true); else b.disabled = false; });
+        };
+      });
+    };
+    return out;
+  };
+
+  /* Workspace: time zone, currency, language. Added to Business Settings for the owner. */
+  var TZ = ['Asia/Karachi','Asia/Dubai','Asia/Riyadh','Asia/Kolkata','Europe/London','America/New_York','America/Chicago','America/Los_Angeles','Australia/Sydney'];
+  var _tdmSettings = VIEWS.settings;
+  VIEWS.settings = function(){
+    var html = _tdmSettings.apply(this, arguments);
+    if (!isOwner() || !S.config) return html;
+    var c = S.config.config || {}, tz = c.timezone || 'Asia/Karachi', cur = c.currency || 'PKR', lang = c.language || 'en';
+    var tzs = TZ.indexOf(tz) === -1 ? [tz].concat(TZ) : TZ;
+    var ws = '<div class="panel" style="margin-bottom:14px"><div class="panel-head"><div class="panel-title">Workspace</div></div>' +
+      '<form id="tdm-ws" class="tdm-form">' +
+      '<label>Time zone<select name="timezone">' + tzs.map(function(z){ return '<option' + (z === tz ? ' selected' : '') + '>' + esc(z) + '</option>'; }).join('') + '</select></label>' +
+      '<label>Currency<input name="currency" value="' + esc(cur) + '" maxlength="3" pattern="[A-Za-z]{3}" required></label>' +
+      '<label>Language<select name="language"><option value="en"' + (lang === 'en' ? ' selected' : '') + '>English</option><option value="ur"' + (lang === 'ur' ? ' selected' : '') + '>Urdu</option></select></label>' +
+      '<div class="wide"><button class="btn primary" type="submit">Save workspace</button><span id="tdm-wsmsg" class="card-note" style="margin-left:10px"></span></div></form></div>';
+    var prev = TDM.after;
+    TDM.after = function(){
+      if (typeof prev === 'function') prev();
+      var f = document.getElementById('tdm-ws'), m = document.getElementById('tdm-wsmsg');
+      if (f) f.onsubmit = function(e){
+        e.preventDefault();
+        var d = new FormData(f), body = {timezone:d.get('timezone'), currency:String(d.get('currency')).toUpperCase(), language:d.get('language')};
+        m.textContent = 'Saving...'; m.style.color = '';
+        api('/portal/config', {method:'PUT', body:body}).then(function(r){
+          var saved = r.ok && r.data && (r.data.saved || []).indexOf('timezone') !== -1;
+          if (saved) { S.config = {config:r.data.config, onboarding:r.data.onboarding}; m.textContent = 'Saved.'; m.style.color = 'var(--growth)'; return; }
+          m.style.color = r.ok || r.status === 400 ? 'var(--warn)' : 'var(--danger)';
+          m.textContent = (r.ok || (r.status === 400 && r.data && r.data.detail === 'nothing to save'))
+            ? 'The server does not store these yet (backend batch 1). Nothing was changed.'
+            : ((r.data && r.data.detail && typeof r.data.detail === 'string' ? r.data.detail : 'That did not save.'));
+        });
+      };
+    };
+    var at = html.indexOf('</p>');
+    return at === -1 ? ws + html : html.slice(0, at + 4) + ws + html.slice(at + 4);
   };
 
   var css = document.createElement('style');
@@ -8748,6 +8868,14 @@ function apWire(){
     '.tdm-col-body{padding:10px;display:flex;flex-direction:column;gap:8px}' +
     '.tdm-card{display:block;background:var(--bg-elevated,var(--panel2));border:1px solid var(--line);border-radius:10px;padding:10px;font-size:12.5px;color:var(--fg-muted);text-decoration:none}' +
     '.tdm-card b{display:block;font-size:13px;color:var(--fg)}' +
+    '.tdm-card[draggable]{cursor:grab}.tdm-card.dragging{opacity:.45}' +
+    '.tdm-col.over{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-tint)}' +
+    '.tdm-move{margin-top:8px;width:100%;font:inherit;font-size:12px;padding:4px 6px;border-radius:7px;border:1px solid var(--line);background:var(--card,var(--panel));color:var(--fg-muted)}' +
+    '.tdm-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;padding:16px}' +
+    '.tdm-form label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--fg-muted)}' +
+    '.tdm-form .wide{grid-column:1/-1}' +
+    '.tdm-form input,.tdm-form select{font:inherit;font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--line-strong,var(--line));background:var(--bg-elevated,var(--panel2));color:var(--fg)}' +
+    '.tdm-pair{display:flex;gap:6px}.tdm-pair input{flex:1;min-width:0}' +
     '.tdm-bars{display:grid;gap:8px;padding:16px}' +
     '.tdm-bar{display:grid;grid-template-columns:minmax(90px,170px) minmax(0,1fr) auto;gap:10px;align-items:center;font-size:13px}' +
     '.tdm-track{height:8px;border-radius:4px;background:var(--bg-elevated,var(--panel2));overflow:hidden}' +
