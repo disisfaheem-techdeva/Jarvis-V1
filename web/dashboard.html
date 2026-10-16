@@ -8740,7 +8740,7 @@ function apWire(){
     return ['Live', 'ok'];
   }
   if (!VIEWS.deals) VIEWS.deals = function(){
-    var out = hd('Deals', 'Time-limited offers your AI can mention to customers.');
+    var out = hd('Deals', 'Time-limited offers for your business.');
     if (!need('tdm_offers', '/business/offers')) return out + panel('Offers', loading('Loading offers...'));
     if (S.tdm_offers === null) {
       if (S.tdm_offers_status === 404) return out + build('Offers are not on the server yet', 'The page is ready. It starts working when backend batch 1 (the offers table and API) is deployed.',
@@ -8761,7 +8761,7 @@ function apWire(){
       return '<tr><td style="white-space:normal"><b>' + esc(o.title) + '</b>' + (o.description ? '<div class="sub" style="margin:4px 0 0">' + esc(o.description) + '</div>' : '') +
         '</td><td>' + offerText(o) + '</td><td>' + esc((o.starts_on || 'now') + ' → ' + (o.ends_on || 'no end')) + '</td><td>' + st(stt[0], stt[1]) + '</td><td>' +
         (own && o.active ? '<button class="btn" data-tdmend="' + esc(o.id) + '">End offer</button>' : '') + '</td></tr>';
-    })) : empty('No offers yet', own ? 'Add one above. Your AI only mentions offers that are live.' : 'The owner has not added any offers.'));
+    })) : empty('No offers yet', own ? 'Add one above.' : 'The owner has not added any offers.'));
     TDM.after = function(){
       var f = document.getElementById('tdm-offer');
       if (f) f.onsubmit = function(e){
