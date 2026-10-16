@@ -174,6 +174,37 @@ RESOURCES.update({
 })
 
 
+# Offers (db/65_offers.sql): a discount on everything, or on one service,
+# product or package. item_id has no foreign key because it points at one of
+# three tables, so _check_offer() below is what keeps it inside this business.
+RESOURCES["offers"] = Spec(
+    table="offers",
+    read="id, title, description, discount_type, discount_value, applies_to, item_id, "
+         "starts_on, ends_on, active, " + _TS,
+    writable=["title", "description", "discount_type", "discount_value", "applies_to",
+              "item_id", "starts_on", "ends_on", "active"],
+    order="active DESC, ends_on NULLS LAST, created_at DESC",
+    required=("title", "discount_type", "discount_value"))
+
+_OFFER_TARGETS = {"service": "services", "product": "products", "package": "packages"}
+
+
+def _check_offer(cur, row):
+    """Run inside the write's transaction: raising here rolls the write back."""
+    if row["discount_type"] == "percent" and row["discount_value"] > 100:
+        raise HTTPException(400, "A percent discount cannot be more than 100.")
+    if row["applies_to"] == "all":
+        if row["item_id"] is not None:
+            raise HTTPException(400, "An offer on everything cannot name an item. Leave item_id empty.")
+        return
+    if row["item_id"] is None:
+        raise HTTPException(400, "Choose which {0} this offer is for (item_id).".format(row["applies_to"]))
+    cur.execute("SELECT 1 FROM {0} WHERE id = %s".format(_OFFER_TARGETS[row["applies_to"]]),
+                (row["item_id"],))
+    if not cur.fetchone():
+        raise HTTPException(400, "That {0} does not exist in this business.".format(row["applies_to"]))
+
+
 # Tables whose money or ledger rules live elsewhere. Writing them through the
 # generic router would skip those rules (an invoice total not recomputed, a
 # payment that does not move the invoice status, an appointment deleted while
@@ -231,6 +262,7 @@ OWNER_ONLY = {
     "business_goals": {"POST", "PATCH", "DELETE"},
     "expenses": {"PATCH", "DELETE"},
     "customers": {"DELETE"},
+    "offers": {"POST", "PATCH", "DELETE"},
 }
 
 
@@ -501,6 +533,8 @@ def make_business_router(P=None):
         with _readable_db_errors(resource), tenant_session(tid, role) as cur:
             cur.execute(sql, vals)
             row = cur.fetchone()
+            if resource == "offers":
+                _check_offer(cur, row)
             record(cur, action="create", resource=resource, resource_id=row.get("id"),
                    actor=uid, detail={"fields": sorted(data.keys())})
         return {"resource": resource, "item": row}
@@ -525,6 +559,8 @@ def make_business_router(P=None):
         with _readable_db_errors(resource), tenant_session(tid, role) as cur:
             cur.execute(sql, list(data.values()) + [item_id])
             row = cur.fetchone()
+            if row and resource == "offers":
+                _check_offer(cur, row)
             if row:
                 record(cur, action="update", resource=resource, resource_id=item_id,
                        actor=uid, detail={"fields": sorted(data.keys())})

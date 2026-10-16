@@ -25,10 +25,12 @@ Two rules are enforced here rather than merely documented:
 from __future__ import annotations
 
 import os
+import re
 import time
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Header, Cookie, HTTPException, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from .auth import (AuthError, SESSION_COOKIE, SESSION_TTL_SECONDS, auth_required,
                    issue_token, resolve_scope, verify_password, revoke_sessions,
@@ -116,6 +118,35 @@ class ConfigIn(BaseModel):
     working_hours: dict | None = None
     hermes_persona: str | None = None
     automation: str | None = None
+    # workspace settings (db/66_workspace_settings.sql)
+    timezone: str | None = None
+    currency: str | None = None
+    language: str | None = None
+
+    @field_validator("timezone")
+    @classmethod
+    def _real_timezone(cls, v):
+        if v is None:
+            return v
+        try:
+            ZoneInfo(v)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ValueError("timezone must be a real time zone such as Asia/Karachi")
+        return v
+
+    @field_validator("currency")
+    @classmethod
+    def _iso_currency(cls, v):
+        if v is not None and not re.fullmatch(r"[A-Z]{3}", v):
+            raise ValueError("currency must be a 3-letter code in capitals, such as PKR")
+        return v
+
+    @field_validator("language")
+    @classmethod
+    def _known_language(cls, v):
+        if v is not None and v not in ("en", "ur"):
+            raise ValueError("language must be en or ur")
+        return v
 
 
 def make_portal_router(P) -> APIRouter:
