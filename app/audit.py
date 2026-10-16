@@ -26,7 +26,9 @@ def record(cur, *, action, resource, resource_id=None, actor=None,
     write leaves no audit row claiming it happened.
     """
     # tenant_id: for founder-scope sessions (no current tenant), name the
-    # client the action touched. The SAVEPOINT is what makes "never rolls back
+    # client the action touched. With neither, the row is platform-wide
+    # (tenant_id NULL), which RLS lets only the founder write or read
+    # (db/67_founder_audit.sql). The SAVEPOINT is what makes "never rolls back
     # the real work" true: in Postgres a failed statement aborts the whole
     # transaction, so without it one bad audit insert silently discarded the
     # payment / invoice / hide it was describing.

@@ -63,12 +63,13 @@ def test_only_the_founder_can_change_it(client):
     assert res.status_code == 403
 
 
-@pytest.mark.xfail(strict=True, reason="executions.tenant_id is NOT NULL, so a platform-wide action "
-                                       "(no business) cannot be stored yet; needs a database change")
-def test_the_audit_row_is_stored(client):
+def test_the_audit_row_is_stored_with_no_business(client):
+    """db/67: a founder action is stored platform-wide, tenant_id NULL."""
     assert client.put(URL, headers=FOUNDER, json={"server_alert_at": 737}).status_code == 200
     with tenant_session(None, "techdeva_admin") as cur:
-        cur.execute("SELECT count(*) n FROM executions WHERE action = 'techdeva.setting' "
+        cur.execute("SELECT tenant_id, actor_type, status FROM executions WHERE action = 'techdeva.setting' "
                     "AND resource_id = %s AND detail->>'server_alert_at' = '737'",
                     (retention.SERVER_ALERT_KEY,))
-        assert cur.fetchone()["n"] == 1
+        rows = cur.fetchall()
+    assert len(rows) == 1
+    assert rows[0]["tenant_id"] is None and rows[0]["actor_type"] == "human" and rows[0]["status"] == "ok"
