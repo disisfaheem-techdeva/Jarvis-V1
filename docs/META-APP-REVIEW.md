@@ -31,12 +31,38 @@ The platform uses these today (`app/oauth.py`, `META_SCOPES`):
 | `instagram_content_publish` | To publish the owner-approved post (picture + caption) to the business's own Instagram account. |
 | `business_management` | To list Pages and Instagram accounts that belong to the owner's Business Portfolio. |
 | `ads_management` | See the recommendation below. |
+| `read_insights`, `instagram_manage_insights` | Content Autopilot: to show the owner how each of their own posts did (reach, likes, comments, shares, saves) and their follower count, and to plan next month's posts from what worked. |
+| `pages_messaging` | Social Inbox: to answer customers who message the business's Page on Messenger, with the business's own prices and details, and let the owner reply from the dashboard. |
+| `instagram_manage_messages` | Social Inbox: the same for Instagram direct messages to the business's account. |
+| `pages_manage_metadata` | To subscribe the business's Page to message and comment webhooks, so new messages reach the Social Inbox. |
+| `pages_read_user_content` | To read comments people leave on the business's own Page posts, so they can be answered. |
+| `pages_manage_engagement` | To post the business's reply under a comment on its own Page (one short line; details go by private message). |
+| `instagram_manage_comments` | To read and reply to comments on the business's own Instagram posts. |
 
 **Recommendation (your decision):** the code only *reads* ad accounts (spend and leads for the
 dashboard). It never creates or edits ads. `ads_read` covers that and is much easier to get
 approved than `ads_management`. If you agree, change `ads_management` to `ads_read` in
 `app/oauth.py` (one word), deploy, and reconnect Facebook once. If you plan to create ads from
 TechDeva later, keep `ads_management` and show that feature in the video.
+
+## 2b. Webhooks (Social Inbox), once
+
+In the Meta app dashboard: **Add product → Webhooks**.
+
+1. In the VPS `.env` set `META_WEBHOOK_VERIFY_TOKEN=` to a long random string
+   (`openssl rand -hex 24`), then recreate `api`.
+2. **Page** object: Callback URL `https://api.techdeva.net/meta/webhook`, Verify token = that string,
+   press Verify and save. Subscribe the fields **messages**, **messaging_postbacks**, **feed**.
+3. **Instagram** object: same URL and token. Subscribe **messages**, **comments**.
+4. The platform subscribes each connected Page by itself (every 10 minutes); the Social Inbox shows
+   a warning for any Page Facebook has not agreed to yet.
+
+Until the app is **Live** with these permissions approved, Meta only delivers messages and
+comments from people with a role on the app (you, testers). Test with your own account first.
+
+For the recording, also show: a message sent to the test Page on Messenger and Instagram getting
+an answer; the conversation in **Social Inbox**; the owner replying from the dashboard (the
+assistant pauses there); a comment getting a short public reply and a private message.
 
 ## 3. The screen recording (one video per permission group, or one video showing all)
 

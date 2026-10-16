@@ -120,6 +120,9 @@ from .voice import make_voice_router
 app.include_router(make_voice_router())
 from .autopilot import make_autopilot_router
 app.include_router(make_autopilot_router())
+from .social_agent import make_meta_webhook_router, make_social_inbox_router
+app.include_router(make_meta_webhook_router())
+app.include_router(make_social_inbox_router())
 trial.install(app)
 # Storefront: orders, enquiries and messages from a tenant's own website (docs/STOREFRONT.md)
 app.include_router(make_storefront_router(P))

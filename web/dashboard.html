@@ -8398,6 +8398,134 @@ function apWire(){
   document.head.appendChild(css);
 })();
 
+
+/* ======================================================== Social Inbox
+   Facebook Messenger, Instagram DMs and comments (app/social_agent.py). The AI
+   answers by itself; serious clients are marked 🔥 and emailed to the owner;
+   anything it left for the owner is marked. Writing in a conversation makes the
+   AI go quiet there until the owner hands it back. */
+var SI = { filter: '', sel: null, data: undefined, view: undefined, msg: null, text: '', pub: false };
+function siLoad(force){
+  if (SI.data !== undefined && !force) return;
+  SI.data = SI.data || null;
+  api('/social-inbox/threads' + (SI.filter ? '?filter=' + SI.filter : '')).then(function(r){
+    SI.data = r.ok ? r.data : { error: (r.data && r.data.detail) || 'The social inbox did not load.' }; renderShell();
+  });
+}
+function siOpen(id){
+  SI.sel = id; SI.view = null; SI.text = ''; SI.pub = false; renderShell();
+  api('/social-inbox/threads/' + encodeURIComponent(id)).then(function(r){
+    SI.view = r.ok ? r.data : { error: (r.data && r.data.detail) || 'Could not open the conversation.' }; renderShell();
+  });
+}
+function siWho(t){ return (t.platform === 'instagram' ? '📸 Instagram' : '📘 Facebook') + ' · ' + (t.kind === 'comment' ? 'comment' : 'message'); }
+VIEWS.socialinbox = function(){
+  var out = '<h1>Social Inbox</h1><p class="sub">Facebook and Instagram messages and comments. Your assistant answers 24/7 with your own prices and details; ' +
+    '🔥 marks a serious client (you also get an email). Write in any conversation to take over; the assistant then stays quiet there.</p>';
+  var want = (location.hash.split('?id=')[1] || '').split('&')[0];
+  if (want && SI.sel !== want) setTimeout(function(){ siOpen(want); }, 0);
+  siLoad(false);
+  if (!SI.data) return out + panel('Conversations', loading('Reading your messages...'));
+  if (SI.data.error) return out + panel('Conversations', errState(SI.data.error));
+  var d = SI.data, st = d.settings || {}, c = d.counts || {};
+  if (SI.msg) out += '<div class="card-note" style="margin:6px 0 12px;color:' + (SI.msg.bad ? 'var(--danger)' : 'var(--growth)') + '">' + esc(SI.msg.text) + '</div>';
+  if (!st.enabled) out += '<div class="bil-note">The assistant is switched off: messages are collected here but not answered. Switch it on in the settings below.</div>';
+  var pages = d.pages || [];
+  if (!pages.length) out += '<div class="bil-note">No Facebook Page is connected yet. <a href="#/posts">Connect Facebook &amp; Instagram on the Posts page</a>; messages start arriving here after that.</div>';
+  else if (pages.some(function(p){ return !p.subscribed; })) out += '<div class="bil-note">Facebook has not yet agreed to send us messages for: ' +
+    esc(pages.filter(function(p){ return !p.subscribed; }).map(function(p){ return p.page_name; }).join(', ')) + '. Press Reconnect on the Posts page and allow all the permissions it asks for.</div>';
+  var chips = [['', 'All (' + (c.total || 0) + ')'], ['hot', '🔥 Serious (' + (c.hot || 0) + ')'], ['owner', '🙋 Needs you (' + (c.owner || 0) + ')']].map(function(f){
+    return '<button class="btn' + (SI.filter === f[0] ? ' primary' : '') + '" data-sif="' + f[0] + '">' + esc(f[1]) + '</button>'; }).join(' ');
+  var threads = d.threads || [];
+  var list = threads.length ? threads.map(function(t){
+    return '<div class="ibx-item' + (SI.sel === t.id ? ' sel' : '') + '" data-sit="' + esc(t.id) + '">' +
+      '<div style="display:flex;justify-content:space-between;gap:8px"><strong>' + (t.hot ? '🔥 ' : '') + esc(t.person_name || 'Customer') + '</strong>' +
+      '<span class="card-note">' + esc(when(t.last_message_at)) + '</span></div>' +
+      '<div class="card-note">' + esc(siWho(t)) + (t.intent ? ' · ' + esc(t.intent) : '') + (t.ai_paused ? ' · you are replying' : '') + '</div>' +
+      (t.needs_owner ? '<div class="card-note" style="color:var(--danger)">🙋 ' + esc(t.needs_owner) + '</div>' : '') +
+      '<div class="card-note" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(t.last || '') + '</div></div>';
+  }).join('') : empty('Nothing here yet', 'Messages and comments from Facebook and Instagram appear here.');
+  var chat;
+  if (!SI.sel) chat = empty('Select a conversation', 'Tap one to read it and reply.');
+  else if (SI.view === null) chat = loading('Opening...');
+  else if (SI.view.error) chat = errState(SI.view.error);
+  else {
+    var th = SI.view.thread;
+    var who = { customer: th.person_name || 'Customer', ai: 'Assistant', owner: 'You' };
+    chat = '<div style="padding:10px 14px;border-bottom:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between">' +
+      '<div><b>' + (th.hot ? '🔥 ' : '') + esc(th.person_name || 'Customer') + '</b> <span class="card-note">' + esc(siWho(th)) +
+        (th.score != null ? ' · serious ' + esc(th.score) + '/100' : '') + '</span>' +
+        (th.lead_id ? ' <a class="card-note" href="#/leads">· saved as a lead</a>' : '') + '</div>' +
+      '<button class="btn" id="si_ai">' + (th.ai_paused ? '🤖 Let the assistant reply again' : '✋ Pause the assistant here') + '</button></div>' +
+      (th.needs_owner ? '<div class="ap-check" style="margin:10px 14px">🙋 ' + esc(th.needs_owner) + '</div>' : '') +
+      '<div class="ibx-msgs" style="padding:10px 14px;display:grid;gap:8px">' + SI.view.messages.map(function(m){
+        var mine = m.author !== 'customer';
+        var tag = m.visibility === 'public' ? ' · public' : '';
+        var stx = m.status === 'held' ? ' · <span style="color:var(--danger)">held back, not sent</span>' : m.status === 'failed' ? ' · <span style="color:var(--danger)" title="' + esc(m.error || '') + '">not sent</span>' : '';
+        return '<div class="bub ' + (mine ? 'assistant' : 'user') + (m.author === 'owner' ? ' owner' : '') + '">' + esc(m.text) +
+          '<div class="t">' + esc(who[m.author]) + tag + ' · ' + esc(when(m.created_at)) + stx + '</div>' +
+          (m.status === 'failed' && m.error ? '<div class="t" style="color:var(--danger)">' + esc(m.error) + '</div>' : '') + '</div>';
+      }).join('') + '</div>' +
+      '<div style="padding:10px 14px;border-top:1px solid var(--line)">' +
+        '<textarea class="fld" id="si_text" rows="3" maxlength="1000" style="width:100%" placeholder="Write your reply...">' + esc(SI.text) + '</textarea>' +
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px">' +
+          (th.kind === 'comment' ? '<label class="card-note"><input type="checkbox" id="si_pub"' + (SI.pub ? ' checked' : '') + '> Reply publicly under the comment (otherwise a private message)</label>' : '') +
+          '<button class="btn primary" id="si_send">Send</button></div>' +
+        (th.kind === 'dm' ? '<div class="card-note" style="margin-top:4px">Facebook and Instagram let a business reply within 24 hours of the customer\'s last message.</div>' : '') +
+      '</div>';
+  }
+  out += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' + chips + ' <button class="btn" id="si_ref">Refresh</button></div>';
+  out += '<div class="ibx">' + panel('Conversations', '<div class="ibx-list">' + list + '</div>') + panel('Conversation', chat) + '</div>';
+  if (isOwner()) out += panel('Assistant settings', '<div style="padding:14px 16px;display:grid;gap:8px">' +
+    '<label><input type="checkbox" id="si_on"' + (st.enabled ? ' checked' : '') + '> Answer Facebook and Instagram messages automatically</label>' +
+    '<label><input type="checkbox" id="si_cm"' + (st.reply_comments ? ' checked' : '') + '> Also answer comments (a short public reply, details by private message)</label>' +
+    '<div><label class="card-note">Email serious-client alerts to (empty = the owner\'s login email)</label><input class="fld" id="si_mail" type="email" value="' + esc(st.alert_email || '') + '" style="max-width:320px"></div>' +
+    '<div><button class="btn" id="si_save">Save settings</button></div></div>');
+  return out;
+};
+function siWire(){
+  if (currentView() !== 'socialinbox') return;
+  var g = function(id){ return document.getElementById(id); };
+  var say = function(t, bad){ SI.msg = { text: t, bad: !!bad }; renderShell(); };
+  document.querySelectorAll('[data-sif]').forEach(function(b){ b.onclick = function(){ SI.filter = b.getAttribute('data-sif'); SI.data = undefined; renderShell(); }; });
+  document.querySelectorAll('[data-sit]').forEach(function(el){ el.onclick = function(){ siOpen(el.getAttribute('data-sit')); }; });
+  if (g('si_ref')) g('si_ref').onclick = function(){ SI.data = undefined; if (SI.sel) siOpen(SI.sel); else renderShell(); };
+  if (g('si_text')) g('si_text').oninput = function(){ SI.text = g('si_text').value; };
+  if (g('si_pub')) g('si_pub').onchange = function(){ SI.pub = g('si_pub').checked; };
+  if (g('si_send')) g('si_send').onclick = function(){
+    var text = (g('si_text').value || '').trim(); if (!text) return;
+    g('si_send').disabled = true;
+    api('/social-inbox/threads/' + SI.sel + '/reply', { method: 'POST', body: { text: text, public: SI.pub } }).then(function(r){
+      if (r.ok) { SI.text = ''; SI.msg = { text: 'Sent. The assistant is paused in this conversation.' }; SI.data = undefined; siOpen(SI.sel); }
+      else { say((r.data && r.data.detail) || 'Not sent.', true); }
+    });
+  };
+  if (g('si_ai')) g('si_ai').onclick = function(){
+    var on = SI.view && SI.view.thread && SI.view.thread.ai_paused;
+    api('/social-inbox/threads/' + SI.sel + '/ai', { method: 'POST', body: { on: !!on } }).then(function(){ SI.data = undefined; siOpen(SI.sel); });
+  };
+  if (g('si_save')) g('si_save').onclick = function(){
+    api('/social-inbox/settings', { method: 'PUT', body: { enabled: g('si_on').checked, reply_comments: g('si_cm').checked, alert_email: g('si_mail').value } })
+      .then(function(r){ SI.data = undefined; say(r.ok ? 'Settings saved.' : ((r.data && r.data.detail) || 'Not saved.'), !r.ok); });
+  };
+}
+(function(){
+  NAV.forEach(function(g){
+    if (g.label === 'CRM' && !g.items.some(function(it){ return it.id === 'socialinbox'; })) {
+      var i = -1; g.items.forEach(function(it, k){ if (it.id === 'inbox') i = k; });
+      g.items.splice(i + 1, 0, { id: 'socialinbox', icon: '💬', name: 'Social Inbox', sub: false });
+    }
+  });
+  var _siNav = navHTML;
+  navHTML = function(active){
+    var h = _siNav(active), n = SI.data && SI.data.counts ? SI.data.counts.hot : 0;
+    return n ? h.replace(/(href="#\/socialinbox"[^>]*>[\s\S]*?<span class="nt">[^<]*<\/span>)/, '$1<span class="pill attn">🔥 ' + esc(n) + '</span>') : h;
+  };
+  var _siRender = renderShell;
+  renderShell = function(){ _siRender(); siWire(); };
+  window.addEventListener('hashchange', function(){ SI.msg = null; if (currentView() === 'socialinbox') SI.data = undefined; });
+})();
+
 boot();
 </script>
 </body>
