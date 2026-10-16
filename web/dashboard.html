@@ -323,22 +323,6 @@ VIEWS.leads = function(){
     '<span class="pill count">' + S.leads.length + '</span>');
 };
 
-VIEWS.customers = function(){
-  return '<h1>Customers</h1><p class="sub">Repeat clients, history and notes.</p>' +
-    panel('Customers', soon('', 'There is no customers table in the platform yet. It is built in the next module, together with services, prices and staff.'));
-};
-VIEWS.appointments = function(){
-  return '<h1>Appointments</h1><p class="sub">Bookings and the calendar.</p>' +
-    panel('Appointments', soon('', 'The appointments table exists in the database but has no API route yet. It is wired up in the next module.'));
-};
-VIEWS.revenue = function(){
-  return '<h1>Sales / Revenue</h1><p class="sub">Invoices, payments and takings.</p>' +
-    panel('Sales and revenue', soon('', 'Revenue can currently only be recorded, not read back — there is no read endpoint yet, and no invoices or payments tables. Rather than show a partial number, this stays empty until the finance module lands.'));
-};
-VIEWS.inbox = function(){
-  return '<h1>Inbox</h1><p class="sub">WhatsApp, Instagram, Messenger, email and website leads in one place.</p>' +
-    panel('Conversations', soon('', 'The conversations and messages tables exist but have no API route, and the WhatsApp connection is still being repaired. Nothing is shown until real messages can be read.'));
-};
 
 VIEWS.ai = function(){
   var out = '<h1>AI Workforce</h1><p class="sub">What your AI employees have done for this business.</p>';
@@ -372,14 +356,6 @@ VIEWS.ai = function(){
   return out;
 };
 
-VIEWS.needshuman = function(){
-  var out = '<h1>Needs Human</h1><p class="sub">Work the AI has paused for your decision.</p>';
-  var n = S.summary && S.summary.work_by_status ? S.summary.work_by_status.needs_human : null;
-  var note = n ? '<div class="banner"><div class="banner-txt"><strong>' + esc(n) +
-    ' task' + (n === 1 ? '' : 's') + ' waiting on you</strong><span>These belong to this business only.</span></div></div>' : '';
-  return out + note + panel('Human review centre',
-    soon('', 'The review and approval screen arrives in the next module. Until then the count above is real, but the tasks cannot be actioned here.'));
-};
 
 // ---- the client's brand ----
 // A business owner should recognise their own dashboard at a glance. Their logo
@@ -565,35 +541,6 @@ VIEWS.integrations = function(){
   return out;
 };
 
-VIEWS.console = function(){
-  var out = '<h1>Jarvis</h1><p class="sub">Tell the platform what to change, in your own words. ' +
-            'Change how your dashboard looks, update prices, services, staff and hours, or teach your WhatsApp agent something new.</p>';
-  out += panel('Say it plainly',
-    '<div style="padding:16px">' +
-    '<textarea id="con-in" rows="3" placeholder="Teach my WhatsApp agent: hair PRP is 12,000 per session, three for 30,000.&#10;Or: hide the inventory section and make my brand colour #C9A227.&#10;Or: add a new service called HydraFacial at 8,000." ' +
-    'style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit"></textarea>' +
-    '<div style="margin-top:10px"><button id="con-go" class="btn">Send</button> ' +
-    '<button id="con-mic" class="btn" type="button" style="display:none" title="Speak instead of typing">&#127908; Speak</button> ' +
-    '<button id="con-lang" class="btn" type="button" title="Voice language: English or Urdu" onclick="jarvisToggleLang(this)">EN</button> ' +
-    '<span id="con-note" class="sub"></span></div>' +
-    '<div id="con-out" style="margin-top:14px"></div></div>');
-  out += '<h2>Social posts</h2>';
-  out += panel('Waiting for your approval', actbar() + '<div id="con-posts">' + loading('Loading posts...') + '</div>');
-  out += '<h2>What your WhatsApp agent has been taught</h2>';
-  out += panel('Lessons', '<div id="con-les">' + loading('Loading...') + '</div>');
-  setTimeout(function(){
-    var go = document.getElementById('con-go');
-    if (go) go.onclick = consoleSend;
-    var box = document.getElementById('con-in');
-    if (box) box.onkeydown = function(e){
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); consoleSend(); }
-    };
-    wireConsoleMic();
-    loadPosts();
-    loadLessons();
-  }, 0);
-  return out;
-};
 
 /* ---- Jarvis voice helpers ----
    jarvisHeard: the phrase heard in THIS listening session. Chrome (Android
@@ -812,50 +759,7 @@ function loadLessons(){
   });
 }
 
-VIEWS.reports = function(){
-  var out = '<h1>Reports</h1><p class="sub">Analysis produced for this business.</p>';
-  out += panel('Latest report', '<div id="rep">' + loading('Loading your report...') + '</div>');
-  api('/portal/report').then(function(r){
-    var el = document.getElementById('rep');
-    if (!el) return;
-    if (!r.ok) { el.innerHTML = errState('The report service returned ' + r.status + '.'); return; }
-    var d = r.data || {};
-    if (d.status === 'pending' || !d || Object.keys(d).length === 0) {
-      el.innerHTML = empty('Nothing to show yet', d.message || 'Your analysis has not produced a report yet.');
-      return;
-    }
-    el.innerHTML = '<div style="padding:16px"><pre class="mono" style="white-space:pre-wrap;margin:0;font-size:12px;color:var(--muted)">' +
-      esc(JSON.stringify(d, null, 2)) + '</pre></div>';
-  });
-  return out;
-};
 
-VIEWS.settings = function(){
-  var out = '<h1>Business Settings</h1><p class="sub">The information your AI workforce uses to represent this business.</p>';
-  var cfg = S.config;
-  if (!cfg) return out + panel('Business settings', errState('The settings service did not respond.'));
-  var ob = cfg.onboarding || {};
-  var c = cfg.config || {};
-  var rows = (ob.done || []).map(function(s){
-    return '<tr><td>' + esc(s.label) + '</td><td><span class="tag" style="color:var(--growth)">Provided</span></td></tr>';
-  }).concat((ob.missing || []).map(function(s){
-    return '<tr><td>' + esc(s.label) + '</td><td><span class="tag">Not set</span></td></tr>';
-  })).join('');
-  out += panel('Business Brain — ' + (ob.percent || 0) + '% complete',
-    '<div class="tbl-wrap"><table><thead><tr><th>Item</th><th>Status</th></tr></thead><tbody>' +
-    (rows || '<tr><td colspan="2">No setup steps defined.</td></tr>') + '</tbody></table></div>',
-    '<a class="btn" href="/onboarding">Edit</a>');
-  var svc = c.services;
-  out += '<h2>Services</h2>';
-  if (Array.isArray(svc) && svc.length) {
-    out += panel('Services', '<div class="tbl-wrap"><table><tbody>' + svc.slice(0, 50).map(function(x){
-      return '<tr><td>' + esc(typeof x === 'string' ? x : (x.name || JSON.stringify(x))) + '</td></tr>';
-    }).join('') + '</tbody></table></div>', '<span class="pill count">' + svc.length + '</span>');
-  } else {
-    out += panel('Services', empty('No services yet', 'Add your services and prices during business setup.'));
-  }
-  return out;
-};
 
 /* ======================================================================
    PART 2 modules. Appended to the Part 1 dashboard, which is otherwise
@@ -911,45 +815,6 @@ NAV.forEach(function(g){
   });
 });
 
-VIEWS.customers = function(){
-  var out = '<h1>Customers</h1><p class="sub">Everyone this business has served.</p>';
-  if (!need('customers', '/business/customers')) return out + panel('Customers', loading('Loading customers...'));
-  if (S.customers === null) return out + panel('Customers', errState('The customers service did not respond.'));
-  var items = S.customers.items || [];
-  out += '<div class="panel"><div class="panel-head"><div class="panel-title">Add a customer</div></div>' +
-    '<div style="padding:14px 16px;display:flex;gap:8px;flex-wrap:wrap">' +
-    '<input class="fld" id="cname" placeholder="Name" style="flex:2;min-width:150px">' +
-    '<input class="fld" id="cphone" placeholder="Phone" style="flex:1;min-width:120px">' +
-    '<input class="fld" id="cemail" placeholder="Email (optional)" style="flex:1;min-width:140px">' +
-    '<button class="btn primary" id="caddbtn">Add</button></div>' + actbar() + '</div>';
-  out += '<h2>All customers</h2>';
-  if (!items.length) {
-    out += panel('Customers', empty('No customers yet', 'Add one above, or convert a lead.'));
-  } else {
-    var rows = items.map(function(c){
-      return '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.phone || '—') + '</td>' +
-        '<td>' + esc(c.email || '—') + '</td><td><span class="tag">' + esc(c.status || '—') + '</span></td>' +
-        '<td>' + esc(c.source || '—') + '</td></tr>';
-    }).join('');
-    out += panel('Customers', '<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Phone</th>' +
-      '<th>Email</th><th>Status</th><th>Source</th></tr></thead><tbody>' + rows + '</tbody></table></div>',
-      '<span class="pill count">' + items.length + '</span>');
-  }
-  setTimeout(function(){
-    var b = document.getElementById('caddbtn');
-    if (!b) return;
-    b.onclick = function(){
-      var name = document.getElementById('cname').value.trim();
-      if (!name) { document.getElementById('actmsg').textContent = 'A name is required.'; return; }
-      act('/business/customers', {method:'POST', body:{
-        name: name,
-        phone: document.getElementById('cphone').value.trim() || null,
-        email: document.getElementById('cemail').value.trim() || null
-      }}, 'Customer added.').then(function(r){ if (r.ok) need('customers','/business/customers',true); });
-    };
-  }, 0);
-  return out;
-};
 
 VIEWS.revenue = function(){
   var out = '<h1>Sales / Revenue</h1><p class="sub">Money this business has taken, last 90 days.</p>';
@@ -1072,61 +937,6 @@ var BIZ_SECTIONS = [
 ];
 var BIZ_TAB = 'services';
 
-VIEWS.settings = function(){
-  var out = '<h1>Business Settings</h1>' +
-    '<p class="sub">What your AI workforce knows about this business. It only ever uses what you save here.</p>';
-  var sec = BIZ_SECTIONS.filter(function(s){ return s.key === BIZ_TAB; })[0] || BIZ_SECTIONS[0];
-
-  out += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">' +
-    BIZ_SECTIONS.map(function(s){
-      return '<button class="btn biztab' + (s.key === BIZ_TAB ? ' primary' : '') +
-             '" data-tab="' + s.key + '">' + esc(s.label) + '</button>';
-    }).join('') + '</div>';
-
-  if (!need('biz_' + sec.key, '/business/' + sec.key)) return out + panel(sec.label, loading('Loading ' + sec.label.toLowerCase() + '...'));
-  var data = S['biz_' + sec.key];
-  if (data === null) return out + panel(sec.label, errState('Could not load ' + sec.label.toLowerCase() + '.'));
-  var items = data.items || [];
-
-  out += '<div class="panel"><div class="panel-head"><div class="panel-title">Add ' + esc(sec.label.toLowerCase()) + '</div></div>' +
-    '<div style="padding:14px 16px;display:flex;gap:8px;flex-wrap:wrap">' +
-    sec.cols.map(function(c){
-      return '<input class="fld bizf" data-f="' + c + '" placeholder="' + esc(sec.ph[c] || c) +
-             '" style="flex:1;min-width:120px">';
-    }).join('') +
-    '<button class="btn primary" id="bizadd">Add</button></div>' + actbar() + '</div>';
-
-  out += '<h2>' + esc(sec.label) + '</h2>';
-  if (!items.length) {
-    out += panel(sec.label, empty('Nothing added yet', 'Add your first entry above.'));
-  } else {
-    out += panel(sec.label, '<div class="tbl-wrap"><table><thead><tr>' +
-      sec.cols.map(function(c){ return '<th>' + esc(c.replace(/_/g, ' ')) + '</th>'; }).join('') +
-      '<th></th></tr></thead><tbody>' + items.map(function(it){
-        return '<tr>' + sec.cols.map(function(c){
-          return '<td>' + (it[c] === null || it[c] === undefined || it[c] === '' ? '—' : esc(it[c])) + '</td>';
-        }).join('') + '<td><button class="btn bizdel" data-id="' + esc(it.id) + '">Remove</button></td></tr>';
-      }).join('') + '</tbody></table></div>', '<span class="pill count">' + items.length + '</span>');
-  }
-
-  out += '<h2>Import from a paste</h2>';
-  out += '<div class="panel"><div style="padding:14px 16px">' +
-    '<div class="card-note" style="margin-bottom:8px">Paste your service list. Nothing is saved until you review and confirm.</div>' +
-    '<textarea id="pastebox" class="fld" style="width:100%;min-height:110px;font-family:inherit" ' +
-    'placeholder="Laser Hair Removal&#10;Full Face - 15,000&#10;Underarms: PKR 8000"></textarea>' +
-    '<div style="margin-top:10px"><button class="btn primary" id="parsebtn">Read this</button></div>' +
-    '<div id="proposals"></div></div></div>';
-
-  out += '<h2>Publish to your AI workforce</h2>';
-  out += '<div class="panel"><div style="padding:16px">' +
-    '<div class="card-note" style="margin-bottom:10px">Publishing makes the information above authoritative: ' +
-    'your agents will quote these prices and hours. Sections you have not filled in are left untouched.</div>' +
-    '<button class="btn primary" id="pubbtn">Publish business brain</button>' +
-    '<div id="pubout" class="card-note" style="margin-top:10px"></div></div></div>';
-
-  setTimeout(function(){ wireSettings(sec); }, 0);
-  return out;
-};
 
 /* Input styling for the Part 2 forms, injected here so the Part 1 stylesheet
    stays untouched. */
@@ -1305,76 +1115,6 @@ function select(id, items, placeholder, labelKey){
 
 var APPT_WHEN = 'upcoming';
 
-VIEWS.appointments = function(){
-  var out = '<h1>CRM / Appointments</h1><p class="sub">Who is booked, with whom, and what it is worth.</p>';
-  var key = 'appts_' + APPT_WHEN;
-  if (!need(key, '/operations/appointments?when=' + APPT_WHEN))
-    return out + panel('Appointments', loading('Loading the diary...'));
-  if (S[key] === null)
-    return out + panel('Appointments', errState('The appointments service did not respond.'));
-  need('customers', '/business/customers');
-  need('services', '/business/services');
-  need('staff', '/business/staff');
-
-  var tabs = ['upcoming', 'past', 'all'].map(function(w){
-    return '<button class="btn' + (w === APPT_WHEN ? ' primary' : '') +
-           '" data-when="' + w + '">' + w.charAt(0).toUpperCase() + w.slice(1) + '</button>';
-  }).join(' ');
-  out += '<div style="display:flex;gap:8px;margin:10px 0">' + tabs + '</div>';
-
-  out += '<h2>Book an appointment</h2>';
-  out += row() +
-    select('apcust', (S.customers && S.customers.items) || [], 'Customer (optional)') +
-    select('apsvc', (S.services && S.services.items) || [], 'Service (optional)') +
-    select('apstaff', (S.staff && S.staff.items) || [], 'Staff (optional)') +
-    '</div>' + row() +
-    inp('apstart', 'Starts at', 'datetime-local', 190) +
-    inp('apprice', 'Price', 'number', 110) +
-    inp('apnotes', 'Notes', 'text', 160) +
-    '<button class="btn primary" id="apadd">Book</button></div>' + actbar();
-
-  var rows = S[key].appointments || [];
-  if (!rows.length) {
-    out += panel('Appointments', empty('Nothing here yet',
-      APPT_WHEN === 'upcoming' ? 'Book one above and it appears here.' : 'No past appointments recorded.'));
-  } else {
-    var body = rows.map(function(a){
-      return '<tr><td>' + when(a.starts_at) + '</td>' +
-        '<td>' + esc(a.customer_name || '—') + '<div class="card-note">' + esc(a.customer_phone || '') + '</div></td>' +
-        '<td>' + esc(a.service_name || a.service_text || '—') + '</td>' +
-        '<td>' + esc(a.staff_name || '—') + '</td>' +
-        '<td><span class="tag">' + esc(a.status || '—') + '</span></td>' +
-        '<td>' + money(a.price, a.currency) + '</td></tr>';
-    }).join('');
-    out += panel('Appointments',
-      '<div class="tbl-wrap"><table><thead><tr><th>When</th><th>Customer</th><th>Service</th>' +
-      '<th>Staff</th><th>Status</th><th>Price</th></tr></thead><tbody>' + body + '</tbody></table></div>',
-      '<span class="pill count">' + rows.length + '</span>');
-  }
-
-  setTimeout(function(){
-    document.querySelectorAll('[data-when]').forEach(function(b){
-      b.onclick = function(){ APPT_WHEN = b.getAttribute('data-when'); renderShell(); };
-    });
-    var add = document.getElementById('apadd');
-    if (!add) return;
-    add.onclick = function(){
-      var starts = val('apstart');
-      if (!starts) { say('An appointment needs a start time.'); return; }
-      act('/business/appointments', {method:'POST', body:{
-        customer_id: val('apcust') || null,
-        service_id: val('apsvc') || null,
-        staff_id: val('apstaff') || null,
-        starts_at: starts,
-        price: numv('apprice'),
-        notes: val('apnotes') || null
-      }}, 'Appointment booked.').then(function(r){
-        if (r.ok) need(key, '/operations/appointments?when=' + APPT_WHEN, true);
-      });
-    };
-  }, 0);
-  return out;
-};
 
 var NEW_LINES = [];
 var OPEN_INVOICE = null;
@@ -1568,57 +1308,6 @@ VIEWS.invoices = function(){
   return out;
 };
 
-VIEWS.expenses = function(){
-  var out = '<h1>Money / Expenses</h1><p class="sub">What the business spent, and on what.</p>';
-  if (!need('expenses', '/business/expenses'))
-    return out + panel('Expenses', loading('Loading expenses...'));
-  if (S.expenses === null)
-    return out + panel('Expenses', errState('The expense service did not respond.'));
-
-  out += '<h2>Record an expense</h2>' + row() +
-    inp('exdesc', 'What was it for?', 'text', 200) +
-    inp('examt', 'Amount', 'number', 110) +
-    inp('excat', 'Category', 'text', 130) +
-    inp('exdate', 'Date', 'date', 150) +
-    '<button class="btn primary" id="exadd">Record</button></div>' + actbar();
-
-  var items = (S.expenses && S.expenses.items) || [];
-  if (!items.length) {
-    out += panel('Expenses', empty('No expenses recorded', 'Record one above.'));
-  } else {
-    var total = 0;
-    var body = items.map(function(e){
-      total += Number(e.amount || 0);
-      return '<tr><td>' + onlyDate(e.spent_on) + '</td><td>' + esc(e.description) + '</td>' +
-        '<td><span class="tag">' + esc(e.category || 'general') + '</span></td>' +
-        '<td>' + money(e.amount, e.currency) + '</td></tr>';
-    }).join('');
-    out += panel('Expenses',
-      '<div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th>' +
-      '<th>Amount</th></tr></thead><tbody>' + body + '</tbody></table></div>' +
-      '<div class="card-note" style="margin-top:8px">' + items.length + ' recorded, ' +
-      money(total) + ' in total.</div>',
-      '<span class="pill count">' + items.length + '</span>');
-  }
-
-  setTimeout(function(){
-    var b = document.getElementById('exadd');
-    if (!b) return;
-    b.onclick = function(){
-      var desc = val('exdesc'), amt = numv('examt');
-      if (!desc) { say('An expense needs a description.'); return; }
-      if (amt === null || !(amt > 0)) { say('An expense needs an amount.'); return; }
-      act('/business/expenses', {method:'POST', body:{
-        description: desc, amount: amt,
-        category: val('excat') || 'general',
-        spent_on: val('exdate') || null
-      }}, 'Expense recorded.').then(function(r){
-        if (r.ok) need('expenses', '/business/expenses', true);
-      });
-    };
-  }, 0);
-  return out;
-};
 
 VIEWS.dayclose = function(){
   var out = '<h1>Money / Day Close</h1>' +
@@ -1718,145 +1407,7 @@ VIEWS.pnl = function(){
   return out;
 };
 
-VIEWS.catalogue = function(){
-  var out = '<h1>Catalogue / Services & Products</h1>' +
-    '<p class="sub">What the business sells. This is also what the AI quotes from, so keep it right.</p>';
-  if (!need('services', '/business/services'))
-    return out + panel('Services', loading('Loading the catalogue...'));
-  if (S.services === null)
-    return out + panel('Services', errState('The catalogue service did not respond.'));
-  need('products', '/business/products');
 
-  out += '<h2>Add a service</h2>' + row() +
-    inp('svname', 'Service name', 'text', 180) +
-    inp('svprice', 'Price', 'number', 110) +
-    inp('svmins', 'Minutes', 'number', 100) +
-    inp('svcat', 'Category', 'text', 130) +
-    '<button class="btn primary" id="svadd">Add service</button></div>';
-
-  out += '<h2>Add a product</h2>' + row() +
-    inp('prname', 'Product name', 'text', 180) +
-    inp('prprice', 'Price', 'number', 110) +
-    inp('prsku', 'SKU', 'text', 110) +
-    inp('prcat', 'Category', 'text', 130) +
-    '</div>' + row() +
-    '<label class="card-note" style="display:flex;align-items:center;gap:6px">' +
-    '<input type="checkbox" id="prtrack"> Track stock for this product</label>' +
-    inp('prlow', 'Warn below', 'number', 120) +
-    '<button class="btn primary" id="pradd">Add product</button></div>' + actbar();
-
-  var svcs = (S.services && S.services.items) || [];
-  out += panel('Services', svcs.length
-    ? '<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Price</th>' +
-      '<th>Minutes</th></tr></thead><tbody>' + svcs.map(function(s){
-        return '<tr><td>' + esc(s.name) + '</td><td>' + esc(s.category || '—') + '</td><td>' +
-          money(s.price, s.currency) + '</td><td>' + esc(s.duration_minutes || '—') + '</td></tr>';
-      }).join('') + '</tbody></table></div>'
-    : empty('No services yet', 'Add the ones you sell most often first.'),
-    '<span class="pill count">' + svcs.length + '</span>');
-
-  var prods = (S.products && S.products.items) || [];
-  out += panel('Products', prods.length
-    ? '<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>SKU</th><th>Category</th>' +
-      '<th>Price</th></tr></thead><tbody>' + prods.map(function(p){
-        return '<tr><td>' + esc(p.name) + '</td><td>' + esc(p.sku || '—') + '</td><td>' +
-          esc(p.category || '—') + '</td><td>' + money(p.price, p.currency) + '</td></tr>';
-      }).join('') + '</tbody></table></div>'
-    : empty('No products yet', 'Add anything the business sells over the counter.'),
-    '<span class="pill count">' + prods.length + '</span>');
-
-  setTimeout(function(){
-    var sv = document.getElementById('svadd');
-    if (sv) sv.onclick = function(){
-      var n = val('svname');
-      if (!n) { say('A service needs a name.'); return; }
-      act('/business/services', {method:'POST', body:{
-        name: n, price: numv('svprice'), duration_minutes: numv('svmins'),
-        category: val('svcat') || null
-      }}, 'Service added.').then(function(r){
-        if (r.ok) need('services', '/business/services', true);
-      });
-    };
-    var pr = document.getElementById('pradd');
-    if (pr) pr.onclick = function(){
-      var n = val('prname');
-      if (!n) { say('A product needs a name.'); return; }
-      act('/business/products', {method:'POST', body:{
-        name: n, price: numv('prprice'), sku: val('prsku') || null,
-        category: val('prcat') || null,
-        track_stock: !!(document.getElementById('prtrack') || {}).checked,
-        low_stock_threshold: numv('prlow')
-      }}, 'Product added.').then(function(r){
-        if (r.ok) need('products', '/business/products', true);
-      });
-    };
-  }, 0);
-  return out;
-};
-
-VIEWS.inventory = function(){
-  var out = '<h1>Catalogue / Inventory</h1>' +
-    '<p class="sub">Stock on hand, added up from every movement rather than stored as a number someone can edit.</p>';
-  if (!need('inventory', '/operations/inventory'))
-    return out + panel('Inventory', loading('Counting stock...'));
-  if (S.inventory === null)
-    return out + panel('Inventory', errState('The inventory service did not respond.'));
-  var inv = S.inventory, prods = inv.products || [];
-
-  out += '<div class="grid">' +
-    metric('Products', prods.length) +
-    metric('Stock tracked', inv.tracked_count) +
-    metric('Low on stock', inv.low_stock_count,
-           inv.low_stock_count ? 'Reorder these' : 'Nothing below its threshold') +
-    '</div>';
-
-  if ((inv.low_stock || []).length) {
-    out += panel('Running low',
-      '<div class="tbl-wrap"><table><thead><tr><th>Product</th><th>On hand</th>' +
-      '<th>Threshold</th></tr></thead><tbody>' + inv.low_stock.map(function(p){
-        return '<tr><td>' + esc(p.name) + '</td><td>' + esc(p.on_hand) + '</td><td>' +
-          esc(p.low_stock_threshold) + '</td></tr>';
-      }).join('') + '</tbody></table></div>');
-  }
-
-  out += '<h2>Record a stock movement</h2>' + row() +
-    select('stprod', prods, 'Product') +
-    '<select class="fld" id="stkind" style="flex:1;min-width:140px">' +
-    '<option value="purchase">Purchase in</option><option value="sale">Sale out</option>' +
-    '<option value="adjustment">Adjustment</option><option value="return">Return</option>' +
-    '<option value="opening">Opening balance</option></select>' +
-    inp('stqty', 'Quantity (+ in, - out)', 'number', 160) +
-    inp('streason', 'Reason', 'text', 150) +
-    '<button class="btn primary" id="stadd">Record</button></div>' + actbar();
-
-  out += panel('Stock on hand', prods.length
-    ? '<div class="tbl-wrap"><table><thead><tr><th>Product</th><th>SKU</th><th>Tracked</th>' +
-      '<th>On hand</th><th>Last movement</th></tr></thead><tbody>' + prods.map(function(p){
-        return '<tr><td>' + esc(p.name) + '</td><td>' + esc(p.sku || '—') + '</td>' +
-          '<td>' + (p.track_stock ? '<span class="tag">yes</span>' : '—') + '</td>' +
-          '<td>' + (p.track_stock ? esc(p.on_hand) : '—') + '</td>' +
-          '<td>' + when(p.last_movement) + '</td></tr>';
-      }).join('') + '</tbody></table></div>'
-    : empty('No products yet', 'Add products in the catalogue first.'),
-    '<span class="pill count">' + prods.length + '</span>');
-
-  setTimeout(function(){
-    var b = document.getElementById('stadd');
-    if (!b) return;
-    b.onclick = function(){
-      var pid = val('stprod'), q = numv('stqty');
-      if (!pid) { say('Pick a product.'); return; }
-      if (q === null || q === 0) { say('A movement needs a non-zero quantity.'); return; }
-      act('/business/stock_movements', {method:'POST', body:{
-        product_id: pid, kind: val('stkind') || 'adjustment',
-        quantity_delta: q, reason: val('streason') || null
-      }}, 'Movement recorded.').then(function(r){
-        if (r.ok) need('inventory', '/operations/inventory', true);
-      });
-    };
-  }, 0);
-  return out;
-};
 
 
 /* ---------- Part 3: Reports the owner can actually read ----------
@@ -2003,124 +1554,6 @@ VIEWS.reports = function(){
 
 var OPEN_PACKAGE = null;
 
-VIEWS.packages = function(){
-  var out = '<h1>Catalogue / Packages</h1>' +
-    '<p class="sub">Bundles you sell as one price. What is inside is listed, not implied.</p>';
-  if (!need('packages', '/business/packages'))
-    return out + panel('Packages', loading('Loading packages...'));
-  if (S.packages === null)
-    return out + panel('Packages', errState('The catalogue service did not respond.'));
-  need('services', '/business/services');
-  need('products', '/business/products');
-
-  out += '<h2>Create a package</h2>' + row() +
-    inp('pkname', 'Package name', 'text', 180) +
-    inp('pkprice', 'Price', 'number', 110) +
-    inp('pkdays', 'Valid for (days)', 'number', 140) +
-    '</div>' + row() +
-    inp('pkdesc', 'Description', 'text', 220) +
-    inp('pkterms', 'Terms', 'text', 180) +
-    '<button class="btn primary" id="pkadd">Create</button></div>' + actbar();
-
-  var pkgs = (S.packages && S.packages.items) || [];
-  if (!pkgs.length) {
-    out += panel('Packages', empty('No packages yet',
-      'Create one above, then add the services and products it includes.'));
-  } else {
-    var body = pkgs.map(function(p){
-      return '<tr><td><strong>' + esc(p.name) + '</strong>' +
-        (p.description ? '<div class="card-note">' + esc(p.description) + '</div>' : '') + '</td>' +
-        '<td>' + money(p.price, p.currency) + '</td>' +
-        '<td>' + (p.validity_days ? esc(p.validity_days) + ' days' : '—') + '</td>' +
-        '<td>' + (p.active ? '<span class="tag">active</span>' : '—') + '</td>' +
-        '<td><button class="btn" data-pkg="' + esc(p.id) + '">' +
-        (OPEN_PACKAGE === p.id ? 'Close' : 'Contents') + '</button></td></tr>';
-    }).join('');
-    out += panel('Packages',
-      '<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Price</th><th>Valid</th>' +
-      '<th>Status</th><th></th></tr></thead><tbody>' + body + '</tbody></table></div>',
-      '<span class="pill count">' + pkgs.length + '</span>');
-  }
-
-  if (OPEN_PACKAGE) {
-    var pkg = null;
-    pkgs.forEach(function(p){ if (p.id === OPEN_PACKAGE) pkg = p; });
-    var ik = 'pkgitems';
-    if (!need(ik, '/business/package_items')) {
-      out += panel('Contents', loading('Loading contents...'));
-    } else if (S[ik] === null) {
-      out += panel('Contents', errState('The package contents could not be read.'));
-    } else {
-      var svcs = (S.services && S.services.items) || [];
-      var prods = (S.products && S.products.items) || [];
-      var nameOf = function(list, id){
-        var hit = '—';
-        list.forEach(function(x){ if (x.id === id) hit = x.name; });
-        return hit;
-      };
-      var items = ((S[ik] && S[ik].items) || []).filter(function(i){
-        return i.package_id === OPEN_PACKAGE;
-      });
-      var inner = items.length
-        ? '<div class="tbl-wrap"><table><thead><tr><th>Item</th><th>Kind</th><th>Quantity</th>' +
-          '</tr></thead><tbody>' + items.map(function(i){
-            var isService = !!i.service_id;
-            return '<tr><td>' + esc(isService ? nameOf(svcs, i.service_id) : nameOf(prods, i.product_id)) +
-              '</td><td><span class="tag">' + (isService ? 'service' : 'product') + '</span></td>' +
-              '<td>' + esc(i.quantity) + '</td></tr>';
-          }).join('') + '</tbody></table></div>'
-        : empty('Nothing in this package yet',
-                'A package with no contents is a price with nothing behind it. Add at least one item.');
-
-      var picks = svcs.map(function(x){ return {id:'s:' + x.id, name:x.name}; })
-        .concat(prods.map(function(x){ return {id:'p:' + x.id, name:x.name}; }));
-      inner += '<h3>Add an item</h3>' + row() +
-        select('pkitem', picks, 'Pick a service or product') +
-        inp('pkqty', 'Quantity', 'number', 110) +
-        '<button class="btn primary" id="pkitemadd">Add to package</button></div>' + actbar();
-
-      out += panel('Inside ' + esc(pkg ? pkg.name : 'this package'), inner,
-        pkg ? '<span class="tag">' + money(pkg.price, pkg.currency) + '</span>' : '');
-    }
-  }
-
-  setTimeout(function(){
-    document.querySelectorAll('[data-pkg]').forEach(function(b){
-      b.onclick = function(){
-        var id = b.getAttribute('data-pkg');
-        OPEN_PACKAGE = (OPEN_PACKAGE === id) ? null : id;
-        renderShell();
-      };
-    });
-    var mk = document.getElementById('pkadd');
-    if (mk) mk.onclick = function(){
-      var n = val('pkname');
-      if (!n) { say('A package needs a name.'); return; }
-      act('/business/packages', {method:'POST', body:{
-        name: n, price: numv('pkprice'), validity_days: numv('pkdays'),
-        description: val('pkdesc') || null, terms: val('pkterms') || null
-      }}, 'Package created.').then(function(r){
-        if (r.ok) {
-          OPEN_PACKAGE = (r.data && r.data.item && r.data.item.id) || null;
-          need('packages', '/business/packages', true);
-        }
-      });
-    };
-    var ia = document.getElementById('pkitemadd');
-    if (ia) ia.onclick = function(){
-      var sel = val('pkitem');
-      if (!sel) { say('Pick a service or product to add.'); return; }
-      var payload = {package_id: OPEN_PACKAGE, quantity: numv('pkqty') || 1};
-      if (sel.indexOf('s:') === 0) payload.service_id = sel.slice(2);
-      else payload.product_id = sel.slice(2);
-      act('/business/package_items', {method:'POST', body: payload},
-          'Added to the package.').then(function(r){
-        if (r.ok) need('pkgitems', '/business/package_items', true);
-      });
-    };
-  }, 0);
-  return out;
-};
 
 function currentView(){
   var h = (location.hash || '').replace(/^#\/?/, '').split('?')[0];
@@ -2300,38 +1733,6 @@ function ibxOpen(sid){
     renderShell();
   });
 }
-VIEWS.inbox = function(){
-  var out = '<h1>WhatsApp Inbox</h1><p class="sub">Every WhatsApp conversation your AI agent has had with customers.</p>';
-  ibxLoad(false);
-  if (IBX.data === undefined) return out + panel('Conversations', loading('Reading your conversations...'));
-  var head = '<button class="btn" id="ibx_ref">Refresh</button>';
-  // An error must still offer Refresh: an agent that comes back (or a number
-  // just re-linked) used to need a full page reload to show its chats.
-  if (IBX.data.error) return out + panel('Conversations', errState(IBX.data.error +
-    ' If your number is not connected yet, open WhatsApp in the menu and scan the QR code.'), head) + ibxWire();
-  var chats = IBX.data.chats || [];
-  if (!chats.length) return out + panel('Conversations', empty('No conversations yet',
-    IBX.data.connected ? 'When customers message your WhatsApp, their chats appear here.'
-                       : 'Connect your WhatsApp number first: open WhatsApp in the menu and scan the QR code.'), head) + ibxWire();
-  var list = chats.map(function(c){
-    return '<div class="ibx-item' + (IBX.sel === c.session_id ? ' sel' : '') + '" data-sid="' + esc(c.session_id) + '">' +
-      '<div style="display:flex;justify-content:space-between;gap:8px"><strong>' + esc(c.phone ? '+' + c.phone : 'Unknown number') +
-      '</strong><span class="card-note">' + esc(c.messages) + ' msgs</span></div>' +
-      '<div class="card-note" style="margin-top:4px">' + esc(c.last || '') + '</div>' +
-      '<div class="card-note">' + (c.last_at ? when(c.last_at) : '') + '</div></div>';
-  }).join('');
-  var chat;
-  if (!IBX.sel) chat = empty('Select a conversation', 'Tap a chat on the left to read it.');
-  else if (IBX.msgs === null) chat = loading('Opening the chat...');
-  else if (IBX.msgs.error) chat = errState(IBX.msgs.error);
-  else chat = IBX.msgs.map(function(m){
-    return '<div class="bub ' + (m.role === 'assistant' ? 'assistant' : 'user') + '">' + esc(m.content) +
-           '<div class="t">' + (m.role === 'assistant' ? 'Your agent' : 'Customer') + (m.at ? ' · ' + when(m.at) : '') + '</div></div>';
-  }).join('') || empty('Empty chat', '');
-  out += panel('Conversations', '<div class="ibx"><div class="ibx-list">' + list + '</div><div class="ibx-chat" id="ibx_chat">' +
-    chat + '</div></div>', '<span class="pill count">' + chats.length + '</span> ' + head);
-  return out + ibxWire();
-};
 function ibxWire(){
   setTimeout(function(){
     var r = document.getElementById('ibx_ref');
@@ -4138,25 +3539,6 @@ function consoleSend(){
     else jvSet('idle');
   });
 }
-VIEWS.console = function(){
-  var out = '<h1>Jarvis</h1><p class="sub">Tell the platform what to change, in your own words: prices, services, staff, hours, how your dashboard looks, or what your WhatsApp agent should know.</p>';
-  out += '<div class="panel jv-panel"><div class="jv-head"><div id="jv-orb" class="jv-orb ' + JV.state + '"></div>' +
-    '<div style="flex:1;min-width:0"><div id="jv-state" class="jv-state">' + JV_LABEL[JV.state] + '</div><div id="jv-msg" class="card-note">' + esc(JV.msg) + '</div></div>' +
-    '<button id="con-mic" class="btn primary jv-mic" type="button">● LISTEN</button>' +
-    '<button id="con-lang" class="btn" type="button" title="Voice language: English or Urdu" onclick="jarvisToggleLang(this)">EN</button></div>' +
-    '<div style="padding:0 16px 16px"><textarea id="con-in" class="fld" rows="3" style="width:100%" placeholder="Teach my WhatsApp agent: hair PRP is 12,000 per session, three for 30,000.&#10;Or: add a new service called HydraFacial at 8,000."></textarea>' +
-    '<div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button id="con-go" class="btn">Send</button><span class="card-note">Enter sends · Shift+Enter for a new line</span></div>' +
-    '<div id="con-out" style="margin-top:14px"></div></div></div>';
-  out += '<h2>Social posts</h2>' + panel('Waiting for your approval', actbar() + '<div id="con-posts">' + loading('Loading posts...') + '</div>');
-  out += '<h2>What your WhatsApp agent has been taught</h2>' + panel('Lessons', '<div id="con-les">' + loading('Loading...') + '</div>');
-  setTimeout(function(){
-    var go = document.getElementById('con-go'); if (go) go.onclick = consoleSend;
-    var box = document.getElementById('con-in');
-    if (box) box.onkeydown = function(e){ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); consoleSend(); } };
-    wireConsoleMic(); loadPosts(); loadLessons();
-  }, 0);
-  return out;
-};
 (function(){
   var st = document.createElement('style');
   st.textContent =
@@ -8641,10 +8023,10 @@ function apWire(){
     var l = (S.leads || []).filter(function(x){ return String(x.id) === String(id); })[0];
     if (!l || l.status === to) return;
     var from = l.status;
-    l.status = to; renderShell();                       /* optimistic: the card moves at once */
+    l.status = to; TDM.flipNext = true; renderShell();  /* optimistic: the card moves at once */
     act('/leads/' + encodeURIComponent(id), {method:'PATCH', body:{status:to}}, 'Moved to ' + to + '.').then(function(r){
       if (r.ok) { if (r.data && r.data.lead) Object.assign(l, r.data.lead); return; }
-      l.status = from; renderShell();                   /* put it back: the server did not save it */
+      l.status = from; TDM.flipNext = true; renderShell(); /* put it back: the server did not save it */
       var el = document.getElementById('actmsg');
       if (el && missing(r)) { el.textContent = 'Moving leads needs backend batch 1 on the server. Nothing was changed.'; el.style.color = 'var(--warn)'; }
     });
@@ -8737,7 +8119,7 @@ function apWire(){
     if (!o.active) return ['Ended', ''];
     if (o.ends_on && o.ends_on < today) return ['Expired', 'bad'];
     if (o.starts_on && o.starts_on > today) return ['Scheduled', 'info'];
-    return ['Live', 'ok'];
+    return ['Live', 'ok live'];
   }
   if (!VIEWS.deals) VIEWS.deals = function(){
     var out = hd('Deals', 'Time-limited offers for your business.');
@@ -8758,7 +8140,7 @@ function apWire(){
       '<div class="wide"><button class="btn primary" type="submit">Save offer</button></div></form></div>';
     out += actbar() + panel('Offers', items.length ? tb(['Offer', 'Discount', 'Runs', 'Status', ''], items.map(function(o){
       var stt = offerState(o);
-      return '<tr><td style="white-space:normal"><b>' + esc(o.title) + '</b>' + (o.description ? '<div class="sub" style="margin:4px 0 0">' + esc(o.description) + '</div>' : '') +
+      return '<tr' + (TDM.newOffer && String(TDM.newOffer) === String(o.id) ? ' class="tdm-new"' : '') + '><td style="white-space:normal"><b>' + esc(o.title) + '</b>' + (o.description ? '<div class="sub" style="margin:4px 0 0">' + esc(o.description) + '</div>' : '') +
         '</td><td>' + offerText(o) + '</td><td>' + esc((o.starts_on || 'now') + ' → ' + (o.ends_on || 'no end')) + '</td><td>' + st(stt[0], stt[1]) + '</td><td>' +
         (own && o.active ? '<button class="btn" data-tdmend="' + esc(o.id) + '">End offer</button>' : '') + '</td></tr>';
     })) : empty('No offers yet', own ? 'Add one above.' : 'The owner has not added any offers.'));
@@ -8772,7 +8154,7 @@ function apWire(){
         if (body.ends_on && body.starts_on && body.ends_on < body.starts_on) { var m = document.getElementById('actmsg'); m.textContent = 'The end date is before the start date.'; m.style.color = 'var(--danger)'; return; }
         f.querySelector('button').disabled = true;
         act('/business/offers', {method:'POST', body:body}, 'Offer saved.').then(function(r){
-          if (r.ok) need('tdm_offers', '/business/offers', true); else f.querySelector('button').disabled = false;
+          if (r.ok) { TDM.newOffer = r.data && r.data.item && r.data.item.id; need('tdm_offers', '/business/offers', true); } else f.querySelector('button').disabled = false;
         });
       };
       document.querySelectorAll('[data-tdmend]').forEach(function(b){
@@ -8821,6 +8203,79 @@ function apWire(){
     var at = html.indexOf('</p>');
     return at === -1 ? ws + html : html.slice(0, at + 4) + ws + html.slice(at + 4);
   };
+
+  /* ---------- motion, part 2 ----------
+     Everything here answers something: data loading, a lead moving, a save,
+     a new row. All of it is off when the device asks for reduced motion. */
+  (function(){
+    /* 1. a thin progress line while anything is loading */
+    var bar = document.createElement('div'); bar.id = 'tdm-progress'; bar.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(bar);
+    var acting = 0, showT = null, doneT = null, on = false;
+    function busy(){ for (var k in LOADING) if (LOADING[k]) return true; return acting > 0; }
+    function sync(){
+      if (busy()) { clearTimeout(doneT);
+        if (!on) { on = true; clearTimeout(showT); showT = setTimeout(function(){ if (on) bar.className = 'run'; }, 120); } }
+      else if (on) { on = false; clearTimeout(showT);
+        if (bar.className === 'run') { bar.className = 'done'; doneT = setTimeout(function(){ bar.className = ''; }, 420); } }
+    }
+
+    /* 2. saves drive the same line, and the result line slides in when they answer */
+    var _act = act;
+    act = function(){ acting++; sync();
+      var p = _act.apply(this, arguments);
+      p.then(function(r){ acting = Math.max(0, acting - 1); sync();
+        var el = document.getElementById('actmsg');
+        if (el && !REDUCED) { el.classList.remove('tdm-flash'); void el.offsetWidth; el.classList.add('tdm-flash'); }
+      }, function(){ acting = Math.max(0, acting - 1); sync(); });
+      return p; };
+
+    /* 3. a lead card glides to its new column instead of jumping (FLIP) */
+    var before = null;
+    var _shell = renderShell;
+    renderShell = function(){
+      var flip = TDM.flipNext && !REDUCED; TDM.flipNext = false; before = null;
+      if (flip) { before = {}; document.querySelectorAll('.tdm-card[data-lead]').forEach(function(c){
+        before[c.getAttribute('data-lead')] = { r: c.getBoundingClientRect(), col: c.closest('.tdm-col').getAttribute('data-stage') }; }); }
+      var out = _shell.apply(this, arguments);
+      if (before) {
+        document.querySelectorAll('.tdm-card[data-lead]').forEach(function(c){
+          var b = before[c.getAttribute('data-lead')]; if (!b) return;
+          var r = c.getBoundingClientRect(), dx = b.r.left - r.left, dy = b.r.top - r.top;
+          if (!dx && !dy) return;
+          c.animate([{ transform: 'translate(' + dx + 'px,' + dy + 'px) scale(1.03)', boxShadow: '0 18px 40px -16px var(--accent)' },
+                     { transform: 'none', boxShadow: '0 0 0 transparent' }],
+                    { duration: 520, easing: 'cubic-bezier(.2,.8,.2,1)' });
+          var col = c.closest('.tdm-col');
+          if (col && col.getAttribute('data-stage') !== b.col) {
+            var n = col.querySelector('.tdm-col-head .mono');
+            if (n) n.animate([{ transform: 'scale(1.6)', color: 'var(--accent-ink)' }, { transform: 'none' }], { duration: 480, easing: 'cubic-bezier(.2,.8,.2,1)' });
+            col.animate([{ boxShadow: '0 0 0 3px var(--accent-tint), 0 0 36px -10px var(--accent)' }, { boxShadow: '0 0 0 0 transparent' }], { duration: 900 });
+          }
+        });
+      }
+      /* 4. the module icon gives a small pop when you arrive */
+      var v = currentView();
+      if (!REDUCED && TDM.popView !== v) {
+        var ic = document.querySelector('.tdm-nav .tdm-link.active svg');
+        if (ic) ic.animate([{ transform: 'scale(.6) rotate(-12deg)' }, { transform: 'scale(1.18)' }, { transform: 'none' }], { duration: 480, easing: 'cubic-bezier(.2,.8,.2,1)' });
+      }
+      if (TDM.popView !== v) TDM.grown = {};
+      /* bars grow from zero the first time they show on a visit, even when the data arrives after the page */
+      if (!REDUCED) document.querySelectorAll('.tdm-bar').forEach(function(row){
+        var k = row.textContent, i = row.querySelector('.tdm-track i');
+        if (!i || TDM.grown[k]) return; TDM.grown[k] = 1;
+        i.animate([{ transform: 'scaleX(0)' }, { transform: 'none' }], { duration: 900, delay: 120, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'backwards' });
+      });
+      TDM.popView = v;
+      sync();
+      return out;
+    };
+
+    /* 5. while a card is dragged, every column shows it can take it */
+    document.addEventListener('dragstart', function(e){ if (e.target.closest && e.target.closest('.tdm-card[data-lead]')) document.body.classList.add('tdm-dragging'); });
+    document.addEventListener('dragend', function(){ document.body.classList.remove('tdm-dragging'); });
+  })();
 
   var css = document.createElement('style');
   css.textContent =
@@ -8903,6 +8358,42 @@ function apWire(){
     '.page-dashboard .btn{transition:transform .12s,background-color .2s,border-color .2s}' +
     '.page-dashboard .btn:active{transform:scale(.97)}' +
     '.card-value{font-variant-numeric:tabular-nums}' +
+    /* motion, part 2 */
+    '#tdm-progress{position:fixed;top:0;left:0;height:2px;width:0;z-index:9999;pointer-events:none;opacity:0;' +
+      'background:linear-gradient(90deg,transparent,var(--accent) 30%,var(--accent-ink));box-shadow:0 0 12px var(--accent);transition:width .3s,opacity .3s}' +
+    '#tdm-progress.run{opacity:1;width:82%;transition:width 6s cubic-bezier(.1,.7,.2,1),opacity .2s}' +
+    '#tdm-progress.done{opacity:0;width:100%;transition:width .2s,opacity .35s .15s}' +
+    '@keyframes tdmShimmer{from{background-position:-200% 0}to{background-position:200% 0}}' +
+    '.page-dashboard .state:has(.spin){background:linear-gradient(100deg,transparent 30%,var(--accent-tint) 50%,transparent 70%) 0 0/200% 100%;animation:tdmShimmer 1.6s linear infinite}' +
+    '@keyframes tdmRow{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}' +
+    '.tdm-enter tbody tr{animation:tdmRow .45s cubic-bezier(.2,.8,.2,1) both}' +
+    '.tdm-enter tbody tr:nth-child(1){animation-delay:155ms}' +
+    '.tdm-enter tbody tr:nth-child(2){animation-delay:190ms}' +
+    '.tdm-enter tbody tr:nth-child(3){animation-delay:225ms}' +
+    '.tdm-enter tbody tr:nth-child(4){animation-delay:260ms}' +
+    '.tdm-enter tbody tr:nth-child(5){animation-delay:295ms}' +
+    '.tdm-enter tbody tr:nth-child(6){animation-delay:330ms}' +
+    '.tdm-enter tbody tr:nth-child(7){animation-delay:365ms}' +
+    '.tdm-enter tbody tr:nth-child(8){animation-delay:400ms}' +
+    '.tdm-enter tbody tr:nth-child(9){animation-delay:435ms}' +
+    '.tdm-enter tbody tr:nth-child(10){animation-delay:470ms}' +
+    '.tdm-enter tbody tr:nth-child(11){animation-delay:505ms}' +
+    '.tdm-enter tbody tr:nth-child(12){animation-delay:540ms}' +
+    '.tdm-enter tbody tr:nth-child(n+13){animation-delay:540ms}' +
+    '.tdm-track i{transform-origin:left}' +
+    '@keyframes tdmFlash{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}' +
+    '#actmsg.tdm-flash{animation:tdmFlash .35s cubic-bezier(.2,.8,.2,1)}' +
+    '@keyframes tdmPulse{0%{box-shadow:0 0 0 0 currentColor}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}' +
+    '.tdm-st.live::before{animation:tdmPulse 1.8s ease-out infinite}' +
+    '@keyframes tdmNew{0%{background:var(--accent-tint)}100%{background:transparent}}' +
+    '.page-dashboard tr.tdm-new td{animation:tdmNew 2.4s ease-out}' +
+    'body.tdm-dragging .tdm-col{border-color:var(--accent-line);transition:border-color .2s}' +
+    'body.tdm-dragging .tdm-col-body{background:linear-gradient(var(--accent-tint),var(--accent-tint)) 0 0/100% 100% no-repeat;border-radius:0 0 14px 14px;transition:background .2s}' +
+    '.tdm-card.dragging{transform:rotate(-2deg) scale(.98)}' +
+    '.page-dashboard .btn.primary{position:relative;overflow:hidden}' +
+    '.page-dashboard .btn.primary::after{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 35%,rgba(255,255,255,.22) 50%,transparent 65%);transform:translateX(-120%);transition:transform .6s}' +
+    '.page-dashboard .btn.primary:hover::after{transform:translateX(120%)}' +
+    '@media(prefers-reduced-motion:reduce){#tdm-progress,.page-dashboard .state:has(.spin),.tdm-enter tbody tr,#actmsg.tdm-flash,.tdm-st.live::before,.page-dashboard tr.tdm-new td,.page-dashboard .btn.primary::after{animation:none!important;transition:none!important}}' +
     '@media(prefers-reduced-motion:reduce){.tdm-ink,.tdm-enter *,.tdm-enter>*,.page-dashboard .btn,.tdm-card{transition:none!important;animation:none!important;transform:none!important}}';
   document.head.appendChild(css);
 })();
