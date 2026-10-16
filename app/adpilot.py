@@ -23,7 +23,6 @@ import base64
 import datetime as _dt
 import json
 import re
-import uuid
 
 from fastapi import APIRouter, Body, Cookie, Header, HTTPException
 

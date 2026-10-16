@@ -20,7 +20,6 @@ are human steps. Cancelling is for the owner, and never after money was taken.
 """
 from __future__ import annotations
 
-import datetime as _dt
 import hashlib
 import re
 

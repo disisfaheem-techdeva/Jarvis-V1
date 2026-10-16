@@ -30,7 +30,7 @@ yet, so an approved task reports `executed: false` and raises an ops.alert askin
 for the launch integration. It never claims an ad went live. `_execute` below is
 the single, clearly-marked seam where Build 3 wires the real API call.
 """
-from .contract import Agent, Task, Context, AgentResult
+from .contract import Agent, Context, AgentResult
 
 
 def _needs(provider, ctx: Context):
