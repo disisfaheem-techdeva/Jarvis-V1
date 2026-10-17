@@ -306,7 +306,7 @@ def launch_meta(tid, role, d, s):
     else:
         raise AdsError("Choose which Facebook Page this campaign runs from: press Edit and pick the Page.")
     if not d.get("image_token"):
-        raise AdsError("Add a photo first: upload one on the Posts page, then write the campaign again.")
+        raise AdsError("Add a photo first: press 'Add a photo' on the campaign, then Launch.")
     with tenant_session(tid, role) as cur:
         cur.execute("SELECT bytes FROM social_media WHERE token = %s", (d["image_token"],))
         img = cur.fetchone()

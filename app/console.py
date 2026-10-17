@@ -78,6 +78,9 @@ Fields:
             book_appointment, reschedule_appointment, cancel_appointment,
             complete_appointment (mark done), add_customer, add_lead,
             add_expense, schedule_post (a post to go out at a later time),
+            write_campaign (write a paid ad campaign as a DRAFT the owner
+                checks and launches; use this, not kind post, for any ad,
+                campaign, boost or promotion request),
             update_order (confirm / out for delivery / delivered),
             record_order_payment, cancel_order
   "args": if kind is action, an object:
@@ -91,6 +94,9 @@ Fields:
             add_lead: name, phone, service
             add_expense: description, amount (number, PKR), category, method
                 (cash, card, bank, jazzcash, easypaisa), spent_on (YYYY-MM-DD)
+            write_campaign: provider ("meta" for Facebook/Instagram, the
+                default, or "google"), service (as named in BUSINESS FACTS
+                services; empty means their best seller)
             schedule_post: caption (finished post text, laid out exactly as
                 for kind post: headline, description, call to action,
                 3 to 5 hashtags),
@@ -281,17 +287,23 @@ def _attached_images(body):
 # no words about a post -- is read with the same reader as the "photo of the
 # menu" button on Business & agent, and lands there as a suggestion the owner
 # checks and saves. Nothing is saved to services from here.
-_MENU_WORDS = re.compile(r"menu|price|rate|list|card|service|treatment|package|course|fee|read|parh|"
+_MENU_WORDS = re.compile(r"menu|price ?list|rate ?list|\brates?\b|\bprices\b|read|parh|"
                          r"\u0645\u06cc\u0646\u0648|\u0631\u06cc\u0679|\u0642\u06cc\u0645\u062a|\u0644\u0633\u0679|\u067e\u0691\u06be", re.I)
-_POST_WORDS = re.compile(r"\bpost|caption|publish|schedule|instagram|facebook|\bstory|\breel|\bads?\b|"
-                         r"\u067e\u0648\u0633\u0679", re.I)
+# a post, an ad or a campaign: the picture is for that, not a menu to read
+_POST_WORDS = re.compile(r"\bpost|caption|publish|schedule|instagram|facebook|\bstory|\breel|\bads?\b|advert|"
+                         r"campaign|promot|boost|"
+                         r"\u067e\u0648\u0633\u0679|\u06a9\u0645\u067e\u06cc\u0646|\u0627\u0634\u062a(?:\u06c1|\u06be)\u0627\u0631", re.I)
 MENU_PHOTOS_MAX = 3          # pages of one menu read per message
 
 
 def _wants_menu_read(message, attached):
+    """Menu words win; then a post/ad/campaign word means the picture is for
+    that; a picture with neither is read as a menu."""
     if not attached:
         return False
-    return bool(_MENU_WORDS.search(message)) or not _POST_WORDS.search(message)
+    if _MENU_WORDS.search(message):
+        return True
+    return not _POST_WORDS.search(message)
 
 
 def _read_menu_photos(tid, role, urls):
@@ -659,7 +671,10 @@ def _do_action(tid, role, uid, action, args, founder, reply):
     # questioning (or missing) reply is replaced by what actually happened.
     if not reply or reply.rstrip().endswith(("?", "\u061f")):
         reply = _done_text(action, args)
-    if note:
+    if note and action == "write_campaign":
+        # the model's own words could say "launched"; only what happened is said
+        reply = note + "."
+    elif note:
         reply = reply.rstrip(".") + " -- " + note + "."
     return dict(result, kind="action", action=action, ok=True, reply=reply)
 
@@ -710,7 +725,7 @@ def make_console_router():
                     "reply": "I read your menu and found %s. It is on Business & agent now: check the names and prices, "
                              "then press Save. Nothing changes until you do." % (what or "your business details")}
         if attached:
-            message += ("\n[The owner attached %d picture%s to this message, for a social media post.]"
+            message += ("\n[The owner attached %d picture%s to this message, for the post or ad campaign they ask for.]"
                         % (len(attached), "" if len(attached) == 1 else "s"))
         system = CLASSIFY + LANG_RULE + FACTS_RULE + (VOICE_RULE if voice else "")
         t0 = time.time()
@@ -746,6 +761,8 @@ def make_console_router():
                 v = str(args.get(k) or "").strip().lower()
                 if v and not any(w in heard for w in re.findall(r"[a-z0-9\u0600-\u06ff]{3,}", v)):
                     args.pop(k, None)
+            if action == "write_campaign":
+                args["image_urls"] = attached
             if action == "schedule_post":
                 args.pop("image_url", None)
                 args["image_urls"] = attached
