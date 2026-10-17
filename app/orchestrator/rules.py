@@ -155,4 +155,21 @@ def rules_for(event: dict) -> list[dict]:
                                     "message": f"Trial ended for tenant {p.get('tenant_id')} "
                                                f"— convert to paid or drop."}}]
 
+    # 21. Website order placed -> alert the owner (Hermes confirmation can be added here later)
+    if et == "storefront.order.created":
+        return [{"notify": {"role": "owner",
+                            "message": f"🛒 New website order {p.get('order_id')}: Rs {p.get('total', 0):,}"
+                                       f", {p.get('area') or 'area TBC'}, delivery {p.get('slot_date') or ''} {p.get('slot') or ''}".rstrip()}}]
+
+    # 22. Website order cancelled -> tell the owner so the kitchen stops
+    if et == "storefront.order.status_changed" and p.get("status") == "cancelled":
+        return [{"notify": {"role": "owner",
+                            "message": f"❌ Order {p.get('order_id')} cancelled (was {p.get('previous')})"}}]
+
+    # 23. Catering / bulk enquiry from the website -> owner follows up
+    if et == "storefront.enquiry.created":
+        people = f", {p.get('people')} people" if p.get("people") else ""
+        return [{"notify": {"role": "owner",
+                            "message": f"🎉 Event enquiry from {p.get('name')}{people} ({p.get('phone')})"}}]
+
     return []

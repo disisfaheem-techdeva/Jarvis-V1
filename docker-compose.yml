@@ -56,6 +56,7 @@ services:
       HERMES_RETRIES: ${HERMES_RETRIES:-2}
       META_APP_ID: ${META_APP_ID:-}
       META_APP_SECRET: ${META_APP_SECRET:-}
+      META_WEBHOOK_VERIFY_TOKEN: ${META_WEBHOOK_VERIFY_TOKEN:-}   # Social Inbox: Meta webhook check (app/social_agent.py)
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_SECRET: ${GOOGLE_SECRET:-}
       # Google Ads reporting: TechDeva's developer token (Google Ads API
@@ -140,6 +141,10 @@ services:
       DATABASE_URL: postgresql://techdeva_app@db:5432/techdeva
       PGPASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}
       REDIS_URL: redis://redis:6379/0
+      # same signing key as the api: the worker runs the same app code, and
+      # auth.py refuses to sign or check a token without it (AUTH_REQUIRED
+      # defaults to true)
+      SESSION_SECRET: ${SESSION_SECRET:-}
       HERMES_URL: ${HERMES_URL:-}
       HERMES_REPLY_PATH: ${HERMES_REPLY_PATH:-/reply}
       HERMES_API_KEY: ${HERMES_API_KEY:-}

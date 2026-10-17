@@ -13,13 +13,15 @@ non-superuser role.
 import os
 import time
 import re
+import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, Cookie, Request
+from fastapi import Body, FastAPI, Header, HTTPException, Cookie, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
 from .db import tenant_session
+from .audit import record
 from .attribution import (extract_click, merge_click,
                           build_attribution_report)
 from .persistence import Persistence
@@ -44,6 +46,7 @@ from .provisioning import make_provisioning_router
 from .plans import make_plans_router
 from .pins import make_pins_router
 from . import trial
+from .storefront import make_storefront_router
 
 # API docs (/docs, /redoc, /openapi.json) hand anyone on the internet the
 # full route surface and request/response schema. Off by default; set
@@ -115,7 +118,14 @@ app.include_router(make_orders_router())
 # Voice: the AI phone agent's call log and number settings (calls answered by app/voice_bridge.py)
 from .voice import make_voice_router
 app.include_router(make_voice_router())
+from .autopilot import make_autopilot_router
+app.include_router(make_autopilot_router())
+from .social_agent import make_meta_webhook_router, make_social_inbox_router
+app.include_router(make_meta_webhook_router())
+app.include_router(make_social_inbox_router())
 trial.install(app)
+# Storefront: orders, enquiries and messages from a tenant's own website (docs/STOREFRONT.md)
+app.include_router(make_storefront_router(P))
 
 # The two client-facing pages. The API image is built from ./app, so web/ is
 # mounted in (see docker-compose.yml) rather than baked into the image; WEB_DIR
@@ -132,15 +142,16 @@ def _page(name: str):
     return FileResponse(path, headers={"Cache-Control": "no-store"})
 
 
-def scope(x_tenant_id, x_role, authorization=None, session=None):
+def scope(x_tenant_id, x_role, authorization=None, session=None, with_user=False):
     """Identity for every legacy route. Delegates to the ONE resolver in auth.py,
     so setting AUTH_REQUIRED=true closes header spoofing across the whole API at
-    once rather than route by route."""
+    once rather than route by route. with_user=True also returns the user id
+    (None without a signed session), for routes that audit who did it."""
     try:
-        tid, role, _uid = resolve_scope(x_tenant_id, x_role, authorization, session)
+        tid, role, uid = resolve_scope(x_tenant_id, x_role, authorization, session)
     except AuthError as e:
         raise HTTPException(e.status, e.message)
-    return tid, role
+    return (tid, role, uid) if with_user else (tid, role)
 
 
 @app.get("/health")
@@ -235,6 +246,78 @@ def create_lead(body: LeadIn, x_tenant_id: str | None = Header(None),
     return {"id": lead_id, "emitted": "lead.created",
             "attributed": campaign_id is not None,
             "click_id": click.get("click_id")}
+
+
+# The lead_status enum, said at the boundary like LEAD_SOURCES above, so a typo
+# is a 400 that names the allowed values rather than a database refusal.
+LEAD_STATUSES = ("new", "qualified", "booked", "showed", "sold", "lost", "fake")
+LEAD_EDITABLE = ("status", "notes", "service", "assigned_operator")
+_LEAD_VIEW = "id, name, phone, service, status, source, priority, est_revenue"
+
+
+@app.patch("/leads/{lead_id}")
+def update_lead(lead_id: str, body: dict = Body(...),
+                x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                authorization: str | None = Header(None),
+                td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+    """Move a lead along the pipeline, note it, or hand it to a team member.
+    RLS hides another business's lead, so its id is simply "not found"."""
+    tid, role, uid = scope(x_tenant_id, x_role, authorization, td_session, with_user=True)
+    if not tid:
+        raise HTTPException(400, "tenant required")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "expected a JSON object")
+    unknown = sorted(k for k in body if k not in LEAD_EDITABLE)
+    if unknown:
+        raise HTTPException(400, "unknown field(s): %s. allowed: %s"
+                            % (", ".join(unknown), ", ".join(LEAD_EDITABLE)))
+    data = dict(body)
+    if not data:
+        raise HTTPException(400, "nothing to save")
+    if "status" in data and data["status"] not in LEAD_STATUSES:
+        raise HTTPException(400, "status must be one of " + ", ".join(LEAD_STATUSES))
+    for k in ("notes", "service"):
+        if k in data and data[k] is not None and not isinstance(data[k], str):
+            raise HTTPException(400, "%s must be text" % k)
+    if data.get("assigned_operator") is not None:
+        try:
+            data["assigned_operator"] = str(uuid.UUID(str(data["assigned_operator"])))
+        except ValueError:
+            raise HTTPException(400, "assigned_operator must be a team member's id")
+    try:
+        lead_uuid = str(uuid.UUID(lead_id))
+    except ValueError:
+        raise HTTPException(404, "lead not found")
+
+    with tenant_session(tid, role) as cur:
+        cur.execute("SELECT id, " + ", ".join(LEAD_EDITABLE) + " FROM leads WHERE id = %s FOR UPDATE",
+                    (lead_uuid,))
+        before = cur.fetchone()
+        if not before:
+            raise HTTPException(404, "lead not found")
+        if data.get("assigned_operator"):
+            # users.id is a plain foreign key, which Postgres checks past RLS:
+            # without this a lead could be handed to another business's user.
+            cur.execute("SELECT 1 FROM users WHERE id = %s", (data["assigned_operator"],))
+            if not cur.fetchone():
+                raise HTTPException(400, "assigned_operator is not a member of this business")
+        changes = {k: {"from": before[k] if k != "assigned_operator" or before[k] is None else str(before[k]),
+                       "to": v}
+                   for k, v in data.items()
+                   if (str(before[k]) if before[k] is not None else None) != v}
+        if changes:
+            sets = ", ".join("%s = %%s" % k for k in changes)
+            cur.execute("UPDATE leads SET " + sets + ", updated_at = now() WHERE id = %s RETURNING "
+                        + _LEAD_VIEW, [changes[k]["to"] for k in changes] + [lead_uuid])
+        else:
+            cur.execute("SELECT " + _LEAD_VIEW + " FROM leads WHERE id = %s", (lead_uuid,))
+        lead = cur.fetchone()
+        if changes:
+            record(cur, action="lead.update", resource="leads", resource_id=lead_uuid,
+                   actor=uid or role, detail={"changes": changes})
+    if changes:
+        P.emit(tid, "lead.updated", {"lead_id": lead_uuid, "changes": changes}, role)
+    return {"lead": lead}
 
 
 class ClickIn(BaseModel):
@@ -634,6 +717,15 @@ def dashboard_page():
     auth.resolve_scope(). A tenant id supplied by the browser is ignored.
     """
     return _page("dashboard.html")
+
+
+@app.get("/orders-view", include_in_schema=False)
+@app.get("/storefront-view", include_in_schema=False)
+def storefront_page():
+    """Online orders dashboard (website orders, upcoming deliveries, sales, sources).
+    Like /dashboard it carries no tenant identity; every figure comes from
+    /storefront/* which resolves the tenant from the signed session."""
+    return _page("storefront.html")
 
 
 @app.get("/assets/td.css", include_in_schema=False)

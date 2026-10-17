@@ -13,7 +13,7 @@ import redis
 from psycopg.types.json import Json
 from .db import tenant_session
 from .learning import summarise as summarise_learning, WINDOW as LEARNING_WINDOW
-from .crypto import decrypt_json, encrypt_json, CryptoError
+from .crypto import decrypt_json, CryptoError
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 EVENTS_Q = "events:queue"
@@ -53,7 +53,8 @@ class Persistence:
     def load_config(self, tenant_id) -> dict:
         with self._sess(tenant_id) as cur:
             cur.execute("""SELECT services, price_list, departments, booking_rules,
-                                  hermes_persona, brand, geo, working_hours, automation
+                                  hermes_persona, brand, geo, working_hours, automation,
+                                  timezone, currency, language
                            FROM tenant_config WHERE tenant_id = current_tenant()""")
             row = cur.fetchone()
             return row or {}
@@ -63,7 +64,7 @@ class Persistence:
     # is the intake that was missing, not new capability.
     JSONB_CONFIG = ("services", "price_list", "departments",
                     "booking_rules", "brand", "geo", "working_hours")
-    TEXT_CONFIG = ("hermes_persona", "automation")
+    TEXT_CONFIG = ("hermes_persona", "automation", "timezone", "currency", "language")
 
     def save_config(self, tenant_id, patch: dict) -> dict:
         """Merge-update one tenant's configuration. Unknown keys are ignored."""

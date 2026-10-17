@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Online orders — TechDeva</title>
+<style>
+:root{
+  --bg:#0A0E1A; --panel:#131A2C; --panel2:#0F1524; --line:#26324D;
+  --text:#EAF1FF; --muted:#8A99B8; --accent:#6C8CFF; --tech:#4DA6F0; --growth:#34D07C;
+  --warn:#E0A458; --danger:#E06A6A; --r:10px; --pad:20px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}
+.mono{font-family:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
+.wrap{max-width:1280px;margin:0 auto;padding:24px 16px 64px}
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:22px}
+h1{font-size:22px;margin:0;font-weight:650;letter-spacing:-.01em}
+h2{font-size:13px;margin:0 0 12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.sub{color:var(--muted);font-size:13px}
+.grid{display:grid;gap:14px}
+.kpis{grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin-bottom:14px}
+.two{grid-template-columns:1.4fr 1fr}
+.three{grid-template-columns:repeat(3,1fr)}
+@media (max-width:900px){.two,.three{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+.card-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:600}
+.card-value{font-size:26px;font-weight:600;margin-top:6px;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.card-note{font-size:11px;color:var(--muted);margin-top:4px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:18px}
+.state{padding:34px 20px;text-align:center;color:var(--muted);font-size:13px}
+.state strong{display:block;color:var(--text);font-weight:600;margin-bottom:5px;font-size:14px}
+.state.err strong{color:var(--danger)}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;
+  animation:sp 0.8s linear infinite;vertical-align:-2px;margin-right:8px}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding:8px 6px;border-bottom:1px solid var(--line)}
+td{padding:9px 6px;border-bottom:1px solid rgba(38,50,77,.55);vertical-align:top}
+td.num,th.num{text-align:right;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap}
+.s-new{background:rgba(224,164,88,.15);color:var(--warn)}
+.s-confirmed{background:rgba(77,166,240,.15);color:var(--tech)}
+.s-preparing{background:rgba(108,140,255,.15);color:var(--accent)}
+.s-out_for_delivery{background:rgba(160,120,255,.15);color:#B49BFF}
+.s-delivered{background:rgba(52,208,124,.15);color:var(--growth)}
+.s-cancelled{background:rgba(138,153,184,.15);color:var(--muted)}
+.bars{display:flex;align-items:flex-end;gap:6px;height:150px;padding-top:8px}
+.bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:0}
+.bar i{display:block;width:100%;background:linear-gradient(180deg,var(--accent),rgba(108,140,255,.35));border-radius:4px 4px 0 0;min-height:2px}
+.bar span{font-size:10px;color:var(--muted);margin-top:4px;white-space:nowrap}
+.pipeline{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+@media (max-width:700px){.pipeline{grid-template-columns:repeat(3,1fr)}}
+.stage{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;text-align:center}
+.stage b{display:block;font-size:20px;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.stage small{color:var(--muted);font-size:11px}
+.delivery{border:1px solid var(--line);background:var(--panel2);border-radius:8px;padding:12px;margin-bottom:10px}
+.delivery .top{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.delivery .slot{font-weight:650}
+.delivery .meta{color:var(--muted);font-size:12px;margin-top:3px}
+.daygroup{font-size:12px;color:var(--muted);margin:14px 0 8px;text-transform:uppercase;letter-spacing:.07em}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel2);color:var(--text);
+  border-radius:8px;padding:8px 12px;font:inherit;font-size:13px;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#0A0E1A;font-weight:600}
+input[type=url],input[type=text]{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;
+  padding:9px 11px;font:inherit}
+label{display:block;font-size:12px;color:var(--muted);margin:10px 0 6px}
+.secret{word-break:break-all;background:var(--panel2);border:1px dashed var(--warn);border-radius:8px;padding:10px;margin-top:6px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.section{margin-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap" id="root"><div class="state"><span class="spin"></span>Loading orders...</div></div>
+<script>
+/* Online orders dashboard. No tenant identity lives in this page: every number
+   comes from /storefront/* which resolves the tenant from the signed session.
+   Every section has loading / error / empty / success. Auto-refreshes every minute. */
+var root = document.getElementById('root');
+var S = { me:null, conn:null, summary:null, orders:null, inbox:null, err:null, secret:null };
+
+function api(path, opts){
+  opts = opts || {};
+  return fetch(path, {method:opts.method||'GET', credentials:'include',
+    headers: opts.body ? {'Content-Type':'application/json'} : undefined,
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  }).then(function(r){ return r.text().then(function(t){ var d=null; try{ d=t?JSON.parse(t):null; }catch(e){}
+    return {ok:r.ok,status:r.status,data:d}; }); })
+    .catch(function(e){ return {ok:false,status:0,data:null,err:String(e)}; });
+}
+function esc(v){ if(v===null||v===undefined) return ''; return String(v).replace(/[&<>"']/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function rs(n){ return (n===null||n===undefined) ? '—' : 'Rs ' + Number(n).toLocaleString('en-PK'); }
+var LABEL = {new:'New',confirmed:'Confirmed',preparing:'Preparing',out_for_delivery:'Out for delivery',delivered:'Delivered',cancelled:'Cancelled'};
+function pill(s){ return '<span class="pill s-'+esc(s)+'">'+esc(LABEL[s]||s)+'</span>'; }
+function slotLabel(s){ if(!s) return ''; if(s==='morning') return '10 AM – 12 PM'; var p=s.split(':'), h=+p[0], m=p[1];
+  return ((h%12)||12) + (m!=='00' ? ':'+m : '') + (h<12?' AM':' PM'); }
+function dayName(iso){ var t=new Date(Date.now()+5*3600e3).toISOString().slice(0,10);
+  var tm=new Date(Date.now()+29*3600e3).toISOString().slice(0,10);
+  return iso===t ? 'Today' : iso===tm ? 'Tomorrow' : iso; }
+function near(l){ if(!l) return ''; return ' (' + (/^near\b/i.test(l) ? esc(l) : 'near ' + esc(l)) + ')'; }
+function wa(phone){ var d=String(phone||'').replace(/\D/g,''); if(d.indexOf('0')===0) d='92'+d.slice(1); return 'https://wa.me/'+d; }
+function metric(label, value, note){ return '<div class="card"><div class="card-label">'+esc(label)+'</div><div class="card-value">'+esc(value)+'</div>'+
+  (note?'<div class="card-note">'+esc(note)+'</div>':'')+'</div>'; }
+function empty(t,m){ return '<div class="state"><strong>'+esc(t)+'</strong>'+esc(m||'')+'</div>'; }
+
+function load(){
+  return Promise.all([api('/me'), api('/storefront/connection')]).then(function(r){
+    if (r[1].status===401 || r[0].status===401){ S.err='auth'; return render(); }
+    if (!r[1].ok){ S.err=(r[1].data&&r[1].data.detail)||'Could not reach the platform'; return render(); }
+    S.err=null; S.me=r[0].data; S.conn=r[1].data;
+    return Promise.all([api('/storefront/summary'), api('/storefront/orders?limit=30'), api('/storefront/inbox?limit=10')]).then(function(x){
+      S.summary = x[0].ok ? x[0].data : {error:true};
+      S.orders = x[1].ok ? x[1].data.orders : null;
+      S.inbox = x[2].ok ? x[2].data.items : null;
+      render();
+    });
+  });
+}
+
+function connectPanel(){
+  var owner = S.me && (S.me.role==='owner' || S.me.role==='techdeva_admin');
+  var h = '<div class="panel"><h2>Connect your website</h2>';
+  if (S.secret){
+    h += '<p>Put these two values in the website\'s environment settings, then redeploy it. The secret is shown only this once.</p>'+
+      '<label>PLATFORM_WEBHOOK_URL</label><div class="secret mono">'+esc(S.secret.webhook_url)+'</div>'+
+      '<label>PLATFORM_WEBHOOK_SECRET</label><div class="secret mono">'+esc(S.secret.secret)+'</div>'+
+      '<p class="sub">Then open the website admin and press “Sync to TechDeva” once to send past orders.</p>';
+  } else if (owner){
+    h += '<p class="sub">Orders from your website appear here live once it is connected.'+
+      (S.conn && S.conn.connected ? ' Already connected: making a new secret disconnects the old one.' : '')+'</p>'+
+      '<label for="site">Website address</label><input id="site" type="url" placeholder="https://instantgrill.shop" value="'+esc(S.conn&&S.conn.site||'')+'">'+
+      '<p><button class="btn primary" id="connectBtn">'+(S.conn&&S.conn.connected?'Make a new secret':'Connect website')+'</button></p>';
+  } else {
+    h += '<p class="sub">Ask the business owner to connect the website.</p>';
+  }
+  return h + '</div>';
+}
+
+function render(){
+  if (S.err==='auth'){ root.innerHTML = empty('Please sign in','') + '<p style="text-align:center"><a class="btn primary" href="/portal">Sign in</a></p>'; return; }
+  if (S.err){ root.innerHTML = '<div class="state err"><strong>Could not load orders</strong>'+esc(S.err)+'</div>'; return; }
+  var c = S.conn || {};
+  var h = '<header><div><h1>Online orders</h1><div class="sub">'+
+    (c.connected ? 'Website connected'+(c.site?': '+esc(c.site):'')+(c.last_order_received_at?' · last order received '+esc(new Date(c.last_order_received_at).toLocaleString('en-GB',{timeZone:'Asia/Karachi'})):' · no orders received yet')
+                 : 'Website not connected yet')+
+    '</div></div><div><button class="btn" id="refresh">Refresh</button> <a class="btn" href="/dashboard">Business dashboard</a></div></header>';
+
+  if (!c.connected || S.secret) h += connectPanel();
+  var s = S.summary;
+  if (!s){ h += '<div class="state"><span class="spin"></span>Loading...</div>'; root.innerHTML=h; bind(); return; }
+  if (s.error){ h += '<div class="state err"><strong>Could not load the numbers</strong>Try refreshing.</div>'; root.innerHTML=h; bind(); return; }
+
+  var l30 = s.last_30_days;
+  h += '<div class="grid kpis section">'+
+    metric('Orders today', s.today.orders)+
+    metric('Revenue today', rs(s.today.revenue), 'excludes cancelled')+
+    metric('Revenue, 7 days', rs(s.week.revenue), s.week.orders+' orders')+
+    metric('Avg order, 30 days', l30.avg_order_value===null?'—':rs(l30.avg_order_value), l30.orders+' orders')+
+    metric('Repeat customers', s.customers.repeat+' / '+s.customers.total)+
+    metric('Cancelled, 30 days', l30.cancelled)+
+    '</div>';
+
+  h += '<div class="panel section"><h2>Order pipeline</h2><div class="pipeline">'+
+    ['new','confirmed','preparing','out_for_delivery','delivered','cancelled'].map(function(k){
+      return '<div class="stage"><b>'+esc(s.by_status[k])+'</b><small>'+esc(LABEL[k])+'</small></div>'; }).join('')+'</div></div>';
+
+  // Upcoming deliveries + revenue chart
+  var up = s.upcoming || [];
+  var upH = '';
+  if (!up.length) upH = empty('No open deliveries today or tomorrow', 'New website orders show up here with their delivery slot.');
+  else {
+    var cur = '';
+    up.forEach(function(o){
+      if (o.slot_date!==cur){ cur=o.slot_date; upH += '<div class="daygroup">'+esc(dayName(cur))+'</div>'; }
+      var items = (o.items||[]).map(function(i){ return esc(i.qty+' × '+i.name+(i.chutney?' ('+i.chutney+', '+i.salad+')':'')); }).join('<br>');
+      upH += '<div class="delivery"><div class="top"><span class="slot">'+esc(slotLabel(o.slot))+' · <span class="mono">'+esc(o.external_id)+'</span></span>'+pill(o.status)+'</div>'+
+        '<div class="meta">'+esc(o.customer_name)+' · <a href="'+esc(wa(o.customer_phone))+'" target="_blank" rel="noopener">'+esc(o.customer_phone)+'</a> · '+esc(o.area||'')+(o.rider?' · Rider: '+esc(o.rider):'')+'</div>'+
+        '<div class="meta">'+esc(o.address||'')+near(o.landmark)+'</div>'+
+        '<div style="margin-top:6px">'+items+'</div>'+
+        '<div class="meta mono">COD '+esc(rs(o.total))+(o.delivery_fee===null?' + delivery':'')+'</div></div>';
+    });
+  }
+  var max = Math.max.apply(null, s.daily.map(function(d){return d.revenue;}).concat([1]));
+  var bars = '<div class="bars" role="img" aria-label="Revenue per day, last 14 days">'+s.daily.map(function(d){
+    var pct = Math.round(d.revenue/max*100);
+    return '<div class="bar" title="'+esc(d.day+': '+rs(d.revenue)+', '+d.orders+' orders')+'"><i style="height:'+pct+'%"></i><span>'+esc(d.day.slice(8))+'</span></div>'; }).join('')+'</div>';
+  h += '<div class="grid two section"><div class="panel"><h2>Upcoming deliveries</h2>'+upH+'</div>'+
+       '<div class="panel"><h2>Revenue, last 14 days</h2>'+bars+'<p class="sub">Hover a bar for the day\'s total. Cancelled orders are not counted.</p></div></div>';
+
+  function table(rows, cols, emptyMsg){
+    if (!rows || !rows.length) return empty('No data yet', emptyMsg);
+    return '<table><thead><tr>'+cols.map(function(c){return '<th'+(c.num?' class="num"':'')+'>'+esc(c.h)+'</th>';}).join('')+'</tr></thead><tbody>'+
+      rows.map(function(r){ return '<tr>'+cols.map(function(c){ return '<td'+(c.num?' class="num"':'')+'>'+c.f(r)+'</td>'; }).join('')+'</tr>'; }).join('')+'</tbody></table>';
+  }
+  h += '<div class="grid three section">'+
+    '<div class="panel"><h2>Top items, 30 days</h2>'+table(s.top_items,[{h:'Item',f:function(r){return esc(r.name);}},{h:'Sold',num:1,f:function(r){return esc(r.qty);}},{h:'Revenue',num:1,f:function(r){return esc(rs(r.revenue));}}],'Appears after the first orders.')+'</div>'+
+    '<div class="panel"><h2>Areas, 30 days</h2>'+table(s.areas,[{h:'Area',f:function(r){return esc(r.area);}},{h:'Orders',num:1,f:function(r){return esc(r.orders);}},{h:'Revenue',num:1,f:function(r){return esc(rs(r.revenue));}}],'Where your orders come from.')+'</div>'+
+    '<div class="panel"><h2>Marketing sources, 30 days</h2>'+table(s.sources,[{h:'Source',f:function(r){return esc(r.source)+(r.campaign?'<div class="sub">'+esc(r.campaign)+'</div>':'');}},{h:'Orders',num:1,f:function(r){return esc(r.orders);}},{h:'Revenue',num:1,f:function(r){return esc(rs(r.revenue));}}],'Tag ad links with utm_source and utm_campaign to see which ads sell.')+'</div>'+
+    '</div>';
+
+  h += '<div class="grid two section"><div class="panel"><h2>Latest orders</h2>'+
+    (S.orders===null ? '<div class="state err"><strong>Could not load orders</strong></div>' :
+      table(S.orders,[{h:'Order',f:function(r){return '<span class="mono">'+esc(r.external_id)+'</span><div class="sub">'+esc(new Date(r.placed_at).toLocaleString('en-GB',{timeZone:'Asia/Karachi',dateStyle:'short',timeStyle:'short'}))+'</div>';}},
+        {h:'Customer',f:function(r){return esc(r.customer_name)+'<div class="sub">'+esc(r.area||'')+'</div>';}},
+        {h:'Delivery',f:function(r){return esc(r.slot_date?dayName(r.slot_date):'')+'<div class="sub">'+esc(slotLabel(r.slot))+'</div>';}},
+        {h:'Status',f:function(r){return pill(r.status);}},
+        {h:'Total',num:1,f:function(r){return esc(rs(r.total));}}],'Orders placed on the website appear here.'))+
+    '</div><div class="panel"><h2>Enquiries and messages</h2>'+
+    (S.inbox===null ? '<div class="state err"><strong>Could not load</strong></div>' : !S.inbox.length ? empty('Nothing yet','Catering enquiries and contact messages from the website appear here.') :
+      S.inbox.map(function(i){ var p=i.payload||{}; return '<div class="delivery"><div class="top"><b>'+esc(i.name)+'</b><span class="pill '+(i.kind==='enquiry'?'s-new':'s-confirmed')+'">'+(i.kind==='enquiry'?'Event enquiry':'Message')+'</span></div>'+
+        '<div class="meta">'+[p.people?p.people+' people':'',p.date||'',p.area||''].filter(Boolean).map(esc).join(' · ')+'</div>'+
+        (p.message?'<div style="margin-top:4px;white-space:pre-line">'+esc(p.message)+'</div>':'')+
+        '<div class="meta">'+(i.phone?'<a href="'+esc(wa(i.phone))+'" target="_blank" rel="noopener">'+esc(i.phone)+'</a> ':'')+(i.email?'<a href="mailto:'+esc(i.email)+'">'+esc(i.email)+'</a>':'')+'</div></div>'; }).join(''))+
+    '</div></div>';
+
+  if (c.connected && !S.secret) h += '<div class="section">'+connectPanel()+'</div>';
+  root.innerHTML = h; bind();
+}
+
+function bind(){
+  var r = document.getElementById('refresh'); if (r) r.onclick = function(){ load(); };
+  var b = document.getElementById('connectBtn');
+  if (b) b.onclick = function(){
+    b.disabled = true;
+    var site = (document.getElementById('site')||{}).value || '';
+    api('/storefront/connect',{method:'POST',body:{site_url:site}}).then(function(res){
+      b.disabled = false;
+      if (!res.ok){ alert((res.data&&res.data.detail)||'Could not connect'); return; }
+      S.secret = res.data; load();
+    });
+  };
+}
+
+load();
+setInterval(function(){ if (!S.secret) load(); }, 60000);
+</script>
+</body>
+</html>

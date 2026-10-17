@@ -296,8 +296,7 @@ def make_booking_router():
             raise HTTPException(400, "Enter the client's name.")
 
         pb = _price_lines(body)
-        lines, subtotal, discount, tax, total = (pb["lines"], pb["subtotal"], pb["discount"],
-                                                 pb["tax"], pb["total"])
+        lines, discount, tax, total = pb["lines"], pb["discount"], pb["tax"], pb["total"]
         received = _num(body.get("received"), "Amount received")
         use_credit = round(_num(body.get("use_credit"), "Credit") or 0, 2)
         if use_credit < 0 or use_credit - total > 0.009:

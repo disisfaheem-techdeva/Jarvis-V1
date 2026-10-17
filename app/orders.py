@@ -20,7 +20,6 @@ are human steps. Cancelling is for the owner, and never after money was taken.
 """
 from __future__ import annotations
 
-import datetime as _dt
 import hashlib
 import re
 
@@ -331,6 +330,16 @@ def _recognise(cur, o, actor, actor_type="human"):
     return True
 
 
+WEBSITE_OWNED = ("This order came from your website. Change it in your website admin; "
+                 "it updates here by itself.")
+
+
+def website_owned(o):
+    """A website order follows the website (app/storefront.py), so the dashboard
+    does not move it or take money for it: the two would drift apart."""
+    return o.get("source") == "website" and str(o.get("source_ref") or "").startswith("website:")
+
+
 def _load(cur, oid):
     cur.execute("SELECT * FROM orders WHERE id = %s::uuid", (oid,))
     o = cur.fetchone()
@@ -342,6 +351,8 @@ def _load(cur, oid):
 def move(cur, oid, to, *, actor, role, reason=""):
     """Move an order along its lifecycle. Humans only (callers check)."""
     o = _load(cur, oid)
+    if website_owned(o):
+        raise OrderError(409, WEBSITE_OWNED)
     if to not in STATUSES:
         raise OrderError(400, "Unknown status.")
     if to == o["status"]:
@@ -379,6 +390,8 @@ def move(cur, oid, to, *, actor, role, reason=""):
 def pay(cur, oid, amount, *, method="cash", reference=None, actor, role):
     """Money received for an order (cash on delivery, bank, JazzCash...)."""
     o = _load(cur, oid)
+    if website_owned(o):
+        raise OrderError(409, WEBSITE_OWNED)
     if o["status"] == "cancelled":
         raise OrderError(409, "This order is cancelled.")
     try:
@@ -426,7 +439,9 @@ def view(cur, oid, role):
                 "items": items, "timeline": events, "status_label": LABEL[o["status"]],
                 "next": sorted(NEXT[o["status"]] - ({"out_for_delivery"} if o["fulfilment"] == "pickup" else set()),
                                key=STATUSES.index),
-                "recognised": bool(o["recognised_at"])})
+                "recognised": bool(o["recognised_at"]), "website_owned": website_owned(o)})
+    if out["website_owned"]:
+        out["next"] = []
     out.update(_payment_state(cur, o))
     return out
 

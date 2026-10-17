@@ -18,7 +18,6 @@ import json
 import urllib.error
 import urllib.request
 import urllib.parse
-from datetime import datetime, timezone
 
 # ---------- config ----------
 # .strip(): a trailing space or newline pasted into .env makes Meta answer

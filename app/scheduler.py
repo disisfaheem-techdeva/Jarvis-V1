@@ -61,6 +61,22 @@ class Scheduler:
         except Exception as e:
             print(f"[scheduler] scheduled posts skipped: {e}", flush=True)
 
+        # Content autopilot: read each recent post's results back from Meta
+        # (reach, likes, comments, shares, saves) and follower counts. Throttled inside.
+        try:
+            from .autopilot import run_due as autopilot_due
+            emitted += autopilot_due()
+        except Exception as e:
+            print(f"[scheduler] post results skipped: {e}", flush=True)
+
+        # Social agent: which Facebook Page / Instagram belongs to which business,
+        # and ask Meta to send their DMs and comments here. Every 10 minutes inside.
+        try:
+            from .social_agent import refresh_pages
+            emitted += refresh_pages()
+        except Exception as e:
+            print(f"[scheduler] social pages skipped: {e.__class__.__name__}", flush=True)
+
         # Ad autopilot (growth planner): auto-pause over the owner's limit, and
         # the weekly launch within the owner's daily cap. Throttled inside.
         try:

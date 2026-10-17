@@ -113,7 +113,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=478ad6e7cf">
+<link rel="stylesheet" href="/assets/td.css?v=303145067c">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -323,22 +323,6 @@ VIEWS.leads = function(){
     '<span class="pill count">' + S.leads.length + '</span>');
 };
 
-VIEWS.customers = function(){
-  return '<h1>Customers</h1><p class="sub">Repeat clients, history and notes.</p>' +
-    panel('Customers', soon('', 'There is no customers table in the platform yet. It is built in the next module, together with services, prices and staff.'));
-};
-VIEWS.appointments = function(){
-  return '<h1>Appointments</h1><p class="sub">Bookings and the calendar.</p>' +
-    panel('Appointments', soon('', 'The appointments table exists in the database but has no API route yet. It is wired up in the next module.'));
-};
-VIEWS.revenue = function(){
-  return '<h1>Sales / Revenue</h1><p class="sub">Invoices, payments and takings.</p>' +
-    panel('Sales and revenue', soon('', 'Revenue can currently only be recorded, not read back — there is no read endpoint yet, and no invoices or payments tables. Rather than show a partial number, this stays empty until the finance module lands.'));
-};
-VIEWS.inbox = function(){
-  return '<h1>Inbox</h1><p class="sub">WhatsApp, Instagram, Messenger, email and website leads in one place.</p>' +
-    panel('Conversations', soon('', 'The conversations and messages tables exist but have no API route, and the WhatsApp connection is still being repaired. Nothing is shown until real messages can be read.'));
-};
 
 VIEWS.ai = function(){
   var out = '<h1>AI Workforce</h1><p class="sub">What your AI employees have done for this business.</p>';
@@ -372,14 +356,6 @@ VIEWS.ai = function(){
   return out;
 };
 
-VIEWS.needshuman = function(){
-  var out = '<h1>Needs Human</h1><p class="sub">Work the AI has paused for your decision.</p>';
-  var n = S.summary && S.summary.work_by_status ? S.summary.work_by_status.needs_human : null;
-  var note = n ? '<div class="banner"><div class="banner-txt"><strong>' + esc(n) +
-    ' task' + (n === 1 ? '' : 's') + ' waiting on you</strong><span>These belong to this business only.</span></div></div>' : '';
-  return out + note + panel('Human review centre',
-    soon('', 'The review and approval screen arrives in the next module. Until then the count above is real, but the tasks cannot be actioned here.'));
-};
 
 // ---- the client's brand ----
 // A business owner should recognise their own dashboard at a glance. Their logo
@@ -565,35 +541,6 @@ VIEWS.integrations = function(){
   return out;
 };
 
-VIEWS.console = function(){
-  var out = '<h1>Jarvis</h1><p class="sub">Tell the platform what to change, in your own words. ' +
-            'Change how your dashboard looks, update prices, services, staff and hours, or teach your WhatsApp agent something new.</p>';
-  out += panel('Say it plainly',
-    '<div style="padding:16px">' +
-    '<textarea id="con-in" rows="3" placeholder="Teach my WhatsApp agent: hair PRP is 12,000 per session, three for 30,000.&#10;Or: hide the inventory section and make my brand colour #C9A227.&#10;Or: add a new service called HydraFacial at 8,000." ' +
-    'style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit"></textarea>' +
-    '<div style="margin-top:10px"><button id="con-go" class="btn">Send</button> ' +
-    '<button id="con-mic" class="btn" type="button" style="display:none" title="Speak instead of typing">&#127908; Speak</button> ' +
-    '<button id="con-lang" class="btn" type="button" title="Voice language: English or Urdu" onclick="jarvisToggleLang(this)">EN</button> ' +
-    '<span id="con-note" class="sub"></span></div>' +
-    '<div id="con-out" style="margin-top:14px"></div></div>');
-  out += '<h2>Social posts</h2>';
-  out += panel('Waiting for your approval', actbar() + '<div id="con-posts">' + loading('Loading posts...') + '</div>');
-  out += '<h2>What your WhatsApp agent has been taught</h2>';
-  out += panel('Lessons', '<div id="con-les">' + loading('Loading...') + '</div>');
-  setTimeout(function(){
-    var go = document.getElementById('con-go');
-    if (go) go.onclick = consoleSend;
-    var box = document.getElementById('con-in');
-    if (box) box.onkeydown = function(e){
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); consoleSend(); }
-    };
-    wireConsoleMic();
-    loadPosts();
-    loadLessons();
-  }, 0);
-  return out;
-};
 
 /* ---- Jarvis voice helpers ----
    jarvisHeard: the phrase heard in THIS listening session. Chrome (Android
@@ -812,50 +759,7 @@ function loadLessons(){
   });
 }
 
-VIEWS.reports = function(){
-  var out = '<h1>Reports</h1><p class="sub">Analysis produced for this business.</p>';
-  out += panel('Latest report', '<div id="rep">' + loading('Loading your report...') + '</div>');
-  api('/portal/report').then(function(r){
-    var el = document.getElementById('rep');
-    if (!el) return;
-    if (!r.ok) { el.innerHTML = errState('The report service returned ' + r.status + '.'); return; }
-    var d = r.data || {};
-    if (d.status === 'pending' || !d || Object.keys(d).length === 0) {
-      el.innerHTML = empty('Nothing to show yet', d.message || 'Your analysis has not produced a report yet.');
-      return;
-    }
-    el.innerHTML = '<div style="padding:16px"><pre class="mono" style="white-space:pre-wrap;margin:0;font-size:12px;color:var(--muted)">' +
-      esc(JSON.stringify(d, null, 2)) + '</pre></div>';
-  });
-  return out;
-};
 
-VIEWS.settings = function(){
-  var out = '<h1>Business Settings</h1><p class="sub">The information your AI workforce uses to represent this business.</p>';
-  var cfg = S.config;
-  if (!cfg) return out + panel('Business settings', errState('The settings service did not respond.'));
-  var ob = cfg.onboarding || {};
-  var c = cfg.config || {};
-  var rows = (ob.done || []).map(function(s){
-    return '<tr><td>' + esc(s.label) + '</td><td><span class="tag" style="color:var(--growth)">Provided</span></td></tr>';
-  }).concat((ob.missing || []).map(function(s){
-    return '<tr><td>' + esc(s.label) + '</td><td><span class="tag">Not set</span></td></tr>';
-  })).join('');
-  out += panel('Business Brain — ' + (ob.percent || 0) + '% complete',
-    '<div class="tbl-wrap"><table><thead><tr><th>Item</th><th>Status</th></tr></thead><tbody>' +
-    (rows || '<tr><td colspan="2">No setup steps defined.</td></tr>') + '</tbody></table></div>',
-    '<a class="btn" href="/onboarding">Edit</a>');
-  var svc = c.services;
-  out += '<h2>Services</h2>';
-  if (Array.isArray(svc) && svc.length) {
-    out += panel('Services', '<div class="tbl-wrap"><table><tbody>' + svc.slice(0, 50).map(function(x){
-      return '<tr><td>' + esc(typeof x === 'string' ? x : (x.name || JSON.stringify(x))) + '</td></tr>';
-    }).join('') + '</tbody></table></div>', '<span class="pill count">' + svc.length + '</span>');
-  } else {
-    out += panel('Services', empty('No services yet', 'Add your services and prices during business setup.'));
-  }
-  return out;
-};
 
 /* ======================================================================
    PART 2 modules. Appended to the Part 1 dashboard, which is otherwise
@@ -911,45 +815,6 @@ NAV.forEach(function(g){
   });
 });
 
-VIEWS.customers = function(){
-  var out = '<h1>Customers</h1><p class="sub">Everyone this business has served.</p>';
-  if (!need('customers', '/business/customers')) return out + panel('Customers', loading('Loading customers...'));
-  if (S.customers === null) return out + panel('Customers', errState('The customers service did not respond.'));
-  var items = S.customers.items || [];
-  out += '<div class="panel"><div class="panel-head"><div class="panel-title">Add a customer</div></div>' +
-    '<div style="padding:14px 16px;display:flex;gap:8px;flex-wrap:wrap">' +
-    '<input class="fld" id="cname" placeholder="Name" style="flex:2;min-width:150px">' +
-    '<input class="fld" id="cphone" placeholder="Phone" style="flex:1;min-width:120px">' +
-    '<input class="fld" id="cemail" placeholder="Email (optional)" style="flex:1;min-width:140px">' +
-    '<button class="btn primary" id="caddbtn">Add</button></div>' + actbar() + '</div>';
-  out += '<h2>All customers</h2>';
-  if (!items.length) {
-    out += panel('Customers', empty('No customers yet', 'Add one above, or convert a lead.'));
-  } else {
-    var rows = items.map(function(c){
-      return '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.phone || '—') + '</td>' +
-        '<td>' + esc(c.email || '—') + '</td><td><span class="tag">' + esc(c.status || '—') + '</span></td>' +
-        '<td>' + esc(c.source || '—') + '</td></tr>';
-    }).join('');
-    out += panel('Customers', '<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Phone</th>' +
-      '<th>Email</th><th>Status</th><th>Source</th></tr></thead><tbody>' + rows + '</tbody></table></div>',
-      '<span class="pill count">' + items.length + '</span>');
-  }
-  setTimeout(function(){
-    var b = document.getElementById('caddbtn');
-    if (!b) return;
-    b.onclick = function(){
-      var name = document.getElementById('cname').value.trim();
-      if (!name) { document.getElementById('actmsg').textContent = 'A name is required.'; return; }
-      act('/business/customers', {method:'POST', body:{
-        name: name,
-        phone: document.getElementById('cphone').value.trim() || null,
-        email: document.getElementById('cemail').value.trim() || null
-      }}, 'Customer added.').then(function(r){ if (r.ok) need('customers','/business/customers',true); });
-    };
-  }, 0);
-  return out;
-};
 
 VIEWS.revenue = function(){
   var out = '<h1>Sales / Revenue</h1><p class="sub">Money this business has taken, last 90 days.</p>';
@@ -1072,61 +937,6 @@ var BIZ_SECTIONS = [
 ];
 var BIZ_TAB = 'services';
 
-VIEWS.settings = function(){
-  var out = '<h1>Business Settings</h1>' +
-    '<p class="sub">What your AI workforce knows about this business. It only ever uses what you save here.</p>';
-  var sec = BIZ_SECTIONS.filter(function(s){ return s.key === BIZ_TAB; })[0] || BIZ_SECTIONS[0];
-
-  out += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">' +
-    BIZ_SECTIONS.map(function(s){
-      return '<button class="btn biztab' + (s.key === BIZ_TAB ? ' primary' : '') +
-             '" data-tab="' + s.key + '">' + esc(s.label) + '</button>';
-    }).join('') + '</div>';
-
-  if (!need('biz_' + sec.key, '/business/' + sec.key)) return out + panel(sec.label, loading('Loading ' + sec.label.toLowerCase() + '...'));
-  var data = S['biz_' + sec.key];
-  if (data === null) return out + panel(sec.label, errState('Could not load ' + sec.label.toLowerCase() + '.'));
-  var items = data.items || [];
-
-  out += '<div class="panel"><div class="panel-head"><div class="panel-title">Add ' + esc(sec.label.toLowerCase()) + '</div></div>' +
-    '<div style="padding:14px 16px;display:flex;gap:8px;flex-wrap:wrap">' +
-    sec.cols.map(function(c){
-      return '<input class="fld bizf" data-f="' + c + '" placeholder="' + esc(sec.ph[c] || c) +
-             '" style="flex:1;min-width:120px">';
-    }).join('') +
-    '<button class="btn primary" id="bizadd">Add</button></div>' + actbar() + '</div>';
-
-  out += '<h2>' + esc(sec.label) + '</h2>';
-  if (!items.length) {
-    out += panel(sec.label, empty('Nothing added yet', 'Add your first entry above.'));
-  } else {
-    out += panel(sec.label, '<div class="tbl-wrap"><table><thead><tr>' +
-      sec.cols.map(function(c){ return '<th>' + esc(c.replace(/_/g, ' ')) + '</th>'; }).join('') +
-      '<th></th></tr></thead><tbody>' + items.map(function(it){
-        return '<tr>' + sec.cols.map(function(c){
-          return '<td>' + (it[c] === null || it[c] === undefined || it[c] === '' ? '—' : esc(it[c])) + '</td>';
-        }).join('') + '<td><button class="btn bizdel" data-id="' + esc(it.id) + '">Remove</button></td></tr>';
-      }).join('') + '</tbody></table></div>', '<span class="pill count">' + items.length + '</span>');
-  }
-
-  out += '<h2>Import from a paste</h2>';
-  out += '<div class="panel"><div style="padding:14px 16px">' +
-    '<div class="card-note" style="margin-bottom:8px">Paste your service list. Nothing is saved until you review and confirm.</div>' +
-    '<textarea id="pastebox" class="fld" style="width:100%;min-height:110px;font-family:inherit" ' +
-    'placeholder="Laser Hair Removal&#10;Full Face - 15,000&#10;Underarms: PKR 8000"></textarea>' +
-    '<div style="margin-top:10px"><button class="btn primary" id="parsebtn">Read this</button></div>' +
-    '<div id="proposals"></div></div></div>';
-
-  out += '<h2>Publish to your AI workforce</h2>';
-  out += '<div class="panel"><div style="padding:16px">' +
-    '<div class="card-note" style="margin-bottom:10px">Publishing makes the information above authoritative: ' +
-    'your agents will quote these prices and hours. Sections you have not filled in are left untouched.</div>' +
-    '<button class="btn primary" id="pubbtn">Publish business brain</button>' +
-    '<div id="pubout" class="card-note" style="margin-top:10px"></div></div></div>';
-
-  setTimeout(function(){ wireSettings(sec); }, 0);
-  return out;
-};
 
 /* Input styling for the Part 2 forms, injected here so the Part 1 stylesheet
    stays untouched. */
@@ -1305,76 +1115,6 @@ function select(id, items, placeholder, labelKey){
 
 var APPT_WHEN = 'upcoming';
 
-VIEWS.appointments = function(){
-  var out = '<h1>CRM / Appointments</h1><p class="sub">Who is booked, with whom, and what it is worth.</p>';
-  var key = 'appts_' + APPT_WHEN;
-  if (!need(key, '/operations/appointments?when=' + APPT_WHEN))
-    return out + panel('Appointments', loading('Loading the diary...'));
-  if (S[key] === null)
-    return out + panel('Appointments', errState('The appointments service did not respond.'));
-  need('customers', '/business/customers');
-  need('services', '/business/services');
-  need('staff', '/business/staff');
-
-  var tabs = ['upcoming', 'past', 'all'].map(function(w){
-    return '<button class="btn' + (w === APPT_WHEN ? ' primary' : '') +
-           '" data-when="' + w + '">' + w.charAt(0).toUpperCase() + w.slice(1) + '</button>';
-  }).join(' ');
-  out += '<div style="display:flex;gap:8px;margin:10px 0">' + tabs + '</div>';
-
-  out += '<h2>Book an appointment</h2>';
-  out += row() +
-    select('apcust', (S.customers && S.customers.items) || [], 'Customer (optional)') +
-    select('apsvc', (S.services && S.services.items) || [], 'Service (optional)') +
-    select('apstaff', (S.staff && S.staff.items) || [], 'Staff (optional)') +
-    '</div>' + row() +
-    inp('apstart', 'Starts at', 'datetime-local', 190) +
-    inp('apprice', 'Price', 'number', 110) +
-    inp('apnotes', 'Notes', 'text', 160) +
-    '<button class="btn primary" id="apadd">Book</button></div>' + actbar();
-
-  var rows = S[key].appointments || [];
-  if (!rows.length) {
-    out += panel('Appointments', empty('Nothing here yet',
-      APPT_WHEN === 'upcoming' ? 'Book one above and it appears here.' : 'No past appointments recorded.'));
-  } else {
-    var body = rows.map(function(a){
-      return '<tr><td>' + when(a.starts_at) + '</td>' +
-        '<td>' + esc(a.customer_name || '—') + '<div class="card-note">' + esc(a.customer_phone || '') + '</div></td>' +
-        '<td>' + esc(a.service_name || a.service_text || '—') + '</td>' +
-        '<td>' + esc(a.staff_name || '—') + '</td>' +
-        '<td><span class="tag">' + esc(a.status || '—') + '</span></td>' +
-        '<td>' + money(a.price, a.currency) + '</td></tr>';
-    }).join('');
-    out += panel('Appointments',
-      '<div class="tbl-wrap"><table><thead><tr><th>When</th><th>Customer</th><th>Service</th>' +
-      '<th>Staff</th><th>Status</th><th>Price</th></tr></thead><tbody>' + body + '</tbody></table></div>',
-      '<span class="pill count">' + rows.length + '</span>');
-  }
-
-  setTimeout(function(){
-    document.querySelectorAll('[data-when]').forEach(function(b){
-      b.onclick = function(){ APPT_WHEN = b.getAttribute('data-when'); renderShell(); };
-    });
-    var add = document.getElementById('apadd');
-    if (!add) return;
-    add.onclick = function(){
-      var starts = val('apstart');
-      if (!starts) { say('An appointment needs a start time.'); return; }
-      act('/business/appointments', {method:'POST', body:{
-        customer_id: val('apcust') || null,
-        service_id: val('apsvc') || null,
-        staff_id: val('apstaff') || null,
-        starts_at: starts,
-        price: numv('apprice'),
-        notes: val('apnotes') || null
-      }}, 'Appointment booked.').then(function(r){
-        if (r.ok) need(key, '/operations/appointments?when=' + APPT_WHEN, true);
-      });
-    };
-  }, 0);
-  return out;
-};
 
 var NEW_LINES = [];
 var OPEN_INVOICE = null;
@@ -1568,57 +1308,6 @@ VIEWS.invoices = function(){
   return out;
 };
 
-VIEWS.expenses = function(){
-  var out = '<h1>Money / Expenses</h1><p class="sub">What the business spent, and on what.</p>';
-  if (!need('expenses', '/business/expenses'))
-    return out + panel('Expenses', loading('Loading expenses...'));
-  if (S.expenses === null)
-    return out + panel('Expenses', errState('The expense service did not respond.'));
-
-  out += '<h2>Record an expense</h2>' + row() +
-    inp('exdesc', 'What was it for?', 'text', 200) +
-    inp('examt', 'Amount', 'number', 110) +
-    inp('excat', 'Category', 'text', 130) +
-    inp('exdate', 'Date', 'date', 150) +
-    '<button class="btn primary" id="exadd">Record</button></div>' + actbar();
-
-  var items = (S.expenses && S.expenses.items) || [];
-  if (!items.length) {
-    out += panel('Expenses', empty('No expenses recorded', 'Record one above.'));
-  } else {
-    var total = 0;
-    var body = items.map(function(e){
-      total += Number(e.amount || 0);
-      return '<tr><td>' + onlyDate(e.spent_on) + '</td><td>' + esc(e.description) + '</td>' +
-        '<td><span class="tag">' + esc(e.category || 'general') + '</span></td>' +
-        '<td>' + money(e.amount, e.currency) + '</td></tr>';
-    }).join('');
-    out += panel('Expenses',
-      '<div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th>' +
-      '<th>Amount</th></tr></thead><tbody>' + body + '</tbody></table></div>' +
-      '<div class="card-note" style="margin-top:8px">' + items.length + ' recorded, ' +
-      money(total) + ' in total.</div>',
-      '<span class="pill count">' + items.length + '</span>');
-  }
-
-  setTimeout(function(){
-    var b = document.getElementById('exadd');
-    if (!b) return;
-    b.onclick = function(){
-      var desc = val('exdesc'), amt = numv('examt');
-      if (!desc) { say('An expense needs a description.'); return; }
-      if (amt === null || !(amt > 0)) { say('An expense needs an amount.'); return; }
-      act('/business/expenses', {method:'POST', body:{
-        description: desc, amount: amt,
-        category: val('excat') || 'general',
-        spent_on: val('exdate') || null
-      }}, 'Expense recorded.').then(function(r){
-        if (r.ok) need('expenses', '/business/expenses', true);
-      });
-    };
-  }, 0);
-  return out;
-};
 
 VIEWS.dayclose = function(){
   var out = '<h1>Money / Day Close</h1>' +
@@ -1718,145 +1407,7 @@ VIEWS.pnl = function(){
   return out;
 };
 
-VIEWS.catalogue = function(){
-  var out = '<h1>Catalogue / Services & Products</h1>' +
-    '<p class="sub">What the business sells. This is also what the AI quotes from, so keep it right.</p>';
-  if (!need('services', '/business/services'))
-    return out + panel('Services', loading('Loading the catalogue...'));
-  if (S.services === null)
-    return out + panel('Services', errState('The catalogue service did not respond.'));
-  need('products', '/business/products');
 
-  out += '<h2>Add a service</h2>' + row() +
-    inp('svname', 'Service name', 'text', 180) +
-    inp('svprice', 'Price', 'number', 110) +
-    inp('svmins', 'Minutes', 'number', 100) +
-    inp('svcat', 'Category', 'text', 130) +
-    '<button class="btn primary" id="svadd">Add service</button></div>';
-
-  out += '<h2>Add a product</h2>' + row() +
-    inp('prname', 'Product name', 'text', 180) +
-    inp('prprice', 'Price', 'number', 110) +
-    inp('prsku', 'SKU', 'text', 110) +
-    inp('prcat', 'Category', 'text', 130) +
-    '</div>' + row() +
-    '<label class="card-note" style="display:flex;align-items:center;gap:6px">' +
-    '<input type="checkbox" id="prtrack"> Track stock for this product</label>' +
-    inp('prlow', 'Warn below', 'number', 120) +
-    '<button class="btn primary" id="pradd">Add product</button></div>' + actbar();
-
-  var svcs = (S.services && S.services.items) || [];
-  out += panel('Services', svcs.length
-    ? '<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Price</th>' +
-      '<th>Minutes</th></tr></thead><tbody>' + svcs.map(function(s){
-        return '<tr><td>' + esc(s.name) + '</td><td>' + esc(s.category || '—') + '</td><td>' +
-          money(s.price, s.currency) + '</td><td>' + esc(s.duration_minutes || '—') + '</td></tr>';
-      }).join('') + '</tbody></table></div>'
-    : empty('No services yet', 'Add the ones you sell most often first.'),
-    '<span class="pill count">' + svcs.length + '</span>');
-
-  var prods = (S.products && S.products.items) || [];
-  out += panel('Products', prods.length
-    ? '<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>SKU</th><th>Category</th>' +
-      '<th>Price</th></tr></thead><tbody>' + prods.map(function(p){
-        return '<tr><td>' + esc(p.name) + '</td><td>' + esc(p.sku || '—') + '</td><td>' +
-          esc(p.category || '—') + '</td><td>' + money(p.price, p.currency) + '</td></tr>';
-      }).join('') + '</tbody></table></div>'
-    : empty('No products yet', 'Add anything the business sells over the counter.'),
-    '<span class="pill count">' + prods.length + '</span>');
-
-  setTimeout(function(){
-    var sv = document.getElementById('svadd');
-    if (sv) sv.onclick = function(){
-      var n = val('svname');
-      if (!n) { say('A service needs a name.'); return; }
-      act('/business/services', {method:'POST', body:{
-        name: n, price: numv('svprice'), duration_minutes: numv('svmins'),
-        category: val('svcat') || null
-      }}, 'Service added.').then(function(r){
-        if (r.ok) need('services', '/business/services', true);
-      });
-    };
-    var pr = document.getElementById('pradd');
-    if (pr) pr.onclick = function(){
-      var n = val('prname');
-      if (!n) { say('A product needs a name.'); return; }
-      act('/business/products', {method:'POST', body:{
-        name: n, price: numv('prprice'), sku: val('prsku') || null,
-        category: val('prcat') || null,
-        track_stock: !!(document.getElementById('prtrack') || {}).checked,
-        low_stock_threshold: numv('prlow')
-      }}, 'Product added.').then(function(r){
-        if (r.ok) need('products', '/business/products', true);
-      });
-    };
-  }, 0);
-  return out;
-};
-
-VIEWS.inventory = function(){
-  var out = '<h1>Catalogue / Inventory</h1>' +
-    '<p class="sub">Stock on hand, added up from every movement rather than stored as a number someone can edit.</p>';
-  if (!need('inventory', '/operations/inventory'))
-    return out + panel('Inventory', loading('Counting stock...'));
-  if (S.inventory === null)
-    return out + panel('Inventory', errState('The inventory service did not respond.'));
-  var inv = S.inventory, prods = inv.products || [];
-
-  out += '<div class="grid">' +
-    metric('Products', prods.length) +
-    metric('Stock tracked', inv.tracked_count) +
-    metric('Low on stock', inv.low_stock_count,
-           inv.low_stock_count ? 'Reorder these' : 'Nothing below its threshold') +
-    '</div>';
-
-  if ((inv.low_stock || []).length) {
-    out += panel('Running low',
-      '<div class="tbl-wrap"><table><thead><tr><th>Product</th><th>On hand</th>' +
-      '<th>Threshold</th></tr></thead><tbody>' + inv.low_stock.map(function(p){
-        return '<tr><td>' + esc(p.name) + '</td><td>' + esc(p.on_hand) + '</td><td>' +
-          esc(p.low_stock_threshold) + '</td></tr>';
-      }).join('') + '</tbody></table></div>');
-  }
-
-  out += '<h2>Record a stock movement</h2>' + row() +
-    select('stprod', prods, 'Product') +
-    '<select class="fld" id="stkind" style="flex:1;min-width:140px">' +
-    '<option value="purchase">Purchase in</option><option value="sale">Sale out</option>' +
-    '<option value="adjustment">Adjustment</option><option value="return">Return</option>' +
-    '<option value="opening">Opening balance</option></select>' +
-    inp('stqty', 'Quantity (+ in, - out)', 'number', 160) +
-    inp('streason', 'Reason', 'text', 150) +
-    '<button class="btn primary" id="stadd">Record</button></div>' + actbar();
-
-  out += panel('Stock on hand', prods.length
-    ? '<div class="tbl-wrap"><table><thead><tr><th>Product</th><th>SKU</th><th>Tracked</th>' +
-      '<th>On hand</th><th>Last movement</th></tr></thead><tbody>' + prods.map(function(p){
-        return '<tr><td>' + esc(p.name) + '</td><td>' + esc(p.sku || '—') + '</td>' +
-          '<td>' + (p.track_stock ? '<span class="tag">yes</span>' : '—') + '</td>' +
-          '<td>' + (p.track_stock ? esc(p.on_hand) : '—') + '</td>' +
-          '<td>' + when(p.last_movement) + '</td></tr>';
-      }).join('') + '</tbody></table></div>'
-    : empty('No products yet', 'Add products in the catalogue first.'),
-    '<span class="pill count">' + prods.length + '</span>');
-
-  setTimeout(function(){
-    var b = document.getElementById('stadd');
-    if (!b) return;
-    b.onclick = function(){
-      var pid = val('stprod'), q = numv('stqty');
-      if (!pid) { say('Pick a product.'); return; }
-      if (q === null || q === 0) { say('A movement needs a non-zero quantity.'); return; }
-      act('/business/stock_movements', {method:'POST', body:{
-        product_id: pid, kind: val('stkind') || 'adjustment',
-        quantity_delta: q, reason: val('streason') || null
-      }}, 'Movement recorded.').then(function(r){
-        if (r.ok) need('inventory', '/operations/inventory', true);
-      });
-    };
-  }, 0);
-  return out;
-};
 
 
 /* ---------- Part 3: Reports the owner can actually read ----------
@@ -2003,124 +1554,6 @@ VIEWS.reports = function(){
 
 var OPEN_PACKAGE = null;
 
-VIEWS.packages = function(){
-  var out = '<h1>Catalogue / Packages</h1>' +
-    '<p class="sub">Bundles you sell as one price. What is inside is listed, not implied.</p>';
-  if (!need('packages', '/business/packages'))
-    return out + panel('Packages', loading('Loading packages...'));
-  if (S.packages === null)
-    return out + panel('Packages', errState('The catalogue service did not respond.'));
-  need('services', '/business/services');
-  need('products', '/business/products');
-
-  out += '<h2>Create a package</h2>' + row() +
-    inp('pkname', 'Package name', 'text', 180) +
-    inp('pkprice', 'Price', 'number', 110) +
-    inp('pkdays', 'Valid for (days)', 'number', 140) +
-    '</div>' + row() +
-    inp('pkdesc', 'Description', 'text', 220) +
-    inp('pkterms', 'Terms', 'text', 180) +
-    '<button class="btn primary" id="pkadd">Create</button></div>' + actbar();
-
-  var pkgs = (S.packages && S.packages.items) || [];
-  if (!pkgs.length) {
-    out += panel('Packages', empty('No packages yet',
-      'Create one above, then add the services and products it includes.'));
-  } else {
-    var body = pkgs.map(function(p){
-      return '<tr><td><strong>' + esc(p.name) + '</strong>' +
-        (p.description ? '<div class="card-note">' + esc(p.description) + '</div>' : '') + '</td>' +
-        '<td>' + money(p.price, p.currency) + '</td>' +
-        '<td>' + (p.validity_days ? esc(p.validity_days) + ' days' : '—') + '</td>' +
-        '<td>' + (p.active ? '<span class="tag">active</span>' : '—') + '</td>' +
-        '<td><button class="btn" data-pkg="' + esc(p.id) + '">' +
-        (OPEN_PACKAGE === p.id ? 'Close' : 'Contents') + '</button></td></tr>';
-    }).join('');
-    out += panel('Packages',
-      '<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Price</th><th>Valid</th>' +
-      '<th>Status</th><th></th></tr></thead><tbody>' + body + '</tbody></table></div>',
-      '<span class="pill count">' + pkgs.length + '</span>');
-  }
-
-  if (OPEN_PACKAGE) {
-    var pkg = null;
-    pkgs.forEach(function(p){ if (p.id === OPEN_PACKAGE) pkg = p; });
-    var ik = 'pkgitems';
-    if (!need(ik, '/business/package_items')) {
-      out += panel('Contents', loading('Loading contents...'));
-    } else if (S[ik] === null) {
-      out += panel('Contents', errState('The package contents could not be read.'));
-    } else {
-      var svcs = (S.services && S.services.items) || [];
-      var prods = (S.products && S.products.items) || [];
-      var nameOf = function(list, id){
-        var hit = '—';
-        list.forEach(function(x){ if (x.id === id) hit = x.name; });
-        return hit;
-      };
-      var items = ((S[ik] && S[ik].items) || []).filter(function(i){
-        return i.package_id === OPEN_PACKAGE;
-      });
-      var inner = items.length
-        ? '<div class="tbl-wrap"><table><thead><tr><th>Item</th><th>Kind</th><th>Quantity</th>' +
-          '</tr></thead><tbody>' + items.map(function(i){
-            var isService = !!i.service_id;
-            return '<tr><td>' + esc(isService ? nameOf(svcs, i.service_id) : nameOf(prods, i.product_id)) +
-              '</td><td><span class="tag">' + (isService ? 'service' : 'product') + '</span></td>' +
-              '<td>' + esc(i.quantity) + '</td></tr>';
-          }).join('') + '</tbody></table></div>'
-        : empty('Nothing in this package yet',
-                'A package with no contents is a price with nothing behind it. Add at least one item.');
-
-      var picks = svcs.map(function(x){ return {id:'s:' + x.id, name:x.name}; })
-        .concat(prods.map(function(x){ return {id:'p:' + x.id, name:x.name}; }));
-      inner += '<h3>Add an item</h3>' + row() +
-        select('pkitem', picks, 'Pick a service or product') +
-        inp('pkqty', 'Quantity', 'number', 110) +
-        '<button class="btn primary" id="pkitemadd">Add to package</button></div>' + actbar();
-
-      out += panel('Inside ' + esc(pkg ? pkg.name : 'this package'), inner,
-        pkg ? '<span class="tag">' + money(pkg.price, pkg.currency) + '</span>' : '');
-    }
-  }
-
-  setTimeout(function(){
-    document.querySelectorAll('[data-pkg]').forEach(function(b){
-      b.onclick = function(){
-        var id = b.getAttribute('data-pkg');
-        OPEN_PACKAGE = (OPEN_PACKAGE === id) ? null : id;
-        renderShell();
-      };
-    });
-    var mk = document.getElementById('pkadd');
-    if (mk) mk.onclick = function(){
-      var n = val('pkname');
-      if (!n) { say('A package needs a name.'); return; }
-      act('/business/packages', {method:'POST', body:{
-        name: n, price: numv('pkprice'), validity_days: numv('pkdays'),
-        description: val('pkdesc') || null, terms: val('pkterms') || null
-      }}, 'Package created.').then(function(r){
-        if (r.ok) {
-          OPEN_PACKAGE = (r.data && r.data.item && r.data.item.id) || null;
-          need('packages', '/business/packages', true);
-        }
-      });
-    };
-    var ia = document.getElementById('pkitemadd');
-    if (ia) ia.onclick = function(){
-      var sel = val('pkitem');
-      if (!sel) { say('Pick a service or product to add.'); return; }
-      var payload = {package_id: OPEN_PACKAGE, quantity: numv('pkqty') || 1};
-      if (sel.indexOf('s:') === 0) payload.service_id = sel.slice(2);
-      else payload.product_id = sel.slice(2);
-      act('/business/package_items', {method:'POST', body: payload},
-          'Added to the package.').then(function(r){
-        if (r.ok) need('pkgitems', '/business/package_items', true);
-      });
-    };
-  }, 0);
-  return out;
-};
 
 function currentView(){
   var h = (location.hash || '').replace(/^#\/?/, '').split('?')[0];
@@ -2300,38 +1733,6 @@ function ibxOpen(sid){
     renderShell();
   });
 }
-VIEWS.inbox = function(){
-  var out = '<h1>WhatsApp Inbox</h1><p class="sub">Every WhatsApp conversation your AI agent has had with customers.</p>';
-  ibxLoad(false);
-  if (IBX.data === undefined) return out + panel('Conversations', loading('Reading your conversations...'));
-  var head = '<button class="btn" id="ibx_ref">Refresh</button>';
-  // An error must still offer Refresh: an agent that comes back (or a number
-  // just re-linked) used to need a full page reload to show its chats.
-  if (IBX.data.error) return out + panel('Conversations', errState(IBX.data.error +
-    ' If your number is not connected yet, open WhatsApp in the menu and scan the QR code.'), head) + ibxWire();
-  var chats = IBX.data.chats || [];
-  if (!chats.length) return out + panel('Conversations', empty('No conversations yet',
-    IBX.data.connected ? 'When customers message your WhatsApp, their chats appear here.'
-                       : 'Connect your WhatsApp number first: open WhatsApp in the menu and scan the QR code.'), head) + ibxWire();
-  var list = chats.map(function(c){
-    return '<div class="ibx-item' + (IBX.sel === c.session_id ? ' sel' : '') + '" data-sid="' + esc(c.session_id) + '">' +
-      '<div style="display:flex;justify-content:space-between;gap:8px"><strong>' + esc(c.phone ? '+' + c.phone : 'Unknown number') +
-      '</strong><span class="card-note">' + esc(c.messages) + ' msgs</span></div>' +
-      '<div class="card-note" style="margin-top:4px">' + esc(c.last || '') + '</div>' +
-      '<div class="card-note">' + (c.last_at ? when(c.last_at) : '') + '</div></div>';
-  }).join('');
-  var chat;
-  if (!IBX.sel) chat = empty('Select a conversation', 'Tap a chat on the left to read it.');
-  else if (IBX.msgs === null) chat = loading('Opening the chat...');
-  else if (IBX.msgs.error) chat = errState(IBX.msgs.error);
-  else chat = IBX.msgs.map(function(m){
-    return '<div class="bub ' + (m.role === 'assistant' ? 'assistant' : 'user') + '">' + esc(m.content) +
-           '<div class="t">' + (m.role === 'assistant' ? 'Your agent' : 'Customer') + (m.at ? ' · ' + when(m.at) : '') + '</div></div>';
-  }).join('') || empty('Empty chat', '');
-  out += panel('Conversations', '<div class="ibx"><div class="ibx-list">' + list + '</div><div class="ibx-chat" id="ibx_chat">' +
-    chat + '</div></div>', '<span class="pill count">' + chats.length + '</span> ' + head);
-  return out + ibxWire();
-};
 function ibxWire(){
   setTimeout(function(){
     var r = document.getElementById('ibx_ref');
@@ -4138,25 +3539,6 @@ function consoleSend(){
     else jvSet('idle');
   });
 }
-VIEWS.console = function(){
-  var out = '<h1>Jarvis</h1><p class="sub">Tell the platform what to change, in your own words: prices, services, staff, hours, how your dashboard looks, or what your WhatsApp agent should know.</p>';
-  out += '<div class="panel jv-panel"><div class="jv-head"><div id="jv-orb" class="jv-orb ' + JV.state + '"></div>' +
-    '<div style="flex:1;min-width:0"><div id="jv-state" class="jv-state">' + JV_LABEL[JV.state] + '</div><div id="jv-msg" class="card-note">' + esc(JV.msg) + '</div></div>' +
-    '<button id="con-mic" class="btn primary jv-mic" type="button">● LISTEN</button>' +
-    '<button id="con-lang" class="btn" type="button" title="Voice language: English or Urdu" onclick="jarvisToggleLang(this)">EN</button></div>' +
-    '<div style="padding:0 16px 16px"><textarea id="con-in" class="fld" rows="3" style="width:100%" placeholder="Teach my WhatsApp agent: hair PRP is 12,000 per session, three for 30,000.&#10;Or: add a new service called HydraFacial at 8,000."></textarea>' +
-    '<div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button id="con-go" class="btn">Send</button><span class="card-note">Enter sends · Shift+Enter for a new line</span></div>' +
-    '<div id="con-out" style="margin-top:14px"></div></div></div>';
-  out += '<h2>Social posts</h2>' + panel('Waiting for your approval', actbar() + '<div id="con-posts">' + loading('Loading posts...') + '</div>');
-  out += '<h2>What your WhatsApp agent has been taught</h2>' + panel('Lessons', '<div id="con-les">' + loading('Loading...') + '</div>');
-  setTimeout(function(){
-    var go = document.getElementById('con-go'); if (go) go.onclick = consoleSend;
-    var box = document.getElementById('con-in');
-    if (box) box.onkeydown = function(e){ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); consoleSend(); } };
-    wireConsoleMic(); loadPosts(); loadLessons();
-  }, 0);
-  return out;
-};
 (function(){
   var st = document.createElement('style');
   st.textContent =
@@ -5565,6 +4947,8 @@ function jvYesNo(msg){
   var m = String(msg).toLowerCase().replace(/[.!,?؟۔]/g, ' ').replace(/\s+/g, ' ').trim();
   if (m.length > 40) return null;
   if (/^(yes|yeah|yep|yup|sure|ok|okay|confirm|go ahead|do it|haan|han|ha|haa|ji|jee|g|theek|thik|kar do|kardo|bilkul|ہاں|جی|ٹھیک|بالکل)( |$)/.test(m)) return 'yes';
+  if (/^(post it|post kar|post karo|post kardo|post now|publish|share it|daal do|dal do|پوسٹ کر)/.test(m)) return 'yes';
+  if (/^(keep (it )?(as )?(a )?draft|draft|baad me|baad mein|abhi nahi|later)( |$)/.test(m)) return 'no';
   if (/^(no|nope|cancel|stop|dont|don't|leave it|nahi|nahin|nai|na|mat|نہیں|نہ)( |$)/.test(m)) return 'no';
   return null;
 }
@@ -5586,7 +4970,7 @@ function jvConfirm(yes){
   var p = JV.pending; JV.pending = null;
   if (!p) return;
   try { if (JV.rec) JV.rec.abort(); } catch (e) {}
-  if (!yes) { jvHist('user', 'No'); jvLocal('Okay, I\'ve left it as it is.'); return; }
+  if (!yes) { jvHist('user', 'No'); jvLocal(p.no || 'Okay, I\'ve left it as it is.'); return; }
   consoleSend({ confirm: p.confirm, label: 'Yes' });
 }
 function jvLocal(reply){
@@ -5598,10 +4982,38 @@ function jvFreshData(){
   Object.keys(NEEDED).forEach(function(k){ S[k] = undefined; LOADING[k] = false; });
   if (typeof APT !== 'undefined') { APT.data = undefined; }
 }
+/* Jarvis designs the post: its headline and line go on the first picture (or
+   on the brand colour when there is none) with the logo, using the Posts
+   designer's own painter, and the result replaces that picture in the draft.
+   Resolves with the designed picture's link, or null when nothing changed. */
+function jvDesignDraft(post, design, srcs){
+  if (!post || !design || !(design.head || design.sub)) return Promise.resolve(null);
+  var first = srcs && srcs[0];
+  var st = { img: null, img2: null, size: 'square', zoom: 1, ox: 0, oy: 0, head: design.head || '', sub: design.sub || '',
+             pos: first ? 'bottom' : 'center', band: !!first, bg: edBrandColor(), fg: '#ffffff', logo: false, tpl: '' };
+  return (first ? edLoadImg(first).then(function(i){ st.img = i; }) : Promise.resolve())
+    .then(edLogo).then(function(logo){
+      st.logo = !!logo;
+      var cv = document.createElement('canvas'); edPaint(cv, st);
+      return api('/social/media', { method: 'POST', body: { image: cv.toDataURL('image/jpeg', 0.9) } });
+    }).then(function(r){
+      if (!r || !r.ok) throw new Error('upload');
+      var urls = (post.image_urls || []).slice();
+      if (first) urls[0] = r.data.url; else urls = [r.data.url];
+      return api('/social/posts/' + post.id, { method: 'PATCH', body: { image_urls: urls, platforms: design.platforms || post.platforms } })
+        .then(function(p){ if (!p || !p.ok) throw new Error('save'); return r.data.url; });
+    }).catch(function(){ return null; });   // the plain draft is still there
+}
 function consoleSend(opt){
   var box = document.getElementById('con-in');
   if (JV.state === 'processing') return;
   var body, msg;
+  if (opt && opt.confirm && JV.designing) {
+    // a "post it" before the designed picture is in the draft waits for it
+    jvSet('processing', 'Finishing the design…');
+    JV.designing.then(function(){ jvSet('idle', ''); consoleSend(opt); });
+    return;
+  }
   if (opt && opt.confirm) { body = { confirm: opt.confirm }; msg = opt.label || 'Yes'; }
   else {
     if (!box || !box.value.trim()) return;
@@ -5610,7 +5022,7 @@ function consoleSend(opt){
     if (JV.pending) {
       var p = JV.pending, yn = jvYesNo(msg); JV.pending = null;
       if (yn === 'yes') { box.value = ''; return consoleSend({ confirm: p.confirm, label: msg }); }
-      if (yn === 'no') { box.value = ''; jvHist('user', msg); return jvLocal('Okay, I\'ve left it as it is.'); }
+      if (yn === 'no') { box.value = ''; jvHist('user', msg); return jvLocal(p.no || 'Okay, I\'ve left it as it is.'); }
     }
     body = { message: msg, history: JV.hist.slice(-8) };
     if (jvImgUrls().length) body.image_urls = jvImgUrls();
@@ -5635,8 +5047,22 @@ function consoleSend(opt){
         if (d.kind === 'teach') { extra = '<div class="jv-x">Your agent will now follow: <em>' + esc(d.lesson || '') + '</em></div>'; loadLessons(); }
         if (d.kind === 'dashboard') { PREFS = d.prefs || PREFS; applyBrand(); }
         if (d.kind === 'post') {
-          extra = '<div class="jv-x">Nothing is public yet. <a href="#/needshuman">Review it in Needs Human</a></div>';
-          JV.imgs = []; jvRenderAttach(); loadPosts();
+          var srcs = jvImgs().map(function(m){ return m.src; });
+          JV.imgs = []; jvRenderAttach();
+          if (d.confirm) JV.pending = { confirm: d.confirm, no: d.no_reply };
+          extra = '<div class="jv-x"><div id="jv-prev" class="jv-prev">' + (d.design ? '<span class="card-note">Designing the picture…</span>' : '') + '</div>' +
+                  (d.confirm ? '<button class="btn primary" type="button" onclick="jvConfirm(true)">Post it now</button> ' +
+                               '<button class="btn" type="button" onclick="jvConfirm(false)">Keep as draft</button> ' : '') +
+                  '<a class="btn" href="#/posts">Edit on Posts</a></div>';
+          JV.designing = jvDesignDraft(d.post, d.design, srcs).then(function(url){
+            JV.designing = null;
+            var pv = document.getElementById('jv-prev');
+            var show = url || (d.post && (d.post.image_urls || [])[0]);
+            JV.extra = JV.extra.replace(/<div id="jv-prev" class="jv-prev">[\s\S]*?<\/div>/,
+              '<div id="jv-prev" class="jv-prev">' + (show ? '<img src="' + esc(show) + '" alt="The post picture">' : '') + '</div>');
+            if (pv) pv.innerHTML = show ? '<img src="' + esc(show) + '" alt="The post picture">' : '';
+            if (typeof loadPosts === 'function') loadPosts();
+          });
         }
         if (d.kind === 'business') { need('biz_' + d.resource, '/business/' + d.resource, true); }
         if (d.kind === 'confirm') {
@@ -5736,6 +5162,7 @@ VIEWS.console = function(){
     '.jv-b.me{align-self:flex-end;background:var(--accent);color:var(--fg-on-accent);border-bottom-right-radius:4px}' +
     '.jv-b.ai{align-self:flex-start;background:var(--panel2,rgba(127,127,127,.12));border:1px solid var(--line);border-bottom-left-radius:4px}' +
     '.jv-x{margin-top:8px;font-size:13px;white-space:normal}.jv-x a{color:inherit;font-weight:600}' +
+    '.jv-prev img{display:block;max-width:220px;width:100%;border-radius:10px;margin:6px 0 8px}.jv-x .btn{margin:2px 4px 2px 0}' +
     '.jv-typing span{display:inline-block;width:6px;height:6px;margin:0 2px;border-radius:50%;background:currentColor;opacity:.4;animation:jvdot 1s infinite}' +
     '.jv-typing span:nth-child(2){animation-delay:.15s}.jv-typing span:nth-child(3){animation-delay:.3s}' +
     '@keyframes jvdot{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:.9;transform:translateY(-3px)}}' +
@@ -6950,8 +6377,9 @@ function edCover(x, img, dx, dy, dw, dh, zoom, ox, oy){
   var sx = dx + (dw - w) / 2 + (w - dw) / 2 * (ox || 0), sy = dy + (dh - h) / 2 + (h - dh) / 2 * (oy || 0);
   x.save(); x.beginPath(); x.rect(dx, dy, dw, dh); x.clip(); x.drawImage(img, sx, sy, w, h); x.restore();
 }
-function edDraw(){
-  var cv = document.getElementById('ed_cv'); if (!cv || !ED) return;
+function edDraw(){ var cv = document.getElementById('ed_cv'); if (cv && ED) edPaint(cv, ED); }
+// Paints one design (the editor's ED, or Jarvis's own) onto a canvas.
+function edPaint(cv, ED){
   var sz = ED_SIZES[ED.size], W = sz.w, H = sz.h, x = cv.getContext('2d');
   cv.width = W; cv.height = H;
   x.fillStyle = ED.bg; x.fillRect(0, 0, W, H);
@@ -7876,6 +7304,8 @@ function ordDetailView(id){
     if (n === 'cancelled' && !isOwner()) return;
     acts += '<button class="btn' + (n === 'cancelled' ? '' : ' primary') + '" data-omove="' + n + '">' + esc(NAMES[n] || n) + '</button>';
   });
+  // A website order follows the website: its status and cash-on-delivery payment arrive from there.
+  if (o.website_owned) acts = '<span class="card-note">Change this order in your website admin; it updates here by itself.</span>';
   var who = '<div style="display:grid;gap:4px"><div><b>' + esc(o.customer_name || 'No name') + '</b>' + (o.customer_phone ? ' · ' + esc(o.customer_phone) : '') + '</div>' +
     '<div>' + (o.fulfilment === 'pickup' ? 'Pickup from the shop' : 'Delivery to: ' + esc(o.address || '(no address yet: ask the customer)')) + '</div>' +
     '<div class="card-note">From ' + esc(ORD_SRC[o.source] || o.source) + (o.created_by_type === 'agent' ? ' (taken by your WhatsApp agent)' : '') + ' · ' + when(o.created_at) +
@@ -7890,14 +7320,15 @@ function ordDetailView(id){
     '<tr><td colspan="3"><b>Total</b></td><td><b>' + money(o.total) + '</b></td></tr></tbody></table></div>';
   out += panel('Items', items);
   var payBox = '<div style="display:grid;gap:6px"><div>Paid: <b>' + money(o.paid) + '</b> · Still owed: <b>' + money(o.balance) + '</b></div>';
-  if (o.status !== 'cancelled' && o.balance > 0) payBox += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
+  if (o.website_owned) payBox += '<div class="card-note">Cash on delivery: recorded here automatically when the website marks the order delivered.</div>';
+  else if (o.status !== 'cancelled' && o.balance > 0) payBox += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
     '<input class="fld" id="op_amt" type="number" min="1" placeholder="Amount" value="' + esc(ORD.payAmt || o.balance) + '" style="width:140px">' +
     '<select class="fld" id="op_m">' + ['cash', 'bank', 'online', 'card', 'other'].map(function(m){ return '<option value="' + m + '"' + (ORD.payMethod === m ? ' selected' : '') + '>' + ({ cash: 'Cash', bank: 'Bank transfer', online: 'JazzCash / EasyPaisa / online', card: 'Card', other: 'Other' })[m] + '</option>'; }).join('') + '</select>' +
     '<button class="btn primary" id="op_pay"' + (ORD.busy ? ' disabled' : '') + '>Record payment</button></div>';
   out += panel('Payment', payBox + '</div>');
   out += panel('Timeline', '<div style="display:grid;gap:6px">' + (o.timeline || []).map(function(e){
     var lab = { created: 'Order placed', confirmed: 'Confirmed', out_for_delivery: 'Out for delivery', delivered: 'Delivered', cancelled: 'Cancelled', payment: 'Payment', recognised: 'Counted as a sale', check: 'Check' }[e.event] || e.event;
-    return '<div><span class="card-note">' + when(e.at) + '</span> · <b>' + esc(lab) + '</b>' + (e.actor_type === 'agent' ? ' <span class="card-note">(WhatsApp agent)</span>' : '') + (e.detail ? ' — ' + esc(e.detail) : '') + '</div>';
+    return '<div><span class="card-note">' + when(e.at) + '</span> · <b>' + esc(lab) + '</b>' + (e.actor_type === 'agent' ? ' <span class="card-note">(WhatsApp agent)</span>' : '') + (e.actor_type === 'system' && o.source === 'website' ? ' <span class="card-note">(website)</span>' : '') + (e.detail ? ' — ' + esc(e.detail) : '') + '</div>';
   }).join('') + '</div>');
   setTimeout(ordWire, 0);
   return out;
@@ -8094,6 +7525,1084 @@ window.addEventListener('hashchange', function(){
   if (typeof IBX !== 'undefined') { IBX.data = undefined; }
   S.navOpen = false; if (S.me) renderShell();
 });
+
+/* ======================================================== Content Autopilot
+   A month of Facebook/Instagram posts (app/autopilot.py): the photo and video
+   library, "Plan my month" (the AI writes drafts with proposed times from the
+   business's own facts), a week-by-week calendar with "Approve this week", and
+   the results read back from Meta. Approving a week turns its drafts into
+   ordinary scheduled posts (the Posts page and its scheduler do the posting). */
+var AP = { up: null, msg: null, weekMsg: {}, form: { days: 30, posts_per_week: 7, language: 'mix', goal: '', offers: '', starts_on: '' },
+           edit: {}, poll: null };
+function apDay(iso){ var d = new Date(iso); return d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Asia/Karachi' }); }
+function apTime(iso){ var d = new Date(iso); return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Karachi' }); }
+function apPkDate(d){ return new Date(d.getTime() + 5 * 3600e3).toISOString().slice(0, 10); }   // a Date as YYYY-MM-DD in Pakistan
+function apMonday(){ var now = new Date(Date.now() + 5 * 3600e3); var wd = (now.getUTCDay() + 6) % 7; now.setUTCDate(now.getUTCDate() - wd); return now.toISOString().slice(0, 10); }
+function apReload(which){
+  (which || ['ap_media', 'ap_plans', 'ap_cal', 'ap_res']).forEach(function(k){ S[k] = undefined; LOADING[k] = false; });
+  renderShell();
+}
+function apStatus(p){
+  var m = { draft: ['Waiting for approval', ''], scheduled: ['Approved, will post', 'ok'], publishing: ['Posting…', 'ok'],
+            published: ['Posted', 'ok'], partial: ['Posted on one platform', 'warn'], failed: ['Failed', 'bad'] }[p.status] || [p.status, ''];
+  return '<span class="tag' + (m[1] ? ' ' + m[1] : '') + '">' + esc(m[0]) + '</span>';
+}
+function apThumb(p){
+  if (p.video_token) return '<div class="ap-thumb ap-vid">🎬<span>Reel</span></div>';
+  var u = (p.image_urls || [])[0];
+  return u ? '<img class="ap-thumb" src="' + esc(u) + '" alt="" loading="lazy">' + ((p.image_urls || []).length > 1 ? '<span class="ap-more">+' + ((p.image_urls || []).length - 1) + '</span>' : '')
+           : '<div class="ap-thumb ap-vid">✍️<span>Text</span></div>';
+}
+function apPostRow(p, own){
+  var ed = AP.edit[p.id];
+  var nums = p.numbers ? '<div class="card-note">👁 ' + esc(p.numbers.reach) + ' · ❤️ ' + esc(p.numbers.likes) + ' · 💬 ' + esc(p.numbers.comments) +
+      ' · ↗ ' + esc(p.numbers.shares) + ' · 🔖 ' + esc(p.numbers.saves) + '</div>' : '';
+  var check = (p.check && p.check.length) ? '<div class="ap-check">⚠️ Check before approving: ' + esc(p.check.map(function(c){
+        return c.replace('price not in config:', 'price not in your price list:').replace('offer not in config:', 'offer you did not add:')
+                .replace('unsourced figure:', 'number not in your details:').replace('unverifiable promise:', 'promise you never made:'); }).join('; ')) +
+      '. These are not in your prices or offers, so this post is held back until you fix the text.</div>' : '';
+  var editable = own && (p.status === 'draft' || p.status === 'failed');
+  var body = ed
+    ? '<textarea class="fld" rows="6" data-apcap="' + esc(p.id) + '" style="width:100%">' + esc(ed.caption) + '</textarea>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center">' +
+        '<input class="fld" type="date" data-apd="' + esc(p.id) + '" value="' + esc(ed.date) + '" style="max-width:160px">' +
+        '<input class="fld" type="time" data-apt="' + esc(p.id) + '" value="' + esc(ed.time) + '" style="max-width:120px">' +
+        '<button class="btn primary" data-apsave="' + esc(p.id) + '">Save</button><button class="btn" data-apx="' + esc(p.id) + '">Cancel</button></div>'
+    : '<div class="ap-cap">' + esc(p.caption) + '</div>';
+  return '<div class="ap-row">' +
+    '<div class="ap-when"><b>' + esc(apDay(p.at)) + '</b><span>' + esc(apTime(p.at)) + '</span></div>' +
+    '<div class="ap-media">' + apThumb(p) + '</div>' +
+    '<div class="ap-body">' + body + check + nums +
+      '<div class="card-note" style="margin-top:4px">' + apStatus(p) + ' ' + esc((p.platforms || []).map(function(x){ return x === 'facebook' ? 'Facebook' : 'Instagram'; }).join(' + ')) +
+        (p.theme ? ' · ' + esc(p.theme) : '') + '</div>' +
+      (editable && !ed ? '<div style="display:flex;gap:6px;margin-top:6px"><button class="btn" data-ape="' + esc(p.id) + '">Edit</button>' +
+         '<button class="btn" data-apdel="' + esc(p.id) + '">Remove</button></div>' : '') +
+      (own && p.status === 'scheduled' ? '<div style="margin-top:6px"><button class="btn" data-apun="' + esc(p.id) + '">Take back to draft</button></div>' : '') +
+    '</div></div>';
+}
+VIEWS.autopilot = function(){
+  var own = isOwner();
+  var out = '<h1>Content Autopilot</h1><p class="sub">A month of Facebook and Instagram posts, written from your own photos, prices and offers. ' +
+    'You approve one week at a time; approved posts go out by themselves.</p>';
+  var ok = need('social_acc', '/social/accounts') & need('ap_media', '/autopilot/media') & need('ap_plans', '/autopilot/plans') &
+           need('ap_cal', '/autopilot/calendar?start=' + apMonday() + '&days=35') & need('ap_res', '/autopilot/results?days=30');
+  if (!ok) return out + loading('Loading your content plan...');
+  if (AP.msg) out += '<div class="card-note" style="margin:6px 0 12px;color:' + (AP.msg.bad ? 'var(--danger)' : 'var(--growth)') + '">' + esc(AP.msg.text) + '</div>';
+  var acc = S.social_acc || {};
+  if (!acc.connected) out += '<div class="bil-note">Facebook and Instagram are not connected yet. You can build the library and plan now; ' +
+    'approving needs the connection. <a href="#/posts">Connect on the Posts page</a>.</div>';
+
+  // ---- results ----
+  var r = S.ap_res;
+  if (r) {
+    var fb = r.by_platform.facebook || {}, ig = r.by_platform.instagram || {}, fo = r.followers || {};
+    var fol = function(p){ var f = fo[p]; return f ? f.now.toLocaleString('en-US') + (f.gained ? ' (' + (f.gained > 0 ? '+' : '') + f.gained + ')' : '') : null; };
+    out += '<div class="grid">' +
+      metric('Posted, 30 days', r.counts.published) + metric('Approved, coming up', r.counts.scheduled) +
+      metric('Waiting for your approval', r.counts.waiting) +
+      metric('People reached', (fb.reach || 0) + (ig.reach || 0), 'Facebook ' + (fb.reach || 0) + ' · Instagram ' + (ig.reach || 0)) +
+      metric('Likes, comments, shares, saves', (fb.likes || 0) + (ig.likes || 0) + (fb.comments || 0) + (ig.comments || 0) + (fb.shares || 0) + (ig.shares || 0) + (ig.saves || 0)) +
+      metric('Facebook followers', fol('facebook')) + metric('Instagram followers', fol('instagram')) +
+    '</div>';
+    if (r.top.length) out += panel('What worked best (30 days)', '<div class="tbl-wrap"><table><tbody>' + r.top.map(function(t){
+      return '<tr><td style="width:64px">' + (t.image ? '<img class="ap-thumb" src="' + esc(t.image) + '" alt="">' : '') + '</td><td>' + esc(t.caption.slice(0, 140)) +
+        '<div class="card-note">' + esc(t.theme || '') + '</div></td><td class="card-note">👁 ' + esc(t.reach) + '<br>❤️ ' + esc(t.likes) + ' · 💬 ' + esc(t.comments) + '</td></tr>';
+    }).join('') + '</tbody></table></div>' + (r.themes.length ? '<div class="card-note" style="padding:10px 16px">Best kinds of post: ' +
+      r.themes.slice(0, 4).map(function(t){ return esc(t.theme) + ' (' + esc(t.posts) + ')'; }).join(', ') + '. The next plan does more of these.</div>' : ''));
+  }
+
+  // ---- calendar, week by week ----
+  var posts = (S.ap_cal && S.ap_cal.posts) || [];
+  var weeks = {};
+  posts.forEach(function(p){
+    var d = new Date(new Date(p.at).getTime() + 5 * 3600e3); var wd = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - wd);
+    var k = d.toISOString().slice(0, 10); (weeks[k] = weeks[k] || []).push(p);
+  });
+  var keys = Object.keys(weeks).sort();
+  var plans = (S.ap_plans && S.ap_plans.plans) || [];
+  var busy = plans.some(function(p){ return p.status === 'generating'; });
+  if (busy) out += '<div class="bil-note"><span class="spin"></span> Writing your plan: ' + esc(plans[0].drafted) + ' posts so far. ' +
+    'It takes a few minutes; posts appear below as each week is written.</div>';
+  var lastFail = plans[0] && plans[0].status === 'failed' ? plans[0] : null;
+  if (lastFail) out += '<div class="bil-note" style="border-left-color:var(--danger)">The last plan did not finish: ' + esc(lastFail.error || 'unknown error') + '</div>';
+  if (!keys.length) out += panel('Your calendar', empty('No posts planned yet', 'Add photos to the library, then press Plan my month below.'));
+  keys.forEach(function(k){
+    var list = weeks[k], waiting = list.filter(function(p){ return p.status === 'draft' && new Date(p.at) > new Date(); });
+    var flagged = waiting.filter(function(p){ return p.check && p.check.length; }).length;
+    var end = new Date(k + 'T00:00:00Z'); end.setUTCDate(end.getUTCDate() + 6);
+    var title = 'Week of ' + apDay(k + 'T12:00:00+05:00') + ' – ' + apDay(end.toISOString().slice(0, 10) + 'T12:00:00+05:00');
+    var right = own && waiting.length ? '<button class="btn primary" data-apweek="' + k + '"' + (acc.connected ? '' : ' disabled title="Connect Facebook first"') + '>Approve this week (' +
+      (waiting.length - flagged) + ')</button>' : '<span class="pill count">' + list.length + '</span>';
+    var note = AP.weekMsg[k] ? '<div class="card-note" style="padding:8px 16px;color:var(--growth)">' + esc(AP.weekMsg[k]) + '</div>' : '';
+    out += panel(title, note + list.map(function(p){ return apPostRow(p, own); }).join(''), right);
+  });
+
+  // ---- plan my month ----
+  if (own) {
+    var f = AP.form;
+    var tomorrow = apPkDate(new Date(Date.now() + 864e5));
+    out += panel('Plan my month', '<div style="padding:14px 16px;display:grid;gap:10px">' +
+      '<div class="card-note">The AI writes every post from your business details, prices and the offers below, picks a photo or video from your library for each, ' +
+        'and proposes the best times. Nothing goes out until you approve the week. Captions with a price or promise you never gave are held back for you to fix.</div>' +
+      '<div class="fgrid">' +
+        '<div><label>Start on</label><input class="fld" type="date" id="ap_start" value="' + esc(f.starts_on || tomorrow) + '"></div>' +
+        '<div><label>Days</label><input class="fld" type="number" id="ap_days" min="1" max="31" value="' + esc(f.days) + '"></div>' +
+        '<div><label>Posts a week</label><input class="fld" type="number" id="ap_ppw" min="1" max="14" value="' + esc(f.posts_per_week) + '"></div>' +
+        '<div><label>Language</label><select class="fld" id="ap_lang">' + [['mix', 'English + Roman Urdu'], ['english', 'English'], ['urdu', 'Roman Urdu']].map(function(o){
+          return '<option value="' + o[0] + '"' + (f.language === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
+      '</div>' +
+      '<div><label>Goal for the month</label><input class="fld" id="ap_goal" maxlength="600" placeholder="e.g. More weekend orders and new followers in DHA and Gulberg" value="' + esc(f.goal) + '" style="width:100%"></div>' +
+      '<div><label>Offers the posts may mention (exact wording; leave empty for none)</label><textarea class="fld" id="ap_offers" rows="2" maxlength="1200" placeholder="e.g. Free delivery on Family boxes this Friday to Sunday" style="width:100%">' + esc(f.offers) + '</textarea></div>' +
+      '<div><button class="btn primary" id="ap_plan"' + (busy ? ' disabled' : '') + '>✨ Plan my month</button></div></div>');
+  }
+
+  // ---- library ----
+  var items = (S.ap_media && S.ap_media.items) || [];
+  out += panel('Photo & video library (' + items.length + ')', '<div style="padding:14px 16px">' +
+    (own ? '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">' +
+      '<label class="btn primary" style="cursor:pointer">📷 Add photos<input type="file" id="ap_files" accept="image/jpeg,image/png,image/webp,image/heic" multiple style="display:none"></label>' +
+      '<label class="btn" style="cursor:pointer">🎬 Add a video<input type="file" id="ap_vfile" accept="video/mp4,video/quicktime,.mp4,.mov" style="display:none"></label>' +
+      (AP.up ? '<span class="card-note"><span class="spin"></span> ' + esc(AP.up) + '</span>' : '') +
+      '<span class="card-note">Give each a short name (what is in it). The planner uses the names to pick the right photo.</span></div>' : '') +
+    (items.length ? '<div class="ap-lib">' + items.map(function(it){
+      return '<div class="ap-item">' + (it.kind === 'video' ? '<div class="ap-thumb ap-vid big">🎬<span>' + esc(Math.round(it.duration)) + 's</span></div>' : '<img class="ap-thumb big" src="' + esc(it.url) + '" alt="" loading="lazy">') +
+        (own ? '<input class="fld" data-aplabel="' + esc(it.kind + '/' + it.id) + '" value="' + esc(it.label) + '" placeholder="Name it" maxlength="120">' : '<div>' + esc(it.label) + '</div>') +
+        '<div class="card-note">' + (it.used ? 'used ' + esc(it.used) + '×' : 'not used yet') + (own ? ' · <a href="#/autopilot" data-aprm="' + esc(it.kind + '/' + it.id) + '">remove</a>' : '') + '</div></div>';
+    }).join('') + '</div>' : empty('The library is empty', 'Add the photos and videos you want posted this month.')) + '</div>');
+  return out;
+};
+function apWire(){
+  if (currentView() !== 'autopilot') return;
+  var g = function(id){ return document.getElementById(id); };
+  var say = function(t, bad){ AP.msg = { text: t, bad: !!bad }; renderShell(); };
+  // poll while a plan is being written
+  var plans = (S.ap_plans && S.ap_plans.plans) || [];
+  if (plans.some(function(p){ return p.status === 'generating'; })) {
+    if (!AP.poll) AP.poll = setTimeout(function(){ AP.poll = null; if (currentView() === 'autopilot') apReload(['ap_plans', 'ap_cal']); }, 6000);
+  }
+  ['ap_start', 'ap_days', 'ap_ppw', 'ap_lang', 'ap_goal', 'ap_offers'].forEach(function(id){
+    var el = g(id); if (!el) return;
+    el.oninput = el.onchange = function(){ var k = { ap_start: 'starts_on', ap_days: 'days', ap_ppw: 'posts_per_week', ap_lang: 'language', ap_goal: 'goal', ap_offers: 'offers' }[id]; AP.form[k] = el.value; };
+  });
+  if (g('ap_plan')) g('ap_plan').onclick = function(){
+    var f = AP.form; f.starts_on = g('ap_start').value; f.days = g('ap_days').value; f.posts_per_week = g('ap_ppw').value; f.language = g('ap_lang').value;
+    f.goal = g('ap_goal').value; f.offers = g('ap_offers').value;
+    g('ap_plan').disabled = true;
+    api('/autopilot/plan', { method: 'POST', body: { starts_on: f.starts_on, days: Number(f.days), posts_per_week: Number(f.posts_per_week),
+      language: f.language, goal: f.goal, offers: f.offers } }).then(function(res){
+      if (res.ok) { AP.msg = { text: 'Writing your plan now. Posts appear in the calendar as each week is written.' }; apReload(['ap_plans', 'ap_cal']); }
+      else say((res.data && res.data.detail) || 'The plan could not start.', true);
+    });
+  };
+  // library: photos (converted to JPEG, the only kind Instagram takes), then kept in the library
+  if (g('ap_files')) g('ap_files').onchange = function(){
+    var files = Array.prototype.slice.call(g('ap_files').files || []), done = 0, failed = 0;
+    if (!files.length) return;
+    var next = function(){
+      if (!files.length) { AP.up = null; AP.msg = { text: done + ' photo' + (done === 1 ? '' : 's') + ' added.' + (failed ? ' ' + failed + ' could not be added.' : '') , bad: !!failed && !done }; apReload(['ap_media']); return; }
+      var file = files.shift(); AP.up = 'Adding photo ' + (done + failed + 1) + '…'; renderShell();
+      jvToJpeg(file).then(function(data){
+        return api('/social/media', { method: 'POST', body: { image: data } });
+      }).then(function(res){
+        if (!res.ok) throw new Error((res.data && res.data.detail) || 'not saved');
+        var label = file.name.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').replace(/^(img|dsc|pxl|whatsapp image)\s*[\d\s]*$/i, '').slice(0, 120);
+        return api('/autopilot/media/photo/' + res.data.id, { method: 'PATCH', body: { in_library: true, label: label } });
+      }).then(function(){ done++; next(); }, function(){ failed++; next(); });
+    };
+    next();
+  };
+  if (g('ap_vfile')) g('ap_vfile').onchange = function(){
+    var file = g('ap_vfile').files[0]; if (!file) return;
+    var type = file.type || (/\.mov$/i.test(file.name) ? 'video/quicktime' : 'video/mp4');
+    if (!/^video\/(mp4|quicktime)$/.test(type)) return say('Choose an MP4 or MOV video.', true);
+    if (file.size > 100 * 1024 * 1024) return say('That video is larger than 100 MB. Trim or compress it on your phone first.', true);
+    var x = new XMLHttpRequest();
+    x.open('POST', '/social/video'); x.withCredentials = true; x.setRequestHeader('Content-Type', type);
+    x.upload.onprogress = function(e){ if (e.lengthComputable) { AP.up = 'Uploading video ' + Math.round(100 * e.loaded / e.total) + '%'; renderShell(); } };
+    x.onload = function(){
+      var d = null; try { d = JSON.parse(x.responseText); } catch (e) {}
+      if (x.status >= 200 && x.status < 300 && d && d.token) {
+        api('/autopilot/media/video/' + d.token + '/keep', { method: 'POST', body: { label: file.name.replace(/\.[a-z0-9]+$/i, '').slice(0, 120) } }).then(function(){
+          AP.up = null; AP.msg = { text: 'Video added to the library.' }; apReload(['ap_media']);
+        });
+      } else { AP.up = null; say((d && d.detail) || 'The video was not saved.', true); }
+    };
+    x.onerror = function(){ AP.up = null; say('The upload stopped. Check the connection and try again.', true); };
+    x.send(file);
+  };
+  document.querySelectorAll('[data-aplabel]').forEach(function(inp){
+    inp.onchange = function(){ api('/autopilot/media/' + inp.getAttribute('data-aplabel'), { method: 'PATCH', body: { label: inp.value } }); };
+  });
+  document.querySelectorAll('[data-aprm]').forEach(function(a){
+    a.onclick = function(e){ e.preventDefault(); api('/autopilot/media/' + a.getAttribute('data-aprm'), { method: 'PATCH', body: { in_library: false } }).then(function(){ apReload(['ap_media']); }); };
+  });
+  // calendar actions
+  document.querySelectorAll('[data-apweek]').forEach(function(b){
+    b.onclick = function(){
+      var k = b.getAttribute('data-apweek'); b.disabled = true;
+      api('/autopilot/approve-week', { method: 'POST', body: { week_start: k } }).then(function(res){
+        if (res.ok) {
+          var d = res.data;
+          AP.weekMsg[k] = d.scheduled + ' post' + (d.scheduled === 1 ? '' : 's') + ' approved: they go out by themselves at their times.' +
+            (d.held && d.held.length ? ' ' + d.held.length + ' held back: fix the text marked ⚠️ and approve again.' : '') +
+            (d.past ? ' ' + d.past + ' had a time already passed; move them and approve again.' : '');
+          apReload(['ap_cal', 'ap_res']);
+        } else say((res.data && res.data.detail) || 'That week could not be approved.', true);
+      });
+    };
+  });
+  document.querySelectorAll('[data-ape]').forEach(function(b){
+    b.onclick = function(){
+      var id = b.getAttribute('data-ape'), p = ((S.ap_cal && S.ap_cal.posts) || []).filter(function(x){ return x.id === id; })[0]; if (!p) return;
+      var pk = new Date(new Date(p.at).getTime() + 5 * 3600e3).toISOString();
+      AP.edit[id] = { caption: p.caption, date: pk.slice(0, 10), time: pk.slice(11, 16), at: p.at }; renderShell();
+    };
+  });
+  document.querySelectorAll('[data-apx]').forEach(function(b){ b.onclick = function(){ delete AP.edit[b.getAttribute('data-apx')]; renderShell(); }; });
+  document.querySelectorAll('[data-apcap]').forEach(function(t){ t.oninput = function(){ var e = AP.edit[t.getAttribute('data-apcap')]; if (e) e.caption = t.value; }; });
+  document.querySelectorAll('[data-apd]').forEach(function(t){ t.onchange = function(){ var e = AP.edit[t.getAttribute('data-apd')]; if (e) e.date = t.value; }; });
+  document.querySelectorAll('[data-apt]').forEach(function(t){ t.onchange = function(){ var e = AP.edit[t.getAttribute('data-apt')]; if (e) e.time = t.value; }; });
+  document.querySelectorAll('[data-apsave]').forEach(function(b){
+    b.onclick = function(){
+      var id = b.getAttribute('data-apsave'), e = AP.edit[id]; if (!e) return; b.disabled = true;
+      var pk = new Date(new Date(e.at).getTime() + 5 * 3600e3).toISOString();
+      var moved = e.date !== pk.slice(0, 10) || e.time !== pk.slice(11, 16);
+      api('/social/posts/' + id, { method: 'PATCH', body: { caption: e.caption } }).then(function(r1){
+        if (!r1.ok) throw r1;
+        return moved ? api('/autopilot/posts/' + id + '/time', { method: 'PATCH', body: { date: e.date, time: e.time } }) : { ok: true };
+      }).then(function(r2){
+        if (!r2.ok) throw r2;
+        delete AP.edit[id]; AP.msg = { text: 'Saved.' }; apReload(['ap_cal']);
+      }, function(r){ b.disabled = false; say((r && r.data && r.data.detail) || 'That did not save.', true); });
+    };
+  });
+  document.querySelectorAll('[data-apdel]').forEach(function(b){
+    b.onclick = function(){ if (!confirm('Remove this post from the plan?')) return;
+      api('/social/posts/' + b.getAttribute('data-apdel'), { method: 'DELETE' }).then(function(){ apReload(['ap_cal', 'ap_res']); }); };
+  });
+  document.querySelectorAll('[data-apun]').forEach(function(b){
+    b.onclick = function(){ api('/social/posts/' + b.getAttribute('data-apun') + '/unschedule', { method: 'POST' }).then(function(){ apReload(['ap_cal', 'ap_res']); }); };
+  });
+}
+(function(){
+  NAV.forEach(function(g){
+    var i = -1; g.items.forEach(function(it, k){ if (it.id === 'posts' || it.id === 'marketing') i = k; });
+    if (g.label === 'Marketing' && !g.items.some(function(it){ return it.id === 'autopilot'; }))
+      g.items.splice(i + 1, 0, { id: 'autopilot', icon: '✨', name: 'Content Autopilot', sub: false });
+  });
+  var _apRender = renderShell;
+  renderShell = function(){ _apRender(); apWire(); };
+  window.addEventListener('hashchange', function(){ AP.msg = null; AP.weekMsg = {}; });
+  var st = document.createElement('style');
+  st.textContent = '.ap-row{display:grid;grid-template-columns:92px 72px 1fr;gap:12px;padding:12px 16px;border-top:1px solid var(--line);align-items:start}' +
+    '.ap-row:first-child{border-top:0}.ap-when{display:grid;font-size:13px}.ap-when span{color:var(--muted,#999)}' +
+    '.ap-media{position:relative}.ap-thumb{width:72px;height:72px;object-fit:cover;border-radius:10px;display:grid;place-items:center;background:var(--accent-tint,#222)}' +
+    '.ap-thumb.big{width:100%;height:120px}.ap-vid{font-size:22px;text-align:center;line-height:1.1}.ap-vid span{display:block;font-size:11px}' +
+    '.ap-more{position:absolute;right:4px;bottom:4px;font-size:11px;background:rgba(0,0,0,.65);color:#fff;border-radius:6px;padding:1px 5px}' +
+    '.ap-cap{white-space:pre-wrap;font-size:14px;line-height:1.45;max-height:9.5em;overflow:auto}' +
+    '.ap-check{margin-top:6px;padding:8px 10px;border:1px solid var(--warn,#d9a400);border-radius:8px;font-size:13px}' +
+    '.ap-lib{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}.ap-item{display:grid;gap:6px}' +
+    '.tag.ok{border-color:var(--growth)}.tag.bad{border-color:var(--danger)}.tag.warn{border-color:var(--warn,#d9a400)}' +
+    '@media(max-width:640px){.ap-row{grid-template-columns:64px 1fr}.ap-media{grid-row:span 2}.ap-when{grid-column:2}.ap-thumb{width:60px;height:60px}}';
+  document.head.appendChild(st);
+})();
+
+/* =====================================================================
+   Ten-module layout (approved 16 Oct 2026).
+   Same pages, same APIs: every existing menu item is kept, including the
+   ones added conditionally above (Sales, Client work, Orders, Calls...).
+   The sidebar shows ten modules; a module's pages become tabs at the top
+   of the content. Colours come from td.css, so light/dark and the
+   business's brand colour keep working.
+   ===================================================================== */
+(function(){
+  var MODS = [
+    { num:'01', name:'Dashboard',      icon:'grid',  ids:['overview','reports','alerts'] },
+    { num:'02', name:'Jarvis & AI',    icon:'spark', ids:['console','ai','hermes','bizagent','needshuman','history','tools'], sep:true },
+    { num:'03', name:'Chats',          icon:'chat',  ids:['inbox','calls'] },
+    { num:'04', name:'CRM',            icon:'users', ids:['leads','sales','clientwork','customers','pipeline','appointments','calendar'], sep:true },
+    { num:'05', name:'Marketing',      icon:'mega',  ids:['marketing','posts','autopilot','advisor','analytics'] },
+    { num:'06', name:'Business',       icon:'store', ids:['services','products','packages','deals','settings'] },
+    { num:'07', name:'Team & HR',      icon:'badge', ids:['team','attendance','hr'] },
+    { num:'08', name:'Finance',        icon:'wallet',ids:['revenue','invoices','expenses','dayclose','pnl'], sep:true },
+    { num:'09', name:'Operations',     icon:'box',   ids:['inventory','orders','dailyentry'] },
+    { num:'10', name:'Administration', icon:'shield',ids:['integrations','whatsapp','billing','permissions'] }
+  ];
+  // the pages added in this block (they are not in NAV)
+  var NEW = { alerts:'Alerts', history:'Execution History', tools:'Tools', pipeline:'Pipeline',
+              analytics:'Analytics', deals:'Deals', permissions:'Permissions' };
+  // tab names that follow the approved structure; everything else keeps its own name
+  var LABEL = { overview:'Overview', console:'Jarvis Assistant', ai:'AI Agents', needshuman:'Approval Queue',
+                marketing:'Campaigns', posts:'Social Media Publisher', autopilot:'Content Calendar',
+                advisor:'Ads & Growth', inbox:'WhatsApp Inbox', whatsapp:'WhatsApp Connection' };
+  var IC = {
+    grid:'<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+    spark:'<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16l.7 1.8 1.8.7-1.8.7L19 21l-.7-1.8-1.8-.7 1.8-.7z"/>',
+    chat:'<path d="M5 5h14a1 1 0 011 1v9a1 1 0 01-1 1H10l-4 4v-4H5a1 1 0 01-1-1V6a1 1 0 011-1z"/><path d="M8 10h8M8 13h5"/>',
+    users:'<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0111 0"/><path d="M16 5.2a3 3 0 010 5.6M17.5 14.2A5.5 5.5 0 0120.5 19"/>',
+    mega:'<path d="M4 10v4a1 1 0 001 1h2l7 4V5L7 9H5a1 1 0 00-1 1z"/><path d="M18 9a3.5 3.5 0 010 6"/>',
+    store:'<path d="M4 9l1.5-4h13L20 9"/><path d="M4 9h16v2a2.7 2.7 0 01-5.3 0 2.7 2.7 0 01-5.4 0A2.7 2.7 0 014 11z"/><path d="M5.5 13v6h13v-6"/><path d="M10 19v-4h4v4"/>',
+    badge:'<rect x="5" y="3" width="14" height="18" rx="2"/><circle cx="12" cy="10" r="2.6"/><path d="M8.5 17a3.5 3.5 0 017 0"/><path d="M10 6h4"/>',
+    wallet:'<path d="M4 7a2 2 0 012-2h11v4"/><rect x="4" y="7" width="16" height="12" rx="2"/><path d="M16 13h2"/>',
+    box:'<path d="M4 8l8-4 8 4-8 4z"/><path d="M4 8v8l8 4 8-4V8"/><path d="M12 12v8"/>',
+    shield:'<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9.5 12l2 2 3.5-4"/>',
+    back:'<path d="M15 6l-6 6 6 6"/>'
+  };
+  function svg(n){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (IC[n] || IC.grid) + '</svg>'; }
+
+  /* Every page the existing menu offers right now, honouring its own rules
+     (owner-only pages, sections the business hid, conditional items). */
+  function available(){
+    var hidden = (PREFS && PREFS.hidden_sections) || [], own = isOwner(), seen = {}, list = [];
+    NAV.forEach(function(g){ g.items.forEach(function(it){
+      var id = it.id === 'catalogue' ? 'services' : it.id;
+      if (seen[id] || !VIEWS[id]) return;
+      if (!own && OWNER_ONLY_NAV[id]) return;
+      if (id !== 'console' && hidden.indexOf(id) !== -1) return;
+      seen[id] = 1; list.push({ id: id, name: LABEL[id] || it.name });
+    }); });
+    Object.keys(NEW).forEach(function(id){
+      if (seen[id] || hidden.indexOf(id) !== -1) return;
+      if (!own && (id === 'permissions' || id === 'analytics')) return;
+      seen[id] = 1; list.push({ id: id, name: NEW[id] });
+    });
+    return list;
+  }
+  function grouped(){
+    var list = available(), byId = {}, placed = {}, out = [];
+    list.forEach(function(x){ byId[x.id] = x; });
+    MODS.forEach(function(m){
+      var items = [];
+      m.ids.forEach(function(id){ if (byId[id]) { items.push(byId[id]); placed[id] = 1; } });
+      out.push({ m: m, items: items });
+    });
+    // anything the menu has that this map does not know yet goes to Administration
+    list.forEach(function(x){ if (!placed[x.id]) out[out.length - 1].items.push(x); });
+    return out;
+  }
+  function moduleFor(view){
+    if (view === 'catalogue') view = 'services';
+    var g = grouped();
+    for (var i = 0; i < g.length; i++) for (var j = 0; j < g[i].items.length; j++)
+      if (g[i].items[j].id === view) return { g: g[i], it: g[i].items[j] };
+    return { g: g[0], it: g[0].items[0] || { id: view, name: view } };
+  }
+
+  navHTML = function(active){
+    var cur = moduleFor(active).g.m, out = '<nav class="nav tdm-nav" aria-label="Main">';
+    grouped().forEach(function(x){
+      if (!x.items.length) return;
+      var m = x.m, badge = '';
+      if (m.num === '02') {
+        var n = S.summary && S.summary.work_by_status ? S.summary.work_by_status.needs_human : null;
+        if (n) badge = '<span class="pill attn">' + esc(n) + '</span>';
+      } else if (m.num === '04' && S.leads && S.leads.length) {
+        badge = '<span class="pill count">' + esc(S.leads.length) + '</span>';
+      }
+      if (m.sep) out += '<div class="tdm-sep"></div>';
+      out += '<a href="#/' + x.items[0].id + '" class="tdm-link' + (m === cur ? ' active' : '') + '" title="' + esc(m.name) + '">' +
+        '<span class="tdm-num">' + m.num + '</span>' + svg(m.icon) + '<span class="tdm-label">' + esc(m.name) + '</span>' + badge + '</a>';
+    });
+    return out + '</nav>';
+  };
+
+  var TDM = { collapsed: false };
+  try { TDM.collapsed = localStorage.getItem('td-rail') === '1'; } catch (e) {}
+
+  function decorate(){
+    var app = root.querySelector('.app'), content = root.querySelector('.content');
+    if (!app || !content) return;
+    app.classList.toggle('tdm-collapsed', TDM.collapsed);
+    var v = currentView(), mf = moduleFor(v);
+    var tabs = '';
+    if (mf.g.items.length > 1) tabs = '<div class="tdm-tabs" role="tablist">' + mf.g.items.map(function(it){
+      var on = it.id === v || (v === 'catalogue' && it.id === 'services');
+      return '<a role="tab" aria-selected="' + on + '" href="#/' + it.id + '" class="' + (on ? 'active' : '') + '">' + esc(it.name) + '</a>';
+    }).join('') + '</div>';
+    var hd = document.createElement('div');
+    hd.className = 'tdm-head';
+    hd.innerHTML = '<div class="tdm-eyebrow">' + mf.g.m.num + ' · ' + esc(mf.g.m.name) + '</div>' + tabs;
+    content.insertBefore(hd, content.firstChild);
+    var foot = root.querySelector('.sb-foot');
+    if (foot && !foot.querySelector('.tdm-collapse')) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'tdm-collapse';
+      b.setAttribute('aria-label', TDM.collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+      b.innerHTML = svg('back') + '<span class="tdm-label">Collapse</span>';
+      b.onclick = function(){
+        TDM.collapsed = !TDM.collapsed;
+        try { localStorage.setItem('td-rail', TDM.collapsed ? '1' : '0'); } catch (e) {}
+        renderShell();
+      };
+      foot.insertBefore(b, foot.firstChild);
+    }
+  }
+  /* ---------- motion ----------
+     Motion only answers something the person did or something arriving:
+     - a violet "ink" glides from the old module to the new one in the
+       sidebar, and from the old tab to the new tab;
+     - the page that opens rises in once, in reading order (not on the
+       re-renders that happen while data loads);
+     - a number counts up the first time it arrives on a page.
+     Everything here is off when the device asks for reduced motion. */
+  var REDUCED = false;
+  try { REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+  TDM.ink = { nav: null, tab: null, tabModule: null };
+  TDM.counted = {};
+  var GLIDE_MS = 450;
+  TDM.glide = {};
+  function inkTo(holder, target, axis, prev, key){
+    if (!holder || !target) return;
+    var ink = document.createElement('span');
+    ink.className = 'tdm-ink tdm-ink-' + axis;
+    ink.setAttribute('aria-hidden', 'true');
+    holder.appendChild(ink);
+    var hr = holder.getBoundingClientRect(), tr = target.getBoundingClientRect();
+    var now = axis === 'y'
+      ? { a: tr.top - hr.top + holder.scrollTop, b: tr.height }
+      : { a: tr.left - hr.left + holder.scrollLeft, b: tr.width };
+    function place(p){
+      if (axis === 'y') { ink.style.transform = 'translateY(' + p.a + 'px)'; ink.style.height = p.b + 'px';
+        ink.style.left = (tr.left - hr.left) + 'px'; ink.style.width = tr.width + 'px'; }
+      else { ink.style.transform = 'translateX(' + p.a + 'px)'; ink.style.width = p.b + 'px'; }
+    }
+    function jump(p){ ink.classList.add('no-anim'); place(p); void ink.offsetWidth; ink.classList.remove('no-anim'); }
+    var g = TDM.glide[key], t = performance.now(), from = null, ms = GLIDE_MS;
+    if (!REDUCED && prev && (prev.a !== now.a || prev.b !== now.b)) {
+      from = prev; TDM.glide[key] = { from: prev, to: now, t0: t };
+    } else if (!REDUCED && g && t - g.t0 < GLIDE_MS && g.to.a === now.a) {
+      // the page redrew mid-glide: carry on from where the ink is now
+      var k = (t - g.t0) / GLIDE_MS, e = 1 - Math.pow(1 - k, 3);
+      from = { a: g.from.a + (g.to.a - g.from.a) * e, b: g.from.b + (g.to.b - g.from.b) * e };
+      ms = Math.max(60, GLIDE_MS - (t - g.t0));
+    }
+    if (from) {
+      jump(from);
+      ink.style.transitionDuration = ms + 'ms';
+      requestAnimationFrame(function(){ place(now); });
+    } else jump(now);
+    TDM.ink[key] = now;
+  }
+  function countUp(el, start){
+    var raw = el.textContent.trim();
+    var m = raw.match(/^([^\d\-]*)(-?\d[\d,]*(?:\.\d+)?)(.*)$/);
+    if (!m) return;
+    var target = parseFloat(m[2].replace(/,/g, ''));
+    if (!isFinite(target) || target === 0) return;
+    var dec = (m[2].split('.')[1] || '').length, grouped = m[2].indexOf(',') !== -1 || Math.abs(target) >= 1000;
+    function fmt(n){
+      var s = dec ? n.toFixed(dec) : String(Math.round(n));
+      if (grouped) { var p = s.split('.'); p[0] = Number(p[0]).toLocaleString('en-US'); s = p.join('.'); }
+      return m[1] + s + m[3];
+    }
+    var t0 = start, dur = Math.min(900, 380 + String(Math.round(Math.abs(target))).length * 70);
+    if (performance.now() - t0 >= dur) return;
+    el.textContent = fmt(0);
+    function step(t){
+      if (!el.isConnected) return;
+      var k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+      el.textContent = fmt(target * e);
+      if (k < 1) requestAnimationFrame(step); else el.textContent = raw;
+    }
+    requestAnimationFrame(step);
+  }
+  function animate(){
+    var v = currentView(), mf = moduleFor(v);
+    var viewChanged = TDM.lastView !== v;
+    TDM.lastView = v;
+    // sidebar ink
+    var nav = root.querySelector('.tdm-nav'), activeLink = nav && nav.querySelector('.tdm-link.active');
+    inkTo(nav, activeLink, 'y', viewChanged ? TDM.ink.nav : null, 'nav');
+    // tab ink, gliding only inside the same module
+    var tabs = root.querySelector('.tdm-tabs'), activeTab = tabs && tabs.querySelector('a.active');
+    var sameModule = TDM.ink.tabModule === mf.g.m.num;
+    inkTo(tabs, activeTab, 'x', viewChanged && sameModule ? TDM.ink.tab : null, 'tab');
+    TDM.ink.tabModule = mf.g.m.num;
+    if (activeTab && viewChanged) try { activeTab.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) {}
+    if (REDUCED) return;
+    var content = root.querySelector('.content');
+    if (!content) return;
+    if (viewChanged) {
+      TDM.counted = {};
+      content.classList.add('tdm-enter');
+      var kids = content.children, i, n = 0;
+      for (i = 0; i < kids.length && n < 14; i++) {
+        if (kids[i].id === 'incbar' || kids[i].classList.contains('tdm-head')) continue;
+        kids[i].style.setProperty('--tdm-i', n++);
+      }
+      content.querySelectorAll('.grid').forEach(function(g){
+        Array.prototype.forEach.call(g.children, function(c, j){ if (j < 12) c.style.setProperty('--tdm-j', j); });
+      });
+    }
+    // numbers: count each one up the first time it shows on this visit
+    content.querySelectorAll('.card').forEach(function(card){
+      var val = card.querySelector('.card-value'), lab = card.querySelector('.card-label');
+      if (!val || val.classList.contains('none')) return;
+      // keyed by label and value, with its start time, so a re-render while
+      // data loads continues the same count instead of restarting or skipping it
+      var key = (lab ? lab.textContent : '') + '|' + val.textContent.trim();
+      if (!TDM.counted[key]) TDM.counted[key] = performance.now();
+      countUp(val, TDM.counted[key]);
+    });
+  }
+
+  var _tdmShell = renderShell;
+  renderShell = function(){
+    var r = _tdmShell.apply(this, arguments);
+    try { decorate(); } catch (e) { console.error(e); }
+    try { animate(); } catch (e) { console.error(e); }
+    try { if (typeof TDM.after === 'function') { var f = TDM.after; TDM.after = null; f(); } } catch (e) { console.error(e); }
+    return r;
+  };
+
+  /* ---------- the pages that did not exist yet (existing APIs only) ---------- */
+  function hd(t, s){ return '<h1>' + esc(t) + '</h1><p class="sub">' + esc(s) + '</p>'; }
+  function tb(cols, rows){
+    return '<div class="tbl-wrap"><table><thead><tr>' + cols.map(function(c){ return '<th>' + esc(c) + '</th>'; }).join('') +
+      '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>';
+  }
+  function at(v){ return v ? esc(String(v).slice(0, 16).replace('T', ' ')) : '—'; }
+  function st(txt, cls){ return '<span class="tdm-st ' + (cls || '') + '">' + esc(txt) + '</span>'; }
+  function build(title, why, needs){
+    return '<div class="tdm-build"><h3><span class="tdm-build-tag">NEEDS BACKEND</span>' + esc(title) + '</h3><p>' + esc(why) + '</p>' +
+      (needs && needs.length ? '<ul>' + needs.map(function(n){ return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
+  }
+
+  if (!VIEWS.alerts) VIEWS.alerts = function(){
+    var out = hd('Alerts', 'Problems the platform has noticed for this business.');
+    if (!need('tdm_inc', '/incidents')) return out + panel('Open alerts', loading('Loading alerts...'));
+    if (S.tdm_inc === null) return out + panel('Open alerts', errState('The alerts service did not respond.'));
+    var list = S.tdm_inc.incidents || [];
+    if (!list.length) return out + panel('Open alerts', empty('No open alerts', 'Everything the platform watches is fine right now.'));
+    return out + panel('Open alerts', tb(['Severity', 'Alert', 'Since', 'Seen'], list.map(function(i){
+      var cls = i.severity === 'critical' ? 'bad' : (i.severity === 'warn' ? 'warn' : 'info');
+      return '<tr><td>' + st(i.severity, cls) + '</td><td style="white-space:normal"><b>' + esc(i.title) + '</b>' +
+        (i.detail ? '<div class="sub" style="margin:4px 0 0">' + esc(i.detail) + '</div>' : '') + '</td><td>' + at(i.opened_at) + '</td><td>' + esc(i.seen_count) + '</td></tr>';
+    })));
+  };
+
+  if (!VIEWS.history) VIEWS.history = function(){
+    var out = hd('Execution History', 'Every recorded action, by a person or an AI agent.');
+    if (!need('tdm_exec', '/business/executions')) return out + panel('Recorded actions', loading('Loading...'));
+    if (S.tdm_exec === null) return out + panel('Recorded actions', errState('The history service did not respond.'));
+    var items = S.tdm_exec.items || [];
+    return out + panel('Recorded actions', items.length ? tb(['When', 'By', 'Action', 'On', 'Result'], items.slice(0, 200).map(function(x){
+      return '<tr><td>' + at(x.at) + '</td><td>' + esc(x.actor_type || '—') + '</td><td>' + esc(x.action) + '</td><td>' + esc(x.resource || '—') +
+        '</td><td>' + st(x.status || '—', x.status === 'ok' ? 'ok' : 'bad') + (x.error ? '<div class="sub" style="margin:4px 0 0">' + esc(x.error) + '</div>' : '') + '</td></tr>';
+    })) : empty('No actions recorded yet', 'Saves, payments, approvals and AI actions will be listed here.'));
+  };
+
+  /* Backend batch 1 may not be deployed yet: a 404/405 means "route missing", not "you did something wrong". */
+  function missing(r){ return !!r && (r.status === 405 || (r.status === 404 && r.data && r.data.detail === 'Not Found')); }
+  var STAGES = [['new','New'],['qualified','Qualified'],['booked','Booked'],['showed','Showed'],['sold','Sold'],['lost','Lost']];
+
+  function moveLead(id, to){
+    var l = (S.leads || []).filter(function(x){ return String(x.id) === String(id); })[0];
+    if (!l || l.status === to) return;
+    var from = l.status;
+    l.status = to; TDM.flipNext = true; renderShell();  /* optimistic: the card moves at once */
+    act('/leads/' + encodeURIComponent(id), {method:'PATCH', body:{status:to}}, 'Moved to ' + to + '.').then(function(r){
+      if (r.ok) { if (r.data && r.data.lead) Object.assign(l, r.data.lead); return; }
+      l.status = from; TDM.flipNext = true; renderShell(); /* put it back: the server did not save it */
+      var el = document.getElementById('actmsg');
+      if (el && missing(r)) { el.textContent = 'Moving leads needs backend batch 1 on the server. Nothing was changed.'; el.style.color = 'var(--warn)'; }
+    });
+  }
+
+  if (!VIEWS.pipeline) VIEWS.pipeline = function(){
+    var out = hd('Pipeline', 'Your leads by stage. Drag a card, or use its menu, to move it.');
+    if (S.leads === null) return out + panel('Pipeline', errState('The leads service did not respond.'));
+    out += actbar() + '<div class="tdm-board">' + STAGES.map(function(s){
+      var ls = (S.leads || []).filter(function(l){ return l.status === s[0]; });
+      return '<div class="tdm-col" data-stage="' + s[0] + '"><div class="tdm-col-head"><span>' + s[1] + '</span><span class="mono">' + ls.length + '</span></div><div class="tdm-col-body">' +
+        (ls.length ? ls.slice(0, 50).map(function(l){
+          return '<div class="tdm-card" draggable="true" data-lead="' + esc(l.id) + '"><b>' + esc(l.name || 'Unnamed') + '</b>' + esc(l.service || '') +
+            (l.est_revenue ? '<span class="sub" style="display:block;margin:2px 0 0">' + money(l.est_revenue) + '</span>' : '') +
+            '<select class="tdm-move" data-lead="' + esc(l.id) + '" aria-label="Move ' + esc(l.name || 'lead') + '">' +
+            STAGES.map(function(o){ return '<option value="' + o[0] + '"' + (o[0] === s[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') +
+            '</select></div>';
+        }).join('') : '<div class="sub tdm-none" style="text-align:center;padding:14px 0;margin:0">No leads</div>') + '</div></div>';
+    }).join('') + '</div>';
+    TDM.after = function(){
+      document.querySelectorAll('.tdm-card[data-lead]').forEach(function(c){
+        c.ondragstart = function(e){ e.dataTransfer.setData('text/plain', c.getAttribute('data-lead')); e.dataTransfer.effectAllowed = 'move'; c.classList.add('dragging'); };
+        c.ondragend = function(){ c.classList.remove('dragging'); };
+      });
+      document.querySelectorAll('.tdm-col[data-stage]').forEach(function(col){
+        col.ondragover = function(e){ e.preventDefault(); col.classList.add('over'); };
+        col.ondragleave = function(e){ if (!col.contains(e.relatedTarget)) col.classList.remove('over'); };
+        col.ondrop = function(e){ e.preventDefault(); col.classList.remove('over'); moveLead(e.dataTransfer.getData('text/plain'), col.getAttribute('data-stage')); };
+      });
+      document.querySelectorAll('select.tdm-move').forEach(function(sel){
+        sel.onclick = function(e){ e.stopPropagation(); };
+        sel.onchange = function(){ moveLead(sel.getAttribute('data-lead'), sel.value); };
+      });
+    };
+    return out;
+  };
+
+  if (!VIEWS.analytics) VIEWS.analytics = function(){
+    var out = hd('Analytics', 'Where your customers and money come from.');
+    if (!need('tdm_attr', '/attribution/report') || !need('tdm_rev', '/revenue?days=90')) return out + panel('Analytics', loading('Loading...'));
+    var a = S.tdm_attr || {}, r = S.tdm_rev || {};
+    function pk(v){ return v === null || v === undefined ? null : 'PKR ' + Number(v).toLocaleString(); }
+    out += '<div class="grid">' + metric('Ad spend', pk(a.total_spend)) + metric('Revenue (90 days)', pk(r.total)) +
+      metric('Return on ad spend', a.account_roas === null || a.account_roas === undefined ? null : a.account_roas + '×') +
+      metric('Revenue from ads', pk(a.attributed_revenue)) + '</div>';
+    var bs = r.by_source || [], max = bs.reduce(function(m, x){ return Math.max(m, Number(x.total) || 0); }, 0) || 1;
+    out += '<h2>Revenue by source (90 days)</h2>' + panel('Revenue by source', bs.length ? '<div class="tdm-bars">' + bs.map(function(x){
+      return '<div class="tdm-bar"><span>' + esc(x.source || 'unknown') + '</span><div class="tdm-track"><i style="width:' + (100 * (Number(x.total) || 0) / max).toFixed(1) + '%"></i></div><span class="mono">' + money(x.total) + '</span></div>';
+    }).join('') + '</div>' : empty('No revenue recorded in 90 days', ''));
+    var cs = a.campaigns || [];
+    if (cs.length) out += '<h2>Campaigns</h2>' + panel('Campaign results', tb(['Campaign', 'Spend', 'Leads', 'Revenue', 'ROAS', 'Cost per lead'], cs.map(function(c){
+      return '<tr><td>' + esc(c.name) + '</td><td>' + money(c.spend) + '</td><td>' + esc(c.leads === null ? '—' : c.leads) + '</td><td>' + money(c.revenue) +
+        '</td><td>' + esc(c.roas === null || c.roas === undefined ? '—' : c.roas + '×') + '</td><td>' + money(c.cpl) + '</td></tr>';
+    })));
+    return out;
+  };
+
+  if (!VIEWS.permissions) VIEWS.permissions = function(){
+    var out = hd('Permissions', 'Which AI actions need your approval. You can make a rule stricter, never looser than TechDeva’s.');
+    if (!need('tdm_pol', '/policies')) return out + panel('Approval rules', loading('Loading...'));
+    if (S.tdm_pol === null) return out + panel('Approval rules', errState('The policy service did not respond.'));
+    var ps = S.tdm_pol.policies || [];
+    out += actbar() + panel('Approval rules', ps.length ? tb(['Action', 'Risk', 'Needs your approval', 'Why'], ps.map(function(p){
+      var cls = p.risk === 'high' ? 'bad' : (p.risk === 'medium' ? 'warn' : 'ok');
+      var ctl = isOwner() && !p.requires_approval
+        ? '<button class="btn" data-tdmpol="' + esc(p.action) + '" data-risk="' + esc(p.risk) + '">Require approval</button>'
+        : (p.requires_approval ? st('Yes', 'warn') : st('No'));
+      return '<tr><td>' + esc(p.action) + '</td><td>' + st(p.risk, cls) + '</td><td>' + ctl + '</td><td style="white-space:normal">' + esc(p.reason || '') + '</td></tr>';
+    })) : empty('No rules found', ''));
+    TDM.after = function(){
+      document.querySelectorAll('[data-tdmpol]').forEach(function(b){
+        b.onclick = function(){
+          b.disabled = true;
+          act('/policies/' + encodeURIComponent(b.getAttribute('data-tdmpol')), {method:'PUT', body:{risk:b.getAttribute('data-risk'), requires_approval:true}}, 'Rule updated.')
+            .then(function(r){ if (r.ok) need('tdm_pol', '/policies', true); else b.disabled = false; });
+        };
+      });
+    };
+    return out;
+  };
+
+  if (!VIEWS.tools) VIEWS.tools = function(){
+    return hd('Tools', 'The actions your AI agents are allowed to use.') +
+      build('A tool list is not built yet', 'Your agents already act (book, reply, draft posts, run ads within your rules), but there is no page listing those tools with an on/off switch per business.',
+        ['API: list each agent’s tools, with on/off per business', 'Database: per-business tool settings', 'Tie each tool to the rules under Administration > Permissions']);
+  };
+  function offerText(o){ return o.discount_type === 'percent' ? Number(o.discount_value) + '% off' : money(o.discount_value) + ' off'; }
+  function offerState(o){
+    var today = new Date().toISOString().slice(0, 10);
+    if (!o.active) return ['Ended', ''];
+    if (o.ends_on && o.ends_on < today) return ['Expired', 'bad'];
+    if (o.starts_on && o.starts_on > today) return ['Scheduled', 'info'];
+    return ['Live', 'ok live'];
+  }
+  if (!VIEWS.deals) VIEWS.deals = function(){
+    var out = hd('Deals', 'Time-limited offers for your business.');
+    if (!need('tdm_offers', '/business/offers')) return out + panel('Offers', loading('Loading offers...'));
+    if (S.tdm_offers === null) {
+      if (S.tdm_offers_status === 404) return out + build('Offers are not on the server yet', 'The page is ready. It starts working when backend batch 1 (the offers table and API) is deployed.',
+        ['Database: db/29_offers.sql', 'API: "offers" added to /business resources']);
+      return out + panel('Offers', errState('The offers service did not respond.'));
+    }
+    var items = S.tdm_offers.items || [], own = isOwner();
+    if (own) out += '<div class="panel"><div class="panel-head"><div class="panel-title">New offer</div></div>' +
+      '<form id="tdm-offer" class="tdm-form">' +
+      '<label>Title<input name="title" required maxlength="120" placeholder="e.g. Eid facial special"></label>' +
+      '<label>Discount<span class="tdm-pair"><input name="discount_value" type="number" min="0.01" step="0.01" required>' +
+      '<select name="discount_type"><option value="percent">%</option><option value="amount">PKR</option></select></span></label>' +
+      '<label>Starts<input name="starts_on" type="date"></label><label>Ends<input name="ends_on" type="date"></label>' +
+      '<label class="wide">Details<input name="description" maxlength="400" placeholder="What the customer gets, any conditions"></label>' +
+      '<div class="wide"><button class="btn primary" type="submit">Save offer</button></div></form></div>';
+    out += actbar() + panel('Offers', items.length ? tb(['Offer', 'Discount', 'Runs', 'Status', ''], items.map(function(o){
+      var stt = offerState(o);
+      return '<tr' + (TDM.newOffer && String(TDM.newOffer) === String(o.id) ? ' class="tdm-new"' : '') + '><td style="white-space:normal"><b>' + esc(o.title) + '</b>' + (o.description ? '<div class="sub" style="margin:4px 0 0">' + esc(o.description) + '</div>' : '') +
+        '</td><td>' + offerText(o) + '</td><td>' + esc((o.starts_on || 'now') + ' → ' + (o.ends_on || 'no end')) + '</td><td>' + st(stt[0], stt[1]) + '</td><td>' +
+        (own && o.active ? '<button class="btn" data-tdmend="' + esc(o.id) + '">End offer</button>' : '') + '</td></tr>';
+    })) : empty('No offers yet', own ? 'Add one above.' : 'The owner has not added any offers.'));
+    TDM.after = function(){
+      var f = document.getElementById('tdm-offer');
+      if (f) f.onsubmit = function(e){
+        e.preventDefault();
+        var d = new FormData(f), body = {};
+        ['title','description','discount_type','starts_on','ends_on'].forEach(function(k){ var v = String(d.get(k) || '').trim(); if (v) body[k] = v; });
+        body.discount_value = Number(d.get('discount_value'));
+        if (body.ends_on && body.starts_on && body.ends_on < body.starts_on) { var m = document.getElementById('actmsg'); m.textContent = 'The end date is before the start date.'; m.style.color = 'var(--danger)'; return; }
+        f.querySelector('button').disabled = true;
+        act('/business/offers', {method:'POST', body:body}, 'Offer saved.').then(function(r){
+          if (r.ok) { TDM.newOffer = r.data && r.data.item && r.data.item.id; need('tdm_offers', '/business/offers', true); } else f.querySelector('button').disabled = false;
+        });
+      };
+      document.querySelectorAll('[data-tdmend]').forEach(function(b){
+        b.onclick = function(){
+          b.disabled = true;
+          act('/business/offers/' + encodeURIComponent(b.getAttribute('data-tdmend')), {method:'PATCH', body:{active:false}}, 'Offer ended.')
+            .then(function(r){ if (r.ok) need('tdm_offers', '/business/offers', true); else b.disabled = false; });
+        };
+      });
+    };
+    return out;
+  };
+
+  /* Workspace: time zone, currency, language. Added to Business Settings for the owner. */
+  var TZ = ['Asia/Karachi','Asia/Dubai','Asia/Riyadh','Asia/Kolkata','Europe/London','America/New_York','America/Chicago','America/Los_Angeles','Australia/Sydney'];
+  var _tdmSettings = VIEWS.settings;
+  VIEWS.settings = function(){
+    var html = _tdmSettings.apply(this, arguments);
+    if (!isOwner() || !S.config) return html;
+    var c = S.config.config || {}, tz = c.timezone || 'Asia/Karachi', cur = c.currency || 'PKR', lang = c.language || 'en';
+    var tzs = TZ.indexOf(tz) === -1 ? [tz].concat(TZ) : TZ;
+    var ws = '<div class="panel" style="margin-bottom:14px"><div class="panel-head"><div class="panel-title">Workspace</div></div>' +
+      '<form id="tdm-ws" class="tdm-form">' +
+      '<label>Time zone<select name="timezone">' + tzs.map(function(z){ return '<option' + (z === tz ? ' selected' : '') + '>' + esc(z) + '</option>'; }).join('') + '</select></label>' +
+      '<label>Currency<input name="currency" value="' + esc(cur) + '" maxlength="3" pattern="[A-Za-z]{3}" required></label>' +
+      '<label>Language<select name="language"><option value="en"' + (lang === 'en' ? ' selected' : '') + '>English</option><option value="ur"' + (lang === 'ur' ? ' selected' : '') + '>Urdu</option></select></label>' +
+      '<div class="wide"><button class="btn primary" type="submit">Save workspace</button><span id="tdm-wsmsg" class="card-note" style="margin-left:10px"></span></div></form></div>';
+    var prev = TDM.after;
+    TDM.after = function(){
+      if (typeof prev === 'function') prev();
+      var f = document.getElementById('tdm-ws'), m = document.getElementById('tdm-wsmsg');
+      if (f) f.onsubmit = function(e){
+        e.preventDefault();
+        var d = new FormData(f), body = {timezone:d.get('timezone'), currency:String(d.get('currency')).toUpperCase(), language:d.get('language')};
+        m.textContent = 'Saving...'; m.style.color = '';
+        api('/portal/config', {method:'PUT', body:body}).then(function(r){
+          var saved = r.ok && r.data && (r.data.saved || []).indexOf('timezone') !== -1;
+          if (saved) { S.config = {config:r.data.config, onboarding:r.data.onboarding}; m.textContent = 'Saved.'; m.style.color = 'var(--growth)'; return; }
+          m.style.color = r.ok || r.status === 400 ? 'var(--warn)' : 'var(--danger)';
+          m.textContent = (r.ok || (r.status === 400 && r.data && r.data.detail === 'nothing to save'))
+            ? 'The server does not store these yet (backend batch 1). Nothing was changed.'
+            : ((r.data && r.data.detail && typeof r.data.detail === 'string' ? r.data.detail : 'That did not save.'));
+        });
+      };
+    };
+    var at = html.indexOf('</p>');
+    return at === -1 ? ws + html : html.slice(0, at + 4) + ws + html.slice(at + 4);
+  };
+
+  /* ---------- motion, part 2 ----------
+     Everything here answers something: data loading, a lead moving, a save,
+     a new row. All of it is off when the device asks for reduced motion. */
+  (function(){
+    /* 1. a thin progress line while anything is loading */
+    var bar = document.createElement('div'); bar.id = 'tdm-progress'; bar.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(bar);
+    var acting = 0, showT = null, doneT = null, on = false;
+    function busy(){ for (var k in LOADING) if (LOADING[k]) return true; return acting > 0; }
+    function sync(){
+      if (busy()) { clearTimeout(doneT);
+        if (!on) { on = true; clearTimeout(showT); showT = setTimeout(function(){ if (on) bar.className = 'run'; }, 120); } }
+      else if (on) { on = false; clearTimeout(showT);
+        if (bar.className === 'run') { bar.className = 'done'; doneT = setTimeout(function(){ bar.className = ''; }, 420); } }
+    }
+
+    /* 2. saves drive the same line, and the result line slides in when they answer */
+    var _act = act;
+    act = function(){ acting++; sync();
+      var p = _act.apply(this, arguments);
+      p.then(function(r){ acting = Math.max(0, acting - 1); sync();
+        var el = document.getElementById('actmsg');
+        if (el && !REDUCED) { el.classList.remove('tdm-flash'); void el.offsetWidth; el.classList.add('tdm-flash'); }
+      }, function(){ acting = Math.max(0, acting - 1); sync(); });
+      return p; };
+
+    /* 3. a lead card glides to its new column instead of jumping (FLIP) */
+    var before = null;
+    var _shell = renderShell;
+    renderShell = function(){
+      var flip = TDM.flipNext && !REDUCED; TDM.flipNext = false; before = null;
+      if (flip) { before = {}; document.querySelectorAll('.tdm-card[data-lead]').forEach(function(c){
+        before[c.getAttribute('data-lead')] = { r: c.getBoundingClientRect(), col: c.closest('.tdm-col').getAttribute('data-stage') }; }); }
+      var out = _shell.apply(this, arguments);
+      if (before) {
+        document.querySelectorAll('.tdm-card[data-lead]').forEach(function(c){
+          var b = before[c.getAttribute('data-lead')]; if (!b) return;
+          var r = c.getBoundingClientRect(), dx = b.r.left - r.left, dy = b.r.top - r.top;
+          if (!dx && !dy) return;
+          c.animate([{ transform: 'translate(' + dx + 'px,' + dy + 'px) scale(1.03)', boxShadow: '0 18px 40px -16px var(--accent)' },
+                     { transform: 'none', boxShadow: '0 0 0 transparent' }],
+                    { duration: 520, easing: 'cubic-bezier(.2,.8,.2,1)' });
+          var col = c.closest('.tdm-col');
+          if (col && col.getAttribute('data-stage') !== b.col) {
+            var n = col.querySelector('.tdm-col-head .mono');
+            if (n) n.animate([{ transform: 'scale(1.6)', color: 'var(--accent-ink)' }, { transform: 'none' }], { duration: 480, easing: 'cubic-bezier(.2,.8,.2,1)' });
+            col.animate([{ boxShadow: '0 0 0 3px var(--accent-tint), 0 0 36px -10px var(--accent)' }, { boxShadow: '0 0 0 0 transparent' }], { duration: 900 });
+          }
+        });
+      }
+      /* 4. the module icon gives a small pop when you arrive */
+      var v = currentView();
+      if (!REDUCED && TDM.popView !== v) {
+        var ic = document.querySelector('.tdm-nav .tdm-link.active svg');
+        if (ic) ic.animate([{ transform: 'scale(.6) rotate(-12deg)' }, { transform: 'scale(1.18)' }, { transform: 'none' }], { duration: 480, easing: 'cubic-bezier(.2,.8,.2,1)' });
+      }
+      if (TDM.popView !== v) TDM.grown = {};
+      /* bars grow from zero the first time they show on a visit, even when the data arrives after the page */
+      if (!REDUCED) document.querySelectorAll('.tdm-bar').forEach(function(row){
+        var k = row.textContent, i = row.querySelector('.tdm-track i');
+        if (!i || TDM.grown[k]) return; TDM.grown[k] = 1;
+        i.animate([{ transform: 'scaleX(0)' }, { transform: 'none' }], { duration: 900, delay: 120, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'backwards' });
+      });
+      TDM.popView = v;
+      sync();
+      return out;
+    };
+
+    /* 5. while a card is dragged, every column shows it can take it */
+    document.addEventListener('dragstart', function(e){ if (e.target.closest && e.target.closest('.tdm-card[data-lead]')) document.body.classList.add('tdm-dragging'); });
+    document.addEventListener('dragend', function(){ document.body.classList.remove('tdm-dragging'); });
+  })();
+
+  var css = document.createElement('style');
+  css.textContent =
+    '.tdm-nav{display:flex;flex-direction:column;gap:2px;padding:10px}' +
+    '.tdm-sep{height:1px;background:var(--line);margin:8px 6px}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link{display:grid;grid-template-columns:22px 20px minmax(0,1fr) auto;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;' +
+      'color:var(--fg-muted);font-weight:500;border:1px solid transparent;white-space:nowrap;text-decoration:none;justify-content:stretch;text-align:left;height:auto}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link:hover{background:var(--accent-tint);color:var(--fg)}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link.active{background:var(--accent-tint);color:var(--fg);border-color:var(--accent-line)}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link.active svg,.page-dashboard .nav.tdm-nav a.tdm-link.active .tdm-num{color:var(--accent-ink)}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link svg{width:20px;height:20px}' +
+    '.tdm-num{font-family:var(--default-mono-font-family,ui-monospace,monospace);font-size:11px;color:var(--fg-subtle)}' +
+    '.tdm-label{overflow:hidden;text-overflow:ellipsis}' +
+    '.sb-foot .tdm-collapse{display:grid;grid-template-columns:20px minmax(0,1fr);gap:10px;align-items:center;width:100%;margin-bottom:8px;padding:8px 10px;' +
+      'border:0;border-radius:10px;background:none;color:var(--fg-muted);font:inherit;cursor:pointer;text-align:left}' +
+    '.sb-foot .tdm-collapse:hover{background:var(--accent-tint);color:var(--fg)}' +
+    '.sb-foot .tdm-collapse svg{width:18px;height:18px;transition:transform .2s}' +
+    '.tdm-head{margin:0 0 18px}' +
+    '.tdm-eyebrow{font-family:var(--default-mono-font-family,ui-monospace,monospace);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent-ink);margin:0 0 6px}' +
+    '.tdm-tabs{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--line)}' +
+    '.tdm-tabs::-webkit-scrollbar{display:none}' +
+    '.tdm-tabs a{flex:none;padding:10px 14px;color:var(--fg-muted);font-weight:500;border-bottom:2px solid transparent;margin-bottom:-1px;text-decoration:none}' +
+    '.tdm-tabs a:hover{color:var(--fg)}' +
+    '.tdm-tabs a.active{color:var(--fg);border-bottom-color:var(--accent)}' +
+    '@media(min-width:901px){' +
+      '.app.tdm-collapsed .sidebar{width:72px!important;flex-basis:72px!important;min-width:72px!important}' +
+      '.app.tdm-collapsed .brand-text,.app.tdm-collapsed .tdm-label,.app.tdm-collapsed .tdm-num,.app.tdm-collapsed .tdm-link .pill,.app.tdm-collapsed .sb-foot b,.app.tdm-collapsed .sb-foot{font-size:0}' +
+      '.app.tdm-collapsed .tdm-label,.app.tdm-collapsed .tdm-num,.app.tdm-collapsed .tdm-link .pill,.app.tdm-collapsed .brand-text{display:none}' +
+      '.app.tdm-collapsed .page-dashboard .nav.tdm-nav a.tdm-link,.app.tdm-collapsed .sb-foot .tdm-collapse{grid-template-columns:20px;justify-content:center;padding-inline:0}' +
+      '.app.tdm-collapsed .sb-foot .tdm-collapse svg{transform:rotate(180deg)}' +
+      '.app.tdm-collapsed .brand{justify-content:center}' +
+    '}' +
+    '@media(max-width:900px){.tdm-collapse{display:none}}' +
+    '.tdm-st{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:99px;font-size:11px;border:1px solid var(--line-strong);color:var(--fg-muted);white-space:nowrap}' +
+    '.tdm-st::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}' +
+    '.tdm-st.ok{color:var(--success-ink,var(--growth))}.tdm-st.warn{color:var(--warning-ink,var(--warn))}' +
+    '.tdm-st.bad{color:var(--danger-ink,var(--danger))}.tdm-st.info{color:var(--info-ink,var(--accent-ink))}' +
+    '.tdm-build{border:1px dashed var(--warning-ink,var(--warn));border-radius:14px;padding:18px 20px;background:var(--warning-tint,rgba(240,185,85,.08));margin-bottom:16px}' +
+    '.tdm-build h3{margin:0 0 6px;font-size:15px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}' +
+    '.tdm-build p{margin:0 0 6px;color:var(--fg-muted);font-size:13px;max-width:72ch}.tdm-build ul{margin:0;padding-left:18px;color:var(--fg-muted);font-size:13px}' +
+    '.tdm-build-tag{font-size:10px;letter-spacing:.1em;padding:2px 7px;border-radius:4px;background:var(--warning-ink,var(--warn));color:var(--bg);font-weight:600}' +
+    '.tdm-board{display:grid;gap:12px;grid-auto-flow:column;grid-auto-columns:minmax(210px,1fr);overflow-x:auto;padding-bottom:6px}' +
+    '.tdm-col{background:var(--card,var(--panel));border:1px solid var(--line);border-radius:14px;min-height:200px;display:flex;flex-direction:column}' +
+    '.tdm-col-head{display:flex;justify-content:space-between;padding:11px 14px;border-bottom:1px solid var(--line);font-weight:600;font-size:13px}' +
+    '.tdm-col-body{padding:10px;display:flex;flex-direction:column;gap:8px}' +
+    '.tdm-card{display:block;background:var(--bg-elevated,var(--panel2));border:1px solid var(--line);border-radius:10px;padding:10px;font-size:12.5px;color:var(--fg-muted);text-decoration:none}' +
+    '.tdm-card b{display:block;font-size:13px;color:var(--fg)}' +
+    '.tdm-card[draggable]{cursor:grab}.tdm-card.dragging{opacity:.45}' +
+    '.tdm-col.over{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-tint)}' +
+    '.tdm-move{margin-top:8px;width:100%;font:inherit;font-size:12px;padding:4px 6px;border-radius:7px;border:1px solid var(--line);background:var(--card,var(--panel));color:var(--fg-muted)}' +
+    '.tdm-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;padding:16px}' +
+    '.tdm-form label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--fg-muted)}' +
+    '.tdm-form .wide{grid-column:1/-1}' +
+    '.tdm-form input,.tdm-form select{font:inherit;font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--line-strong,var(--line));background:var(--bg-elevated,var(--panel2));color:var(--fg)}' +
+    '.tdm-pair{display:flex;gap:6px}.tdm-pair input{flex:1;min-width:0}' +
+    '.tdm-bars{display:grid;gap:8px;padding:16px}' +
+    '.tdm-bar{display:grid;grid-template-columns:minmax(90px,170px) minmax(0,1fr) auto;gap:10px;align-items:center;font-size:13px}' +
+    '.tdm-track{height:8px;border-radius:4px;background:var(--bg-elevated,var(--panel2));overflow:hidden}' +
+    '.tdm-track i{display:block;height:100%;background:var(--accent);border-radius:4px}' +
+    /* motion */
+    '.tdm-nav,.tdm-tabs{position:relative}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link{position:relative;z-index:1;transition:color .25s}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link.active{background:transparent;border-color:transparent}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link.active:before{display:none}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link svg{transition:transform .3s cubic-bezier(.2,.8,.2,1)}' +
+    '.page-dashboard .nav.tdm-nav a.tdm-link:hover svg{transform:translateX(2px)}' +
+    '.tdm-ink{position:absolute;top:0;left:0;pointer-events:none;z-index:0;' +
+      'transition:transform .45s cubic-bezier(.2,.8,.2,1),height .45s cubic-bezier(.2,.8,.2,1),width .45s cubic-bezier(.2,.8,.2,1)}' +
+    '.tdm-ink.no-anim{transition:none}' +
+    '.tdm-ink-y{border-radius:10px;background:var(--accent-tint);border:1px solid var(--accent-line);' +
+      'box-shadow:inset 3px 0 0 var(--accent),0 0 28px -8px var(--accent)}' +
+    '.tdm-tabs a{position:relative;z-index:1;transition:color .2s}' +
+    '.tdm-tabs a.active{border-bottom-color:transparent}' +
+    '.tdm-ink-x{top:auto;bottom:0;height:2px;border-radius:2px;background:var(--accent);box-shadow:0 0 14px var(--accent)}' +
+    '@keyframes tdmRise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}' +
+    '.tdm-enter>*:not(#incbar):not(.tdm-head){animation:tdmRise .55s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--tdm-i,0) * 50ms)}' +
+    '.tdm-enter .grid>*{animation:tdmRise .55s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--tdm-j,0) * 40ms + 90ms)}' +
+    '.page-dashboard a.card,.page-dashboard .pin-card,.tdm-card{transition:transform .25s cubic-bezier(.2,.8,.2,1),border-color .25s,box-shadow .25s}' +
+    '.page-dashboard a.card:hover,.page-dashboard .pin-card:hover,.tdm-card:hover{transform:translateY(-2px);border-color:var(--accent-line);box-shadow:0 10px 30px -14px var(--accent)}' +
+    '.page-dashboard .btn{transition:transform .12s,background-color .2s,border-color .2s}' +
+    '.page-dashboard .btn:active{transform:scale(.97)}' +
+    '.card-value{font-variant-numeric:tabular-nums}' +
+    /* motion, part 2 */
+    '#tdm-progress{position:fixed;top:0;left:0;height:2px;width:0;z-index:9999;pointer-events:none;opacity:0;' +
+      'background:linear-gradient(90deg,transparent,var(--accent) 30%,var(--accent-ink));box-shadow:0 0 12px var(--accent);transition:width .3s,opacity .3s}' +
+    '#tdm-progress.run{opacity:1;width:82%;transition:width 6s cubic-bezier(.1,.7,.2,1),opacity .2s}' +
+    '#tdm-progress.done{opacity:0;width:100%;transition:width .2s,opacity .35s .15s}' +
+    '@keyframes tdmShimmer{from{background-position:-200% 0}to{background-position:200% 0}}' +
+    '.page-dashboard .state:has(.spin){background:linear-gradient(100deg,transparent 30%,var(--accent-tint) 50%,transparent 70%) 0 0/200% 100%;animation:tdmShimmer 1.6s linear infinite}' +
+    '@keyframes tdmRow{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}' +
+    '.tdm-enter tbody tr{animation:tdmRow .45s cubic-bezier(.2,.8,.2,1) both}' +
+    '.tdm-enter tbody tr:nth-child(1){animation-delay:155ms}' +
+    '.tdm-enter tbody tr:nth-child(2){animation-delay:190ms}' +
+    '.tdm-enter tbody tr:nth-child(3){animation-delay:225ms}' +
+    '.tdm-enter tbody tr:nth-child(4){animation-delay:260ms}' +
+    '.tdm-enter tbody tr:nth-child(5){animation-delay:295ms}' +
+    '.tdm-enter tbody tr:nth-child(6){animation-delay:330ms}' +
+    '.tdm-enter tbody tr:nth-child(7){animation-delay:365ms}' +
+    '.tdm-enter tbody tr:nth-child(8){animation-delay:400ms}' +
+    '.tdm-enter tbody tr:nth-child(9){animation-delay:435ms}' +
+    '.tdm-enter tbody tr:nth-child(10){animation-delay:470ms}' +
+    '.tdm-enter tbody tr:nth-child(11){animation-delay:505ms}' +
+    '.tdm-enter tbody tr:nth-child(12){animation-delay:540ms}' +
+    '.tdm-enter tbody tr:nth-child(n+13){animation-delay:540ms}' +
+    '.tdm-track i{transform-origin:left}' +
+    '@keyframes tdmFlash{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}' +
+    '#actmsg.tdm-flash{animation:tdmFlash .35s cubic-bezier(.2,.8,.2,1)}' +
+    '@keyframes tdmPulse{0%{box-shadow:0 0 0 0 currentColor}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}' +
+    '.tdm-st.live::before{animation:tdmPulse 1.8s ease-out infinite}' +
+    '@keyframes tdmNew{0%{background:var(--accent-tint)}100%{background:transparent}}' +
+    '.page-dashboard tr.tdm-new td{animation:tdmNew 2.4s ease-out}' +
+    'body.tdm-dragging .tdm-col{border-color:var(--accent-line);transition:border-color .2s}' +
+    'body.tdm-dragging .tdm-col-body{background:linear-gradient(var(--accent-tint),var(--accent-tint)) 0 0/100% 100% no-repeat;border-radius:0 0 14px 14px;transition:background .2s}' +
+    '.tdm-card.dragging{transform:rotate(-2deg) scale(.98)}' +
+    '.page-dashboard .btn.primary{position:relative;overflow:hidden}' +
+    '.page-dashboard .btn.primary::after{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 35%,rgba(255,255,255,.22) 50%,transparent 65%);transform:translateX(-120%);transition:transform .6s}' +
+    '.page-dashboard .btn.primary:hover::after{transform:translateX(120%)}' +
+    '@media(prefers-reduced-motion:reduce){#tdm-progress,.page-dashboard .state:has(.spin),.tdm-enter tbody tr,#actmsg.tdm-flash,.tdm-st.live::before,.page-dashboard tr.tdm-new td,.page-dashboard .btn.primary::after{animation:none!important;transition:none!important}}' +
+    '@media(prefers-reduced-motion:reduce){.tdm-ink,.tdm-enter *,.tdm-enter>*,.page-dashboard .btn,.tdm-card{transition:none!important;animation:none!important;transform:none!important}}';
+  document.head.appendChild(css);
+})();
+
+
+/* ======================================================== Social Inbox
+   Facebook Messenger, Instagram DMs and comments (app/social_agent.py). The AI
+   answers by itself; serious clients are marked 🔥 and emailed to the owner;
+   anything it left for the owner is marked. Writing in a conversation makes the
+   AI go quiet there until the owner hands it back. */
+var SI = { filter: '', sel: null, data: undefined, view: undefined, msg: null, text: '', pub: false };
+function siLoad(force){
+  if (SI.data !== undefined && !force) return;
+  SI.data = SI.data || null;
+  api('/social-inbox/threads' + (SI.filter ? '?filter=' + SI.filter : '')).then(function(r){
+    SI.data = r.ok ? r.data : { error: (r.data && r.data.detail) || 'The social inbox did not load.' }; renderShell();
+  });
+}
+function siOpen(id){
+  SI.sel = id; SI.view = null; SI.text = ''; SI.pub = false; renderShell();
+  api('/social-inbox/threads/' + encodeURIComponent(id)).then(function(r){
+    SI.view = r.ok ? r.data : { error: (r.data && r.data.detail) || 'Could not open the conversation.' }; renderShell();
+  });
+}
+function siWho(t){ return (t.platform === 'instagram' ? '📸 Instagram' : '📘 Facebook') + ' · ' + (t.kind === 'comment' ? 'comment' : 'message'); }
+VIEWS.socialinbox = function(){
+  var out = '<h1>Social Inbox</h1><p class="sub">Facebook and Instagram messages and comments. Your assistant answers 24/7 with your own prices and details; ' +
+    '🔥 marks a serious client (you also get an email). Write in any conversation to take over; the assistant then stays quiet there.</p>';
+  var want = (location.hash.split('?id=')[1] || '').split('&')[0];
+  if (want && SI.sel !== want) setTimeout(function(){ siOpen(want); }, 0);
+  siLoad(false);
+  if (!SI.data) return out + panel('Conversations', loading('Reading your messages...'));
+  if (SI.data.error) return out + panel('Conversations', errState(SI.data.error));
+  var d = SI.data, st = d.settings || {}, c = d.counts || {};
+  if (SI.msg) out += '<div class="card-note" style="margin:6px 0 12px;color:' + (SI.msg.bad ? 'var(--danger)' : 'var(--growth)') + '">' + esc(SI.msg.text) + '</div>';
+  if (!st.enabled) out += '<div class="bil-note">The assistant is switched off: messages are collected here but not answered. Switch it on in the settings below.</div>';
+  var pages = d.pages || [];
+  if (!pages.length) out += '<div class="bil-note">No Facebook Page is connected yet. <a href="#/posts">Connect Facebook &amp; Instagram on the Posts page</a>; messages start arriving here after that.</div>';
+  else if (pages.some(function(p){ return !p.subscribed; })) out += '<div class="bil-note">Facebook has not yet agreed to send us messages for: ' +
+    esc(pages.filter(function(p){ return !p.subscribed; }).map(function(p){ return p.page_name; }).join(', ')) + '. Press Reconnect on the Posts page and allow all the permissions it asks for.</div>';
+  var chips = [['', 'All (' + (c.total || 0) + ')'], ['hot', '🔥 Serious (' + (c.hot || 0) + ')'], ['owner', '🙋 Needs you (' + (c.owner || 0) + ')']].map(function(f){
+    return '<button class="btn' + (SI.filter === f[0] ? ' primary' : '') + '" data-sif="' + f[0] + '">' + esc(f[1]) + '</button>'; }).join(' ');
+  var threads = d.threads || [];
+  var list = threads.length ? threads.map(function(t){
+    return '<div class="ibx-item' + (SI.sel === t.id ? ' sel' : '') + '" data-sit="' + esc(t.id) + '">' +
+      '<div style="display:flex;justify-content:space-between;gap:8px"><strong>' + (t.hot ? '🔥 ' : '') + esc(t.person_name || 'Customer') + '</strong>' +
+      '<span class="card-note">' + esc(when(t.last_message_at)) + '</span></div>' +
+      '<div class="card-note">' + esc(siWho(t)) + (t.intent ? ' · ' + esc(t.intent) : '') + (t.ai_paused ? ' · you are replying' : '') + '</div>' +
+      (t.needs_owner ? '<div class="card-note" style="color:var(--danger)">🙋 ' + esc(t.needs_owner) + '</div>' : '') +
+      '<div class="card-note" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(t.last || '') + '</div></div>';
+  }).join('') : empty('Nothing here yet', 'Messages and comments from Facebook and Instagram appear here.');
+  var chat;
+  if (!SI.sel) chat = empty('Select a conversation', 'Tap one to read it and reply.');
+  else if (SI.view === null) chat = loading('Opening...');
+  else if (SI.view.error) chat = errState(SI.view.error);
+  else {
+    var th = SI.view.thread;
+    var who = { customer: th.person_name || 'Customer', ai: 'Assistant', owner: 'You' };
+    chat = '<div style="padding:10px 14px;border-bottom:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between">' +
+      '<div><b>' + (th.hot ? '🔥 ' : '') + esc(th.person_name || 'Customer') + '</b> <span class="card-note">' + esc(siWho(th)) +
+        (th.score != null ? ' · serious ' + esc(th.score) + '/100' : '') + '</span>' +
+        (th.lead_id ? ' <a class="card-note" href="#/leads">· saved as a lead</a>' : '') + '</div>' +
+      '<button class="btn" id="si_ai">' + (th.ai_paused ? '🤖 Let the assistant reply again' : '✋ Pause the assistant here') + '</button></div>' +
+      (th.needs_owner ? '<div class="ap-check" style="margin:10px 14px">🙋 ' + esc(th.needs_owner) + '</div>' : '') +
+      '<div class="ibx-msgs" style="padding:10px 14px;display:grid;gap:8px">' + SI.view.messages.map(function(m){
+        var mine = m.author !== 'customer';
+        var tag = m.visibility === 'public' ? ' · public' : '';
+        var stx = m.status === 'held' ? ' · <span style="color:var(--danger)">held back, not sent</span>' : m.status === 'failed' ? ' · <span style="color:var(--danger)" title="' + esc(m.error || '') + '">not sent</span>' : '';
+        return '<div class="bub ' + (mine ? 'assistant' : 'user') + (m.author === 'owner' ? ' owner' : '') + '">' + esc(m.text) +
+          '<div class="t">' + esc(who[m.author]) + tag + ' · ' + esc(when(m.created_at)) + stx + '</div>' +
+          (m.status === 'failed' && m.error ? '<div class="t" style="color:var(--danger)">' + esc(m.error) + '</div>' : '') + '</div>';
+      }).join('') + '</div>' +
+      '<div style="padding:10px 14px;border-top:1px solid var(--line)">' +
+        '<textarea class="fld" id="si_text" rows="3" maxlength="1000" style="width:100%" placeholder="Write your reply...">' + esc(SI.text) + '</textarea>' +
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px">' +
+          (th.kind === 'comment' ? '<label class="card-note"><input type="checkbox" id="si_pub"' + (SI.pub ? ' checked' : '') + '> Reply publicly under the comment (otherwise a private message)</label>' : '') +
+          '<button class="btn primary" id="si_send">Send</button></div>' +
+        (th.kind === 'dm' ? '<div class="card-note" style="margin-top:4px">Facebook and Instagram let a business reply within 24 hours of the customer\'s last message.</div>' : '') +
+      '</div>';
+  }
+  out += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' + chips + ' <button class="btn" id="si_ref">Refresh</button></div>';
+  out += '<div class="ibx">' + panel('Conversations', '<div class="ibx-list">' + list + '</div>') + panel('Conversation', chat) + '</div>';
+  if (isOwner()) out += panel('Assistant settings', '<div style="padding:14px 16px;display:grid;gap:8px">' +
+    '<label><input type="checkbox" id="si_on"' + (st.enabled ? ' checked' : '') + '> Answer Facebook and Instagram messages automatically</label>' +
+    '<label><input type="checkbox" id="si_cm"' + (st.reply_comments ? ' checked' : '') + '> Also answer comments (a short public reply, details by private message)</label>' +
+    '<div><label class="card-note">Email serious-client alerts to (empty = the owner\'s login email)</label><input class="fld" id="si_mail" type="email" value="' + esc(st.alert_email || '') + '" style="max-width:320px"></div>' +
+    '<div><button class="btn" id="si_save">Save settings</button></div></div>');
+  return out;
+};
+function siWire(){
+  if (currentView() !== 'socialinbox') return;
+  var g = function(id){ return document.getElementById(id); };
+  var say = function(t, bad){ SI.msg = { text: t, bad: !!bad }; renderShell(); };
+  document.querySelectorAll('[data-sif]').forEach(function(b){ b.onclick = function(){ SI.filter = b.getAttribute('data-sif'); SI.data = undefined; renderShell(); }; });
+  document.querySelectorAll('[data-sit]').forEach(function(el){ el.onclick = function(){ siOpen(el.getAttribute('data-sit')); }; });
+  if (g('si_ref')) g('si_ref').onclick = function(){ SI.data = undefined; if (SI.sel) siOpen(SI.sel); else renderShell(); };
+  if (g('si_text')) g('si_text').oninput = function(){ SI.text = g('si_text').value; };
+  if (g('si_pub')) g('si_pub').onchange = function(){ SI.pub = g('si_pub').checked; };
+  if (g('si_send')) g('si_send').onclick = function(){
+    var text = (g('si_text').value || '').trim(); if (!text) return;
+    g('si_send').disabled = true;
+    api('/social-inbox/threads/' + SI.sel + '/reply', { method: 'POST', body: { text: text, public: SI.pub } }).then(function(r){
+      if (r.ok) { SI.text = ''; SI.msg = { text: 'Sent. The assistant is paused in this conversation.' }; SI.data = undefined; siOpen(SI.sel); }
+      else { say((r.data && r.data.detail) || 'Not sent.', true); }
+    });
+  };
+  if (g('si_ai')) g('si_ai').onclick = function(){
+    var on = SI.view && SI.view.thread && SI.view.thread.ai_paused;
+    api('/social-inbox/threads/' + SI.sel + '/ai', { method: 'POST', body: { on: !!on } }).then(function(){ SI.data = undefined; siOpen(SI.sel); });
+  };
+  if (g('si_save')) g('si_save').onclick = function(){
+    api('/social-inbox/settings', { method: 'PUT', body: { enabled: g('si_on').checked, reply_comments: g('si_cm').checked, alert_email: g('si_mail').value } })
+      .then(function(r){ SI.data = undefined; say(r.ok ? 'Settings saved.' : ((r.data && r.data.detail) || 'Not saved.'), !r.ok); });
+  };
+}
+(function(){
+  NAV.forEach(function(g){
+    if (g.label === 'CRM' && !g.items.some(function(it){ return it.id === 'socialinbox'; })) {
+      var i = -1; g.items.forEach(function(it, k){ if (it.id === 'inbox') i = k; });
+      g.items.splice(i + 1, 0, { id: 'socialinbox', icon: '💬', name: 'Social Inbox', sub: false });
+    }
+  });
+  var _siNav = navHTML;
+  navHTML = function(active){
+    var h = _siNav(active), n = SI.data && SI.data.counts ? SI.data.counts.hot : 0;
+    return n ? h.replace(/(href="#\/socialinbox"[^>]*>[\s\S]*?<span class="nt">[^<]*<\/span>)/, '$1<span class="pill attn">🔥 ' + esc(n) + '</span>') : h;
+  };
+  var _siRender = renderShell;
+  renderShell = function(){ _siRender(); siWire(); };
+  window.addEventListener('hashchange', function(){ SI.msg = null; if (currentView() === 'socialinbox') SI.data = undefined; });
+})();
+
 boot();
 </script>
 </body>

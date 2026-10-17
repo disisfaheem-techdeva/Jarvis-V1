@@ -36,10 +36,11 @@ SECTIONS = ("overview", "leads", "customers", "appointments", "calendar", "daily
             "marketing", "attendance", "hr", "hermes", "ai", "bizagent", "orders", "calls")
 
 # What needs a "yes" first.
-CONFIRM = {"add_expense", "cancel_appointment", "schedule_post", "record_order_payment", "cancel_order"}
+CONFIRM = {"add_expense", "cancel_appointment", "schedule_post", "publish_post",
+           "record_order_payment", "cancel_order"}
 ACTIONS = {"navigate", "book_appointment", "reschedule_appointment", "cancel_appointment",
            "complete_appointment", "add_customer", "add_lead", "add_expense", "schedule_post",
-           "update_order", "record_order_payment", "cancel_order", "write_campaign"}
+           "publish_post", "update_order", "record_order_payment", "cancel_order", "write_campaign"}
 _HHMM = re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -128,6 +129,27 @@ def _appt(cur, appt_id):
     return cur.fetchone()
 
 
+def _draft(cur, post_id):
+    """The draft "post it" is about: the one named, else the newest draft of
+    the last week. Only a draft (or a failed post) can still be posted."""
+    pid = str(post_id or "").strip()
+    if re.match(r"^[0-9a-f-]{36}$", pid):
+        cur.execute("SELECT id, caption, platforms, image_urls FROM social_posts "
+                    "WHERE id = %s AND status IN ('draft','failed')", (pid,))
+    else:
+        cur.execute("SELECT id, caption, platforms, image_urls FROM social_posts "
+                    "WHERE status = 'draft' AND video_token IS NULL "
+                    "AND created_at > now() - interval '7 days' ORDER BY created_at DESC LIMIT 1")
+    return cur.fetchone()
+
+
+def _post_check(role, founder):
+    if founder:
+        raise ActionError("posting is the client's own decision, so they have to do it")
+    if role not in ("owner", "techdeva_admin"):
+        raise ActionError("only the business owner can post for the business")
+
+
 def _need(args, key, what):
     v = str(args.get(key) or "").strip()
     if not v:
@@ -167,6 +189,17 @@ def describe(tid, role, action, args, founder=False):
             raise ActionError("scheduling a post is the client's own decision, so they have to do it")
         if role not in ("owner", "techdeva_admin"):
             raise ActionError("only the business owner can post for the business")
+    if action == "publish_post":
+        _post_check(role, founder)
+        with tenant_session(tid, role) as cur:
+            p = _draft(cur, args.get("post_id"))
+        if not p:
+            raise ActionError("there is no draft waiting to be posted. Tell me what the post is about and I'll make one")
+        args["post_id"] = str(p["id"])      # sealed with the question: a yes posts exactly this one
+        where = " and ".join(x.capitalize() for x in (p["platforms"] or ["facebook"]))
+        n = len(p["image_urls"] or [])
+        pics = " with {} picture{}".format(n, "" if n == 1 else "s") if n else ""
+        return "Post this on {} now{}: “{}”?".format(where, pics, str(p["caption"])[:140])
     if action == "add_expense":
         amt = _money(args.get("amount"))
         what = _need(args, "description", "what the expense was for")
@@ -314,6 +347,24 @@ def run(tid, role, uid, action, args, founder=False):
             raise ActionError("I saved it as a draft on the Posts page, but could not schedule it: %s" % e)
         return {"refresh": ["posts"], "post": out.get("post")}, None
 
+    if action == "publish_post":
+        _post_check(role, founder)
+        with tenant_session(tid, role) as cur:
+            p = _draft(cur, args.get("post_id"))
+        if not p:
+            raise ActionError("that draft is not waiting any more; it may already be posted or discarded")
+        out = _call(tid, role, uid, "POST", "/social/posts/%s/publish" % p["id"], {})
+        res = out.get("results") or {}
+        bad = ["%s (%s)" % (k.capitalize(), str((v or {}).get("error") or "refused")[:120])
+               for k, v in res.items() if not (v or {}).get("ok")]
+        if out.get("status") == "failed":
+            raise ActionError("Facebook did not take it: %s. It is still in your drafts" % "; ".join(bad))
+        note = None
+        if out.get("status") == "queued":
+            note = "the video is being processed and goes out within a minute or two"
+        elif bad:
+            note = "but it did not go out on %s" % "; ".join(bad)
+        return {"refresh": ["posts"], "post": out.get("post")}, note
     if action == "write_campaign":
         # Writes a DRAFT through the planner (same owner + Pro checks as the
         # Campaigns page) and puts the attached picture on it. It never

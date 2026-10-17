@@ -1,9 +1,12 @@
 """Trial data retention (Faheem's rule, 30 Sep 2026): only paying clients'
 data is kept.
 
-A business whose free trial ended unpaid is locked (trial.py). Three days
-before its deletion day the owner is warned (lock screen + email when the
-server can send email). On the deletion day, 15 days after the trial ended,
+A business whose free trial ended unpaid is locked (trial.py). The owner is
+warned by email (and on the lock screen) three days before its deletion day.
+Only an email that was actually sent counts as the warning (Faheem, 16 Oct
+2026): until it goes out the business is not "warned", is tried again every
+run, and is never deleted. The deletion day is then the later of 15 days
+after the trial ended and three full days after that email. On that day
 everything the business has on the platform is deleted at once: every row in
 every table (they all cascade from the tenant), its sign-up record, and, via
 the server's provisioning job, its WhatsApp agent containers and session.
@@ -57,7 +60,7 @@ SELECT t.id, t.name, t.status::text AS status, t.trial_ends_at,
        CASE WHEN w.valid THEN r.warned_at END AS warned_at, coalesce(r.emailed, false) AS emailed
   FROM tenants t
   LEFT JOIN data_retention r ON r.tenant_id = t.id
-  CROSS JOIN LATERAL (SELECT coalesce(r.warned_at >= t.trial_ends_at + interval '%(v)d days', false) AS valid) w
+  CROSS JOIN LATERAL (SELECT coalesce(r.warned_at >= t.trial_ends_at + interval '%(v)d days' AND r.emailed, false) AS valid) w
  WHERE t.status::text IN ('trial', 'paused')
    AND NOT t.is_test
    AND t.trial_ends_at IS NOT NULL
@@ -142,7 +145,10 @@ def delete_business(tid, by="retention"):
 
 
 def _warn(cur, c):
-    """Mark the owner warned; send the email when the server can."""
+    """Email the owner that the data will be deleted. Returns True only when the
+    email was sent; only then is the business marked warned (warned_at), which
+    starts the WARN_DAYS before deletion. A failure, no email server or no owner
+    address leaves it unwarned, so it is tried again on the next run."""
     emailed = False
     try:
         from .account import mail_configured, send_mail
@@ -158,11 +164,19 @@ def _warn(cur, c):
                           "brought back.\n\nTo keep it, pay for your plan before then: open your dashboard and go to "
                           "Plan & Billing.\n\nTechDeva" % (c["name"], day))
                 emailed = True
-    except Exception as e:                     # a mail problem never blocks the warning itself
+    except Exception as e:                     # not sent: not warned, tried again next run
         print("[retention] warning email for %s failed: %s" % (c["id"], type(e).__name__), flush=True)
-    cur.execute("""INSERT INTO data_retention (tenant_id, warned_at, emailed) VALUES (%s, now(), %s)
-                   ON CONFLICT (tenant_id) DO UPDATE SET warned_at = now(), emailed = EXCLUDED.emailed,
-                                                         updated_at = now()""", (str(c["id"]), emailed))
+    if emailed:
+        cur.execute("""INSERT INTO data_retention (tenant_id, warned_at, emailed) VALUES (%s, now(), true)
+                       ON CONFLICT (tenant_id) DO UPDATE SET warned_at = now(), emailed = true,
+                                                             updated_at = now()""", (str(c["id"]),))
+    else:
+        # an older warning (before a trial extension) stops counting too: emailed = false
+        cur.execute("""INSERT INTO data_retention (tenant_id, emailed) VALUES (%s, false)
+                       ON CONFLICT (tenant_id) DO UPDATE SET emailed = false, updated_at = now()""",
+                    (str(c["id"]),))
+        print("[retention] %s not warned yet: the warning email was not sent" % c["id"], flush=True)
+    return emailed
 
 
 def run_due(force=False):
@@ -179,8 +193,8 @@ def run_due(force=False):
             if c["hold"] or c["warned_at"]:
                 continue
             if c["trial_ends_at"] + _dt.timedelta(days=GRACE_DAYS - WARN_DAYS) <= now:
-                _warn(cur, c)
-                done += 1
+                if _warn(cur, c):
+                    done += 1
     for c in rows:
         if not c["hold"] and c["warned_at"] and c["deletes_on"] <= now:
             if delete_business(c["id"]):
@@ -262,6 +276,9 @@ def make_retention_router():
         with tenant_session(None, "techdeva_admin") as cur:
             cur.execute("INSERT INTO platform_settings (key, value) VALUES (%s, %s) "
                         "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (SERVER_ALERT_KEY, str(at)))
+            record(cur, action="techdeva.setting", resource="platform_settings", resource_id=SERVER_ALERT_KEY,
+                   actor=str(uid or "founder"), actor_type="human", status="ok",
+                   detail={"server_alert_at": at}, error=None)
         return {"ok": True, "server_alert_at": at}
 
     # ---- the server's provisioning job removes deleted businesses' agents

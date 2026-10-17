@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+/*
+ * Instant Grill design tokens.
+ * Theme: dark-locked. The brand is fire on charcoal, and a light mode would
+ * lose that, so the whole site is one dark theme (no section flips).
+ * Accent: one ember orange, used for CTAs, prices and focus only.
+ * Shape: cards 20px, inputs 12px, every button and chip is a full pill.
+ * Z-index scale: header 30, mobile buy bar 30, drawer backdrop 40, drawer 50, grain 60.
+ */
+@theme {
+  --color-coal-950: #0c0d0f;
+  --color-coal-900: #121316;
+  --color-coal-850: #17191c;
+  --color-coal-800: #1d1f23;
+  --color-coal-700: #2a2d32;
+  --color-coal-600: #3a3e45;
+  --color-ash-400: #9a9ca3;
+  --color-ash-300: #b9bbc1;
+  --color-ash-100: #ecebe8;
+  --color-ash-50: #f6f5f3;
+  --color-ember-300: #ffa47a;
+  --color-ember-400: #ff8650;
+  --color-ember-500: #f2652a;
+  --color-ember-600: #d9501a;
+  --color-danger: #ff7b7b;
+  --color-ok: #6fd3a0;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --radius-card: 20px;
+  --radius-field: 12px;
+
+  --ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html {
+  color-scheme: dark;
+  scroll-behavior: smooth;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background: var(--color-coal-950);
+  color: var(--color-ash-100);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--color-ember-500);
+  color: var(--color-coal-950);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-ember-400);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* Film grain on a fixed, non-interactive layer so it never repaints with scroll. */
+.grain::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Ember glow behind product imagery. Static, so no motion cost. */
+.ember-glow {
+  background:
+    radial-gradient(60% 50% at 50% 70%, rgb(242 101 42 / 0.35), transparent 70%),
+    radial-gradient(40% 35% at 55% 80%, rgb(255 164 122 / 0.25), transparent 70%);
+}
+
+/* Hide the number input spinners in the quantity stepper. */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Live-coal flicker on the hero glow. Disabled by the reduced-motion block above. */
+@keyframes ember-flicker {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  30% { opacity: 1; transform: scale(1.03); }
+  55% { opacity: 0.75; transform: scale(0.99); }
+  80% { opacity: 0.95; transform: scale(1.02); }
+}
+.ember-flicker {
+  animation: ember-flicker 4.5s ease-in-out infinite;
+}

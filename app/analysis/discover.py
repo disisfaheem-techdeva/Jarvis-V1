@@ -29,7 +29,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from .fetchers import GRAPH, HTTP_TIMEOUT, UA, gap
+from .fetchers import GRAPH, HTTP_TIMEOUT, gap
 
 MAX_DISCOVERED = 5
 
