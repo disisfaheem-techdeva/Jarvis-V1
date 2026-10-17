@@ -5,11 +5,15 @@ The AI and Meta are fakes; the database, the media store, the loopback call
 into the platform's own publish endpoint and the sealed confirmation are real.
 """
 import base64
+import os
 import uuid
 
 import pytest
 from psycopg.types.json import Json
 from starlette.testclient import TestClient
+
+if "@db:" in os.environ.get("DATABASE_URL", ""):
+    pytest.skip("refusing to run against the compose (production) database", allow_module_level=True)
 
 from app import console, crypto, jarvis_actions as ja, social
 from app.db import tenant_session
