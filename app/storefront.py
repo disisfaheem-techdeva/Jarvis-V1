@@ -143,7 +143,7 @@ class SFProduct(_Loose):
     slug: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9][a-z0-9-]*$")
     name: str = Field(min_length=1, max_length=120)
     category: Optional[str] = Field(None, max_length=40)
-    price: float = Field(gt=0, le=1_000_000)
+    price: float = Field(ge=0, le=1_000_000)       # 0 = a draft with no price yet
     description: Optional[str] = Field(None, max_length=1000)
     active: bool = True
     soldOut: bool = False
@@ -384,7 +384,8 @@ def ingest_catalog(tenant_id: str, products: list[SFProduct]) -> dict:
                         "WHERE sku = %s OR lower(btrim(name)) = lower(btrim(%s)) "
                         "ORDER BY (sku = %s) DESC NULLS LAST LIMIT 1", (sku, p.name, sku))
             row = cur.fetchone()
-            vals = (p.name.strip(), p.description, p.category, p.price, p.active)
+            # a draft with no price yet is listed but stays off until it has one
+            vals = (p.name.strip(), p.description, p.category, p.price or None, p.active and p.price > 0)
             if row:
                 old = (row["name"], row["description"], row["category"],
                        float(row["price"]) if row["price"] is not None else None, row["active"])
