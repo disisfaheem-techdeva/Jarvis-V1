@@ -7854,6 +7854,40 @@ function apWire(){
   document.head.appendChild(st);
 })();
 
+/* ---------------------------------------------------------- Pages by business type
+   (18 Oct 2026) A business sees the pages for what it sells. A shop (type
+   "shop": products, ordered and delivered) has no appointments, calendar,
+   treatments, packages or visit entry. A service business (clinic, salon,
+   gym, academy, other) has no delivery orders, and sees Products and
+   Inventory only if it sells products (a clinic's retail stock). A
+   restaurant takes both orders and reservations, so it keeps everything, as
+   does a business whose type is not chosen yet. The owner changes the type on
+   Business & agent; sections hidden there (hidden_sections) still apply. */
+var TYPE_HIDE = {
+  product: ['appointments', 'calendar', 'services', 'catalogue', 'packages', 'dailyentry'],
+  service: ['orders']
+};
+function bizMode(){
+  var t = typeof BP !== 'undefined' && BP.data && BP.data.business_type;
+  if (!t || t === 'restaurant') return null;
+  return t === 'shop' ? 'product' : 'service';
+}
+function typeHidden(id){
+  var m = bizMode();
+  if (!m) return false;
+  if (TYPE_HIDE[m].indexOf(id) !== -1) return true;
+  return m === 'service' && (id === 'products' || id === 'inventory') && !(BP.data.products_count > 0);
+}
+(function(){
+  // a shop's overview: no "upcoming appointments" tile
+  var base = VIEWS.overview;
+  VIEWS.overview = function(){
+    var out = base.apply(this, arguments);
+    if (bizMode() !== 'product') return out;
+    return out.replace(/<div class="card"><div class="card-label">Upcoming [^<]*<\/div><div class="card-value[^"]*">[^<]*<\/div>(<div class="card-note">[^<]*<\/div>)?<\/div>/g, '');
+  };
+})();
+
 /* =====================================================================
    Ten-module layout (approved 16 Oct 2026).
    Same pages, same APIs: every existing menu item is kept, including the
@@ -7906,6 +7940,7 @@ function apWire(){
       if (seen[id] || !VIEWS[id]) return;
       if (!own && OWNER_ONLY_NAV[id]) return;
       if (id !== 'console' && hidden.indexOf(id) !== -1) return;
+      if (typeHidden(id)) return;
       seen[id] = 1; list.push({ id: id, name: LABEL[id] || it.name });
     }); });
     Object.keys(NEW).forEach(function(id){
