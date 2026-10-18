@@ -5850,11 +5850,16 @@ function advTip(t, i){
     '<div class="card-note" style="margin-bottom:6px">' + esc(t.why) + '</div>' +
     '<div>👉 ' + esc(t['do']) + '</div>' + (btn ? '<div style="margin-top:8px">' + btn + '</div>' : '') + '</div>';
 }
+function apVideoBtn(id, label){
+  return '<label class="btn" style="cursor:pointer">🎬 ' + label + '<input type="file" accept="video/mp4,video/quicktime" data-apvid="' + esc(id) +
+    '" style="position:absolute;width:1px;height:1px;opacity:0"></label>';
+}
 function apUploadBtn(id, label){
   return '<label class="btn" style="cursor:pointer">📷 ' + label + '<input type="file" accept="image/*" data-apup="' + esc(id) +
     '" style="position:absolute;width:1px;height:1px;opacity:0"></label>';
 }
 function apDraft(d, p){
+  var shopAd = (d.copy || {}).kind === 'product';   // a product is ordered, a service is booked
   var m = (d.copy || {}).meta || {}, g = (d.copy || {}).google || {}, editing = ADV.edit === d.id;
   var open = d.status === 'draft' || d.status === 'failed';
   var tag = { draft: 'waiting for you', launched: 'live', paused: 'paused', failed: 'did not launch' }[d.status] || d.status;
@@ -5884,9 +5889,18 @@ function apDraft(d, p){
       '<div style="margin-top:10px;display:flex;gap:8px"><button class="btn primary" data-apsave="' + esc(d.id) + '">Save</button><button class="btn" data-apcancel="1">Cancel</button></div>';
   } else if (d.provider === 'meta') {
     h += '<div style="display:flex;gap:12px;flex-wrap:wrap">' + '<div style="display:grid;gap:8px;justify-items:start">' + (d.image_url ? '<img src="' + esc(d.image_url) + '" alt="Campaign photo" style="width:110px;height:110px;object-fit:cover;border-radius:8px">' : '<div class="card-note">No photo yet.</div>') +
-      (open ? apUploadBtn(d.id, d.image_url ? 'Change photo' : 'Add a photo') : '') + '</div>' +
+      (open ? apUploadBtn(d.id, d.image_url ? (d.video_url ? 'Change cover photo' : 'Change photo') : 'Add a photo') : '') +
+      (d.video_url ? '<video src="' + esc(d.video_url) + '" controls preload="metadata" playsinline aria-label="Campaign video" style="width:180px;max-height:240px;border-radius:8px;background:#000"></video>' : '') +
+      (open ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + apVideoBtn(d.id, d.video_url ? 'Change video' : 'Add a video') +
+        (d.video_url ? '<button class="btn" type="button" data-apvidrm="' + esc(d.id) + '">Remove video</button>' : '') + '</div>' : '') + '</div>' +
       '<div style="flex:1;min-width:220px"><div style="font-weight:700">' + esc(m.headline || '') + '</div><div style="margin:4px 0;white-space:pre-wrap">' + esc(m.primary_text || '') + '</div>' +
-      '<div class="card-note">' + esc((m.hashtags || []).map(function(x){ return '#' + x; }).join(' ')) + '</div><div class="card-note">' + esc(m.description || '') + ' · button: WhatsApp</div>' +
+      '<div class="card-note">' + esc((m.hashtags || []).map(function(x){ return '#' + x; }).join(' ')) + '</div><div class="card-note">' + esc(m.description || '') + ' · button: ' + (d.destination === 'website' ? (shopAd ? 'Order now' : 'Book now') + ', opens your website' : 'WhatsApp chat') +
+        (d.video_url ? ' · video ad' : '') + '</div>' +
+      (open ? '<div role="group" aria-label="Where the ad button goes" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center"><span class="card-note">Button goes to</span>' +
+        [['whatsapp', '💬 WhatsApp chat'], ['website', shopAd ? '🛒 Order now on website' : '📅 Book now on website']].map(function(o){
+          var on = (d.destination || 'whatsapp') === o[0];
+          return '<button type="button" class="btn' + (on ? ' primary' : '') + '" aria-pressed="' + on + '"' + (on ? '' : ' data-apdest="' + esc(d.id) + '" data-to="' + o[0] + '"') + '>' + o[1] + '</button>';
+        }).join('') + '</div>' : '') +
       (apPageName(p, d.page_id) ? '<div class="card-note">Facebook Page: <b>' + esc(apPageName(p, d.page_id)) + '</b></div>'
         : (open && (p.meta_pages || []).length > 1 ? '<div class="card-note" style="color:var(--danger)">No Facebook Page chosen yet: press Edit and pick the Page.</div>' : '')) +
       '</div></div>';
@@ -6051,6 +6065,39 @@ function advWire(){
   // A photo for one campaign, uploaded right here (it used to need the Posts
   // page first). In Edit, it joins the choices and is selected, so typed
   // changes are kept until Save; on the card it is put on the campaign at once.
+  // A video for one campaign: uploaded like a post's video (checked and made
+  // streamable by the server), then put on the campaign; it runs as a video ad.
+  document.querySelectorAll('[data-apvid]').forEach(function(inp){ inp.onchange = function(){
+    var id = inp.getAttribute('data-apvid'), f = inp.files && inp.files[0], lab = inp.parentNode;
+    if (!f) return;
+    var type = f.type || (/\.mov$/i.test(f.name) ? 'video/quicktime' : 'video/mp4');
+    if (!/^video\/(mp4|quicktime)$/.test(type)) { say('Choose an MP4 or MOV video.'); return; }
+    if (f.size > 100 * 1024 * 1024) { say('That video is larger than 100 MB. Trim or compress it first.'); return; }
+    var x = new XMLHttpRequest();
+    x.open('POST', '/social/video'); x.withCredentials = true; x.setRequestHeader('Content-Type', type);
+    x.upload.onprogress = function(e){ if (e.lengthComputable) lab.firstChild.textContent = '🎬 Uploading ' + Math.round(100 * e.loaded / e.total) + '% '; };
+    x.onload = function(){
+      var r = null; try { r = JSON.parse(x.responseText); } catch (e) {}
+      if (x.status < 200 || x.status >= 300 || !r || !r.url) { say((r && r.detail) || 'The video was not saved (' + x.status + ').'); lab.firstChild.textContent = '🎬 Try another video'; return; }
+      act('/adpilot/drafts/' + id, { method: 'PUT', body: { video_url: r.url } }, 'Video added: this campaign runs as a video ad.')
+        .then(function(q){ if (q.ok) pilotLoad(); else lab.firstChild.textContent = '🎬 Try another video'; });
+    };
+    x.onerror = function(){ say('The upload stopped. Check the connection and try again.'); lab.firstChild.textContent = '🎬 Try again'; };
+    lab.firstChild.textContent = '🎬 Uploading... ';
+    x.send(f);
+  }; });
+  document.querySelectorAll('[data-apvidrm]').forEach(function(b){ b.onclick = function(){
+    b.disabled = true;
+    act('/adpilot/drafts/' + b.getAttribute('data-apvidrm'), { method: 'PUT', body: { video_url: '' } }, 'Video removed: this campaign runs with the photo.')
+      .then(function(q){ if (q.ok) pilotLoad(); else b.disabled = false; });
+  }; });
+  document.querySelectorAll('[data-apdest]').forEach(function(b){ b.onclick = function(){
+    b.disabled = true;
+    var web = b.getAttribute('data-to') === 'website';
+    act('/adpilot/drafts/' + b.getAttribute('data-apdest'), { method: 'PUT', body: { destination: b.getAttribute('data-to') } },
+        web ? 'The button now opens your website. The text was updated to match.' : 'The button now opens a WhatsApp chat. The text was updated to match.')
+      .then(function(q){ if (q.ok) pilotLoad(); else b.disabled = false; });
+  }; });
   document.querySelectorAll('[data-apup]').forEach(function(inp){ inp.onchange = function(){
     var id = inp.getAttribute('data-apup'), f = inp.files && inp.files[0], lab = inp.parentNode;
     if (!f) return;

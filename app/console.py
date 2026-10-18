@@ -98,8 +98,9 @@ Fields:
             add_expense: description, amount (number, PKR), category, method
                 (cash, card, bank, jazzcash, easypaisa), spent_on (YYYY-MM-DD)
             write_campaign: provider ("meta" for Facebook/Instagram, the
-                default, or "google"), service (as named in BUSINESS FACTS
-                services; empty means their best seller)
+                default, or "google"), service (the service or product to
+                advertise, as named in BUSINESS FACTS; empty means their
+                best seller)
             schedule_post: caption (finished post text, laid out exactly as
                 for kind post: headline, description, call to action,
                 3 to 5 hashtags),
