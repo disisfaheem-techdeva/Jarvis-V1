@@ -40,7 +40,7 @@ CONFIRM = {"add_expense", "cancel_appointment", "schedule_post", "publish_post",
            "record_order_payment", "cancel_order"}
 ACTIONS = {"navigate", "book_appointment", "reschedule_appointment", "cancel_appointment",
            "complete_appointment", "add_customer", "add_lead", "add_expense", "schedule_post",
-           "publish_post", "update_order", "record_order_payment", "cancel_order"}
+           "publish_post", "update_order", "record_order_payment", "cancel_order", "write_campaign"}
 _HHMM = re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -365,5 +365,33 @@ def run(tid, role, uid, action, args, founder=False):
         elif bad:
             note = "but it did not go out on %s" % "; ".join(bad)
         return {"refresh": ["posts"], "post": out.get("post")}, note
+    if action == "write_campaign":
+        # Writes a DRAFT through the planner (same owner + Pro checks as the
+        # Campaigns page) and puts the attached picture on it. It never
+        # launches: spending starts only when the owner presses Launch.
+        if founder:
+            raise ActionError("an ad campaign is the client's own decision, so they have to ask for it")
+        from .social import is_our_media
+        prov = str(args.get("provider") or "meta").strip().lower()
+        prov = {"facebook": "meta", "instagram": "meta", "fb": "meta"}.get(prov, prov)
+        if prov not in ("meta", "google"):
+            raise ActionError("I can write campaigns for Facebook and Instagram, or for Google")
+        body = {"provider": prov, "service": (str(args.get("service") or "").strip() or None)}
+        out = _call(tid, role, uid, "POST", "/adpilot/drafts", body)
+        d = out.get("draft") or {}
+        imgs = [u for u in (args.get("image_urls") or []) if isinstance(u, str) and is_our_media(u)]
+        note = None
+        if imgs and d.get("id") and prov == "meta":
+            try:
+                _call(tid, role, uid, "PUT", "/adpilot/drafts/%s" % d["id"], {"image_url": imgs[0]})
+                note = "with your picture"
+            except ActionError as e:
+                note = "but I could not put your picture on it (%s); press Edit on the campaign to choose one" % e
+        elif prov == "meta" and not d.get("image_url"):
+            note = "with no picture yet: attach one, or upload it on the campaign"
+        return {"navigate": "marketing", "refresh": ["campaigns"], "draft": d}, (
+            "I wrote a %s campaign for %s as a draft%s. Nothing runs until you press Launch on Campaigns" % (
+                "Facebook and Instagram" if prov == "meta" else "Google", d.get("service") or "your best seller",
+                (" " + note) if note else ""))
 
     raise ActionError("I cannot do that from here yet")

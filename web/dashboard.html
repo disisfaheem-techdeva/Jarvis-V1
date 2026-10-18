@@ -113,7 +113,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=478ad6e7cf">
+<link rel="stylesheet" href="/assets/td.css?v=303145067c">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -5072,6 +5072,7 @@ function consoleSend(opt){
         }
         if (d.kind === 'action' && d.ok) {
           if (d.navigate) go = d.navigate;
+          if (d.action === 'write_campaign') { JV.imgs = []; jvRenderAttach(); pilotLoad(); }
           if (d.navigate === 'bizagent' && jvImgUrls().length) {
             // Jarvis read the attached menu: drop the pictures so the next
             // message does not read them again, and load the new suggestion
@@ -5849,6 +5850,10 @@ function advTip(t, i){
     '<div class="card-note" style="margin-bottom:6px">' + esc(t.why) + '</div>' +
     '<div>👉 ' + esc(t['do']) + '</div>' + (btn ? '<div style="margin-top:8px">' + btn + '</div>' : '') + '</div>';
 }
+function apUploadBtn(id, label){
+  return '<label class="btn" style="cursor:pointer">📷 ' + label + '<input type="file" accept="image/*" data-apup="' + esc(id) +
+    '" style="position:absolute;width:1px;height:1px;opacity:0"></label>';
+}
 function apDraft(d, p){
   var m = (d.copy || {}).meta || {}, g = (d.copy || {}).google || {}, editing = ADV.edit === d.id;
   var open = d.status === 'draft' || d.status === 'failed';
@@ -5866,7 +5871,8 @@ function apDraft(d, p){
         '<label class="card-note">Description (max 30)<input class="fld" id="apd_desc" maxlength="30" value="' + esc(m.description || '') + '"></label>' +
         '<label class="card-note">Hashtags (space between)<input class="fld" id="apd_tags" value="' + esc((m.hashtags || []).map(function(x){ return '#' + x; }).join(' ')) + '"></label>' +
         '<div class="card-note">Photo</div><div style="display:flex;gap:8px;flex-wrap:wrap">' +
-        (p.photos || []).map(function(u){ return '<label style="cursor:pointer"><input type="radio" name="apd_img" value="' + esc(u) + '"' + (u === d.image_url ? ' checked' : '') + '> <img src="' + esc(u) + '" style="width:72px;height:72px;object-fit:cover;border-radius:6px;vertical-align:middle"></label>'; }).join('') +
+        (p.photos || []).map(function(u){ return '<label style="cursor:pointer"><input type="radio" name="apd_img" value="' + esc(u) + '"' + (u === d.image_url ? ' checked' : '') + '> <img src="' + esc(u) + '" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:6px;vertical-align:middle"></label>'; }).join('') +
+        apUploadBtn(d.id, 'Upload a new photo') +
         '</div>';
     } else {
       h += '<div style="display:grid;gap:8px;max-width:640px">' +
@@ -5877,7 +5883,8 @@ function apDraft(d, p){
     h += '<label class="card-note">Daily budget<input class="fld" id="apd_budget" type="number" min="' + ((p.min_daily || {})[d.provider] || 300) + '" value="' + esc(d.daily_budget) + '" style="max-width:160px"></label></div>' +
       '<div style="margin-top:10px;display:flex;gap:8px"><button class="btn primary" data-apsave="' + esc(d.id) + '">Save</button><button class="btn" data-apcancel="1">Cancel</button></div>';
   } else if (d.provider === 'meta') {
-    h += '<div style="display:flex;gap:12px;flex-wrap:wrap">' + (d.image_url ? '<img src="' + esc(d.image_url) + '" style="width:110px;height:110px;object-fit:cover;border-radius:8px">' : '<div class="card-note">No photo yet: upload one on the Posts page.</div>') +
+    h += '<div style="display:flex;gap:12px;flex-wrap:wrap">' + '<div style="display:grid;gap:8px;justify-items:start">' + (d.image_url ? '<img src="' + esc(d.image_url) + '" alt="Campaign photo" style="width:110px;height:110px;object-fit:cover;border-radius:8px">' : '<div class="card-note">No photo yet.</div>') +
+      (open ? apUploadBtn(d.id, d.image_url ? 'Change photo' : 'Add a photo') : '') + '</div>' +
       '<div style="flex:1;min-width:220px"><div style="font-weight:700">' + esc(m.headline || '') + '</div><div style="margin:4px 0;white-space:pre-wrap">' + esc(m.primary_text || '') + '</div>' +
       '<div class="card-note">' + esc((m.hashtags || []).map(function(x){ return '#' + x; }).join(' ')) + '</div><div class="card-note">' + esc(m.description || '') + ' · button: WhatsApp</div>' +
       (apPageName(p, d.page_id) ? '<div class="card-note">Facebook Page: <b>' + esc(apPageName(p, d.page_id)) + '</b></div>'
@@ -6041,6 +6048,30 @@ function advWire(){
     act('/adpilot/drafts/' + b.getAttribute('data-apdiscard'), { method: 'DELETE' }, 'Discarded.').then(function(){ pilotLoad(); });
   }; });
   document.querySelectorAll('[data-apedit]').forEach(function(b){ b.onclick = function(){ ADV.edit = b.getAttribute('data-apedit'); renderShell(); }; });
+  // A photo for one campaign, uploaded right here (it used to need the Posts
+  // page first). In Edit, it joins the choices and is selected, so typed
+  // changes are kept until Save; on the card it is put on the campaign at once.
+  document.querySelectorAll('[data-apup]').forEach(function(inp){ inp.onchange = function(){
+    var id = inp.getAttribute('data-apup'), f = inp.files && inp.files[0], lab = inp.parentNode;
+    if (!f) return;
+    lab.firstChild.textContent = 'Uploading... ';
+    jvToJpeg(f).then(function(jpeg){ return api('/social/media', { method: 'POST', body: { image: jpeg } }); })
+      .then(function(r){
+        if (!r.ok || !r.data || !r.data.url) throw new Error((r.data && r.data.detail) || 'The photo could not be uploaded.');
+        var url = r.data.url;
+        if (ADV.edit === id) {
+          if (S.adpilot && S.adpilot.photos) S.adpilot.photos.unshift(url);
+          var opt = document.createElement('label'); opt.style.cursor = 'pointer';
+          opt.innerHTML = '<input type="radio" name="apd_img" checked> <img alt="" style="width:72px;height:72px;object-fit:cover;border-radius:6px;vertical-align:middle">';
+          opt.querySelector('input').value = url; opt.querySelector('img').src = url;
+          lab.parentNode.insertBefore(opt, lab); lab.firstChild.textContent = '📷 Upload a new photo';
+          return;
+        }
+        return act('/adpilot/drafts/' + id, { method: 'PUT', body: { image_url: url } }, 'Photo added to the campaign.')
+          .then(function(x){ if (x.ok) pilotLoad(); else lab.firstChild.textContent = '📷 Try another photo'; });
+      })
+      .catch(function(e){ say(e.message || 'The photo could not be uploaded.'); lab.firstChild.textContent = '📷 Try another photo'; });
+  }; });
   document.querySelectorAll('[data-apcancel]').forEach(function(b){ b.onclick = function(){ ADV.edit = null; renderShell(); }; });
   document.querySelectorAll('[data-apsave]').forEach(function(b){ b.onclick = function(){
     var body = { daily_budget: g('apd_budget').value }, lines = function(id){ return g(id).value.split('\n').map(function(x){ return x.trim(); }).filter(Boolean); };
