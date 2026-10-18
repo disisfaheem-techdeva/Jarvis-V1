@@ -10,7 +10,7 @@ import { createHmac, randomUUID } from "node:crypto";
  * The platform refuses anything older than 5 minutes, and upserts orders by order
  * number, so retries and re-syncs are always safe.
  */
-export type PlatformEvent = "order.created" | "order.updated" | "enquiry.created" | "contact.created";
+export type PlatformEvent = "order.created" | "order.updated" | "enquiry.created" | "contact.created" | "catalog.updated";
 
 export const platformConfigured = () => Boolean(process.env.PLATFORM_WEBHOOK_URL && process.env.PLATFORM_WEBHOOK_SECRET);
 
@@ -57,4 +57,21 @@ export async function sendToPlatform(type: PlatformEvent, data: Record<string, u
   }
   console.error(`platform unreachable, gave up on ${type}; use "Sync to TechDeva" in admin to resend`);
   return false;
+}
+
+/**
+ * The whole menu as customers are charged for it (catalog + owner's overrides),
+ * including hidden items, so the dashboard's Products match the site.
+ * Sent after every menu edit and by "Sync to TechDeva". Never throws.
+ */
+export async function sendCatalog(): Promise<boolean> {
+  if (!platformConfigured()) return false;
+  const { getFullMenu } = await import("./menu");
+  const { products } = await getFullMenu();
+  return sendToPlatform("catalog.updated", {
+    products: products.map((p) => ({
+      slug: p.slug, name: p.name, category: p.category, price: p.price,
+      description: p.description, active: p.active, soldOut: Boolean(p.soldOut),
+    })),
+  });
 }

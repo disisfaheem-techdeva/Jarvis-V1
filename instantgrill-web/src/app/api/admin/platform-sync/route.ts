@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { isAdminRequest } from "@/lib/auth";
-import { deliver, platformConfigured } from "@/lib/platform";
+import { deliver, platformConfigured, sendCatalog } from "@/lib/platform";
 import { store } from "@/lib/store";
 
 export const maxDuration = 60;
 
 /**
- * Resends every order, enquiry and message to the TechDeva dashboard.
+ * Sends the menu (products and prices), then resends every order, enquiry and
+ * message to the TechDeva dashboard.
  * Safe to press any time: the platform upserts by id and ignores older copies.
  */
 export async function POST(req: Request) {
@@ -14,6 +15,8 @@ export async function POST(req: Request) {
   if (!platformConfigured()) {
     return NextResponse.json({ error: "Not connected. Set PLATFORM_WEBHOOK_URL and PLATFORM_WEBHOOK_SECRET." }, { status: 400 });
   }
+  // products first, so the orders that follow link to them
+  const catalog = await sendCatalog();
   const s = store();
   const [orders, enquiries, messages] = await Promise.all([s.orders.list({ limit: 5000 }), s.enquiries.list(500), s.messages.list(500)]);
   const jobs = [
@@ -31,5 +34,5 @@ export async function POST(req: Request) {
       else failed++;
     }
   }
-  return NextResponse.json({ sent, failed, orders: orders.length, enquiries: enquiries.length, messages: messages.length });
+  return NextResponse.json({ catalog, sent, failed, orders: orders.length, enquiries: enquiries.length, messages: messages.length });
 }
