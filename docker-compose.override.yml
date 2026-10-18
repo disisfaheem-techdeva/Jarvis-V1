@@ -56,6 +56,12 @@ services:
       PLATFORM_WEBHOOK_URL: http://api:8000/storefront/webhook/9c3e853c-568b-4f31-8324-5246e8cfd269
       PLATFORM_WEBHOOK_SECRET: ${IG_PLATFORM_WEBHOOK_SECRET:-}
       OWNER_EMAIL: info@instantgrill.shop
+      # New-order WhatsApp alerts: instantgrill_notifier (old site's compose,
+      # attached to this network with this alias) relays them via CallMeBot.
+      ORDER_WEBHOOK_URL: http://instantgrill-notifier:8080/order-webhook
+      ORDER_WEBHOOK_SECRET: ${IG_ORDER_WEBHOOK_SECRET:-}
+      # Meta Conversions API (server-side Purchase); empty = off.
+      META_CAPI_TOKEN: ${IG_META_CAPI_TOKEN:-}
     labels:
       - traefik.enable=true
       - "traefik.http.routers.instantgrill-new.rule=Host(`new.instantgrill.shop`)"
