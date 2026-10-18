@@ -63,6 +63,15 @@ services:
       - traefik.http.routers.instantgrill-new.tls.certresolver=letsencrypt
       - traefik.http.routers.instantgrill-new.middlewares=instantgrill-new-noindex
       - "traefik.http.middlewares.instantgrill-new-noindex.headers.customresponseheaders.X-Robots-Tag=noindex, nofollow"
+      # The real domain. Priority 1 is the lowest, so while the old site's
+      # containers (instantgrill_web/_admin) are running they win; stopping
+      # them is the switch, starting them again is the way back.
+      - "traefik.http.routers.instantgrill-live.rule=Host(`instantgrill.shop`) || Host(`www.instantgrill.shop`)"
+      - traefik.http.routers.instantgrill-live.entrypoints=websecure
+      - traefik.http.routers.instantgrill-live.tls.certresolver=letsencrypt
+      - traefik.http.routers.instantgrill-live.priority=1
+      - traefik.http.routers.instantgrill-live.service=instantgrill-new
+      - traefik.http.routers.instantgrill-new.service=instantgrill-new
       - traefik.http.services.instantgrill-new.loadbalancer.server.port=3000
     networks:
       - default
