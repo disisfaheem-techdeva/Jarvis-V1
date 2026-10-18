@@ -32,6 +32,13 @@ storefront_orders, storefront_inbox  (RLS: tenant_isolation, FORCED)
   older than the stored one is ignored, so retries, re-syncs and out-of-order
   delivery never duplicate or roll back an order. Revenue is recorded exactly once.
 - **Unknown tenant and bad signature look the same** (401), so nothing can be probed.
+- **Menu → Products (`catalog.updated`):** the site sends its whole menu (catalog +
+  the owner's price, sold-out and hidden overrides) after every edit in `/admin/menu`
+  and first thing on "Sync to TechDeva". The platform keeps the business's Products
+  in step, keyed by `sku = 'site:<slug>'`: new items are added, names and prices
+  follow, a product the owner typed in by hand with the same name is adopted, and
+  an item hidden or gone from the menu is switched off (never deleted, old orders
+  point at it). Order lines then link to these products by name.
 
 ## Going live for Instant Grill
 

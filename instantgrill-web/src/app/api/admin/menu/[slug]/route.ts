@@ -1,7 +1,8 @@
 import { revalidatePath } from "next/cache";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { isAdminRequest } from "@/lib/auth";
 import { findProduct } from "@/lib/catalog";
+import { sendCatalog } from "@/lib/platform";
 import { store, type ProductOverride } from "@/lib/store";
 
 /** Owner edits one product: price, sold out today, or hidden from the menu. */
@@ -24,5 +25,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ slug: 
 
   const overrides = await store().settings.setOverride(slug, patch);
   revalidatePath("/", "layout"); // menu, prices and cart everywhere pick it up
+  after(() => sendCatalog()); // the dashboard's Products follow the menu
   return NextResponse.json({ override: overrides[slug] });
 }

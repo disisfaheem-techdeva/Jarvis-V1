@@ -138,9 +138,20 @@ class SFInboxItem(_Loose):
     email: Optional[str] = Field(None, max_length=160)
 
 
+class SFProduct(_Loose):
+    """One item on the website's menu, with the owner's live price and switches."""
+    slug: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    name: str = Field(min_length=1, max_length=120)
+    category: Optional[str] = Field(None, max_length=40)
+    price: float = Field(gt=0, le=1_000_000)
+    description: Optional[str] = Field(None, max_length=1000)
+    active: bool = True
+    soldOut: bool = False
+
+
 class Envelope(_Loose):
     id: str = Field(min_length=1, max_length=64)
-    type: Literal["order.created", "order.updated", "enquiry.created", "contact.created"]
+    type: Literal["order.created", "order.updated", "enquiry.created", "contact.created", "catalog.updated"]
     occurred_at: datetime
     data: dict[str, Any]
 
@@ -356,6 +367,47 @@ def _site_lead(cur, kind: str, item: SFInboxItem, payload: dict) -> None:
                 (item.name, item.phone, item.email, service[:120], tags, notes[:2000] or None, SITE_ACTOR))
 
 
+def ingest_catalog(tenant_id: str, products: list[SFProduct]) -> dict:
+    """The website's whole menu becomes the business's Products: added, renamed,
+    repriced and switched on or off to match. Each is keyed by its website slug
+    (sku 'site:<slug>'); a product the owner added by hand with the same name is
+    adopted, not duplicated. A site product no longer on the menu is switched
+    off, never deleted (old orders and invoices still point at it)."""
+    from .audit import record
+    added = updated = 0
+    seen = []
+    with tenant_session(tenant_id, "operator") as cur:
+        for p in products:
+            sku = "site:" + p.slug
+            seen.append(sku)
+            cur.execute("SELECT id, name, price, category, description, active FROM products "
+                        "WHERE sku = %s OR lower(btrim(name)) = lower(btrim(%s)) "
+                        "ORDER BY (sku = %s) DESC NULLS LAST LIMIT 1", (sku, p.name, sku))
+            row = cur.fetchone()
+            vals = (p.name.strip(), p.description, p.category, p.price, p.active)
+            if row:
+                old = (row["name"], row["description"], row["category"],
+                       float(row["price"]) if row["price"] is not None else None, row["active"])
+                if old != vals:
+                    cur.execute("UPDATE products SET name = %s, description = %s, category = %s, price = %s, active = %s, "
+                                "sku = %s, updated_at = now() WHERE id = %s", vals + (sku, row["id"]))
+                    updated += 1
+                else:
+                    cur.execute("UPDATE products SET sku = %s WHERE id = %s AND sku IS DISTINCT FROM %s",
+                                (sku, row["id"], sku))
+            else:
+                cur.execute("INSERT INTO products (tenant_id, name, description, category, price, active, sku) "
+                            "VALUES (current_tenant(), %s, %s, %s, %s, %s, %s)", vals + (sku,))
+                added += 1
+        cur.execute("UPDATE products SET active = false, updated_at = now() "
+                    "WHERE sku LIKE 'site:%%' AND active AND NOT (sku = ANY(%s)) RETURNING id", (seen,))
+        removed = len(cur.fetchall())
+        record(cur, action="storefront.catalog", resource="products", resource_id=None, actor=SITE_ACTOR,
+               actor_type="system", status="ok",
+               detail={"items": len(products), "added": added, "updated": updated, "switched_off": removed}, error=None)
+    return {"items": len(products), "added": added, "updated": updated, "switched_off": removed}
+
+
 def ingest_order(tenant_id: str, o: SFOrder) -> dict:
     """Upsert one order. Returns what changed, for event emission. Idempotent."""
     slot = o.slot or SFSlot()
@@ -548,6 +600,16 @@ def make_storefront_router(persistence_sink=None) -> APIRouter:
                 elif res["previous"] != res["status"]:
                     emit(tenant_id, "storefront.order.status_changed", {**summary, "previous": res["previous"]})
             return {"ok": True, **res}
+
+        if env.type == "catalog.updated":
+            raw = env.data.get("products")
+            if not isinstance(raw, list) or len(raw) > 300:
+                raise HTTPException(422, "bad catalog: products must be a list of at most 300")
+            try:
+                items = [SFProduct.model_validate(x) for x in raw]
+            except ValidationError as e:
+                raise HTTPException(422, f"bad catalog: {str(e)[:300]}")
+            return {"ok": True, **ingest_catalog(tenant_id, items)}
 
         kind = "enquiry" if env.type == "enquiry.created" else "contact"
         raw = env.data.get(kind if kind == "enquiry" else "message") or {}
