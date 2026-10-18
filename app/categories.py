@@ -254,6 +254,7 @@ def make_categories_router():
         return {"business_type": t["business_type"], "business_type_other": t["business_type_other"],
                 "needs_type": not t["business_type"], "category": f["category"],
                 "services_count": len(f["services"]) + len(f.get("products") or []), "hours_set": bool(f["hours"]),
+                "products_count": len(f.get("products") or []),
                 "knowledge": f["knowledge"], "open_flags": flags,
                 "sync": dict(s) if s else {"status": "never", "synced_at": None},
                 "suggestion": sug,

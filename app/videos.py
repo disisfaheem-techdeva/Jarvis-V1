@@ -135,6 +135,8 @@ def cleanup(force=False):
                                              AND p.status IN ('draft','scheduled','publishing','failed'))
                           AND NOT EXISTS (SELECT 1 FROM ad_drafts a WHERE a.video_token = v.token
                                              AND a.status IN ('draft','failed'))
+                          AND NOT EXISTS (SELECT 1 FROM ad_drafts a, jsonb_array_elements(a.creatives) c
+                                           WHERE c->>'token' = v.token AND a.status IN ('draft','failed'))
                           AND (v.created_at < now() - interval '30 days'
                                OR (v.created_at < now() - interval '2 days'
                                    AND NOT EXISTS (SELECT 1 FROM social_posts p WHERE p.video_token = v.token)))

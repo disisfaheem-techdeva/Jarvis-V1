@@ -113,7 +113,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=303145067c">
+<link rel="stylesheet" href="/assets/td.css?v=7a05541bdd">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -5854,6 +5854,56 @@ function apVideoBtn(id, label){
   return '<label class="btn" style="cursor:pointer">🎬 ' + label + '<input type="file" accept="video/mp4,video/quicktime" data-apvid="' + esc(id) +
     '" style="position:absolute;width:1px;height:1px;opacity:0"></label>';
 }
+/* The campaign's creatives (photos, flyers, videos the owner attached), or
+   the one photo the planner picked when none are attached. */
+function apMediaHTML(d, open){
+  var cs = d.creatives || [], picked = (d.plan && d.plan.picked) || [];
+  var box = '<div style="display:grid;gap:8px;justify-items:start;max-width:420px">';
+  if (cs.length) {
+    box += '<div class="ap-cr">' + cs.map(function(c, i){
+      var runs = picked.indexOf(c.token) !== -1;
+      var media = c.kind === 'video'
+        ? '<video src="' + esc(c.url) + '" muted preload="metadata" playsinline aria-label="Video ' + (i + 1) + '"></video>'
+        : '<img src="' + esc(c.url) + '" alt="Creative ' + (i + 1) + '">';
+      return '<div class="ap-cr-i' + (runs ? '' : ' off') + '">' + media +
+        '<span class="ap-cr-tag">' + (i + 1) + (c.kind === 'video' ? ' · video' : '') + (open ? (runs ? '' : ' · left out') : '') + '</span>' +
+        (open ? '<button type="button" class="pst-x" data-apcrrm="' + esc(d.id) + '" data-tok="' + esc(c.token) + '" aria-label="Remove creative ' + (i + 1) + '">×</button>' : '') + '</div>';
+    }).join('') + '</div>';
+  } else {
+    box += d.video_url ? '<video src="' + esc(d.video_url) + '" controls preload="metadata" playsinline aria-label="Campaign video" style="width:180px;max-height:240px;border-radius:8px;background:#000"></video>'
+         : d.image_url ? '<img src="' + esc(d.image_url) + '" alt="Campaign photo" style="width:110px;height:110px;object-fit:cover;border-radius:8px">'
+         : '<div class="card-note">No creative yet.</div>';
+    if (open && (d.image_url || d.video_url)) box += '<div class="card-note">The planner picked your latest ' + (d.video_url ? 'video' : 'photo') + '. Add your own creatives to replace it.</div>';
+  }
+  if (open) box += '<label class="btn" style="cursor:pointer">📎 Add creatives<input type="file" multiple accept="image/*,video/mp4,video/quicktime" data-apcr="' + esc(d.id) +
+    '" style="position:absolute;width:1px;height:1px;opacity:0"></label><span class="card-note">Photos, flyers or videos. With two or more, the planner tests them.</span>';
+  return box + '</div>';
+}
+/* What the planner will do (before launch) or is doing (a running test). */
+function apPlanHTML(d, open){
+  var t = d.test || {}, cur = 'PKR', h = '';
+  if (open && d.plan) h = '<div class="ap-plan"><b>🧪 Planner</b> ' + esc(d.plan.text) + '</div>';
+  if (t.status) {
+    var rows = (t.ads || []).map(function(a){ var r = (t.results || {})[a.ad_id] || {}; return { n: a.n, kind: a.kind, id: a.ad_id, r: r }; });
+    var head = t.status === 'done'
+      ? '🏆 Creative ' + esc(t.winner_n) + ' won: ' + esc(t.reason) + '. ' + ((t.paused || []).length ? 'The other ' + t.paused.length + ' paused; the campaign continues with the winner.' : '')
+      : '🧪 A/B test running: ' + rows.length + ' ads. ' + esc(t.note || ('Day 1 of ' + (t.days || 7) + '.'));
+    h += '<div class="ap-plan"><b>' + head + '</b>';
+    if (Object.keys(t.results || {}).length) {
+      var web = d.destination === 'website';
+      h += '<div class="tbl-wrap"><table><thead><tr><th>Creative</th><th>Spent</th><th>Shown</th><th>' + (web ? 'Link clicks' : 'Results') + '</th><th>Cost per result</th><th></th></tr></thead><tbody>' +
+        rows.map(function(x){
+          var r = x.r, cpr = r.results ? cur + ' ' + Math.round(r.spend / r.results).toLocaleString() : '—';
+          var tag = t.status === 'done' ? (x.id === t.winner ? '<span class="pill attn">Winner</span>' : '<span class="card-note">paused</span>') : '';
+          return '<tr><td>' + esc(x.n) + (x.kind === 'video' ? ' · video' : '') + '</td><td>' + (r.spend != null ? cur + ' ' + Math.round(r.spend).toLocaleString() : '—') +
+            '</td><td>' + (r.impressions != null ? Number(r.impressions).toLocaleString() : '—') + '</td><td>' + (r.results != null ? Math.round(r.results) : '—') +
+            '</td><td>' + cpr + '</td><td>' + tag + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+    h += '</div>';
+  }
+  return h;
+}
 function apUploadBtn(id, label){
   return '<label class="btn" style="cursor:pointer">📷 ' + label + '<input type="file" accept="image/*" data-apup="' + esc(id) +
     '" style="position:absolute;width:1px;height:1px;opacity:0"></label>';
@@ -5888,14 +5938,10 @@ function apDraft(d, p){
     h += '<label class="card-note">Daily budget<input class="fld" id="apd_budget" type="number" min="' + ((p.min_daily || {})[d.provider] || 300) + '" value="' + esc(d.daily_budget) + '" style="max-width:160px"></label></div>' +
       '<div style="margin-top:10px;display:flex;gap:8px"><button class="btn primary" data-apsave="' + esc(d.id) + '">Save</button><button class="btn" data-apcancel="1">Cancel</button></div>';
   } else if (d.provider === 'meta') {
-    h += '<div style="display:flex;gap:12px;flex-wrap:wrap">' + '<div style="display:grid;gap:8px;justify-items:start">' + (d.image_url ? '<img src="' + esc(d.image_url) + '" alt="Campaign photo" style="width:110px;height:110px;object-fit:cover;border-radius:8px">' : '<div class="card-note">No photo yet.</div>') +
-      (open ? apUploadBtn(d.id, d.image_url ? (d.video_url ? 'Change cover photo' : 'Change photo') : 'Add a photo') : '') +
-      (d.video_url ? '<video src="' + esc(d.video_url) + '" controls preload="metadata" playsinline aria-label="Campaign video" style="width:180px;max-height:240px;border-radius:8px;background:#000"></video>' : '') +
-      (open ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + apVideoBtn(d.id, d.video_url ? 'Change video' : 'Add a video') +
-        (d.video_url ? '<button class="btn" type="button" data-apvidrm="' + esc(d.id) + '">Remove video</button>' : '') + '</div>' : '') + '</div>' +
+    h += '<div style="display:flex;gap:12px;flex-wrap:wrap">' + apMediaHTML(d, open) +
       '<div style="flex:1;min-width:220px"><div style="font-weight:700">' + esc(m.headline || '') + '</div><div style="margin:4px 0;white-space:pre-wrap">' + esc(m.primary_text || '') + '</div>' +
       '<div class="card-note">' + esc((m.hashtags || []).map(function(x){ return '#' + x; }).join(' ')) + '</div><div class="card-note">' + esc(m.description || '') + ' · button: ' + (d.destination === 'website' ? (shopAd ? 'Order now' : 'Book now') + ', opens your website' : 'WhatsApp chat') +
-        (d.video_url ? ' · video ad' : '') + '</div>' +
+        '</div>' +
       (open ? '<div role="group" aria-label="Where the ad button goes" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center"><span class="card-note">Button goes to</span>' +
         [['whatsapp', '💬 WhatsApp chat'], ['website', shopAd ? '🛒 Order now on website' : '📅 Book now on website']].map(function(o){
           var on = (d.destination || 'whatsapp') === o[0];
@@ -5910,6 +5956,7 @@ function apDraft(d, p){
       '<div class="card-note">Keywords: ' + esc((g.keywords || []).join(', ')) + '</div>';
   }
   if (d.error) h += '<div class="card-note" style="color:var(--danger);margin-top:6px">' + esc(d.error) + '</div>';
+  if (d.provider === 'meta') h += apPlanHTML(d, open);
   if (!editing) {
     var ext = d.external || {};
     h += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
@@ -6067,6 +6114,46 @@ function advWire(){
   // changes are kept until Save; on the card it is put on the campaign at once.
   // A video for one campaign: uploaded like a post's video (checked and made
   // streamable by the server), then put on the campaign; it runs as a video ad.
+  // Several creatives at once: each photo is made a JPEG and uploaded, each
+  // video is uploaded as for a post; then the campaign's list is saved and the
+  // planner re-plans (how many ads, which ones).
+  document.querySelectorAll('[data-apcr]').forEach(function(inp){ inp.onchange = function(){
+    var id = inp.getAttribute('data-apcr'), files = [].slice.call(inp.files || []), lab = inp.parentNode;
+    var d = ((S.adpilot && S.adpilot.drafts) || []).filter(function(x){ return x.id === id; })[0];
+    if (!files.length || !d) return;
+    var urls = (d.creatives || []).map(function(c){ return c.url; }), done = 0, bad = [];
+    var upVideo = function(f){ return new Promise(function(ok){
+      var type = f.type || (/\.mov$/i.test(f.name) ? 'video/quicktime' : 'video/mp4');
+      if (f.size > 100 * 1024 * 1024) { bad.push(f.name + ' (over 100 MB)'); return ok(null); }
+      var x = new XMLHttpRequest(); x.open('POST', '/social/video'); x.withCredentials = true; x.setRequestHeader('Content-Type', type);
+      x.onload = function(){ var r = null; try { r = JSON.parse(x.responseText); } catch (e) {} if (r && r.url) ok(r.url); else { bad.push(f.name + ((r && r.detail) ? ' (' + r.detail + ')' : '')); ok(null); } };
+      x.onerror = function(){ bad.push(f.name); ok(null); };
+      x.send(f);
+    }); };
+    var upImage = function(f){ return jvToJpeg(f).then(function(j){ return api('/social/media', { method: 'POST', body: { image: j } }); })
+      .then(function(r){ if (r.ok && r.data && r.data.url) return r.data.url; bad.push(f.name); return null; })
+      .catch(function(){ bad.push(f.name); return null; }); };
+    var next = function(k){
+      if (k >= files.length) {
+        lab.firstChild.textContent = '📎 Add creatives';
+        return act('/adpilot/drafts/' + id, { method: 'PUT', body: { creatives: urls } },
+                   bad.length ? 'Added. Not added: ' + bad.join(', ') + '.' : 'Creatives added. See the planner\'s plan below.')
+          .then(function(q){ if (q.ok) pilotLoad(); });
+      }
+      var f = files[k];
+      lab.firstChild.textContent = '📎 Uploading ' + (k + 1) + ' of ' + files.length + '... ';
+      (/^video\//.test(f.type) || /\.(mp4|mov)$/i.test(f.name) ? upVideo(f) : upImage(f)).then(function(u){ if (u) urls.push(u); next(k + 1); });
+    };
+    next(0);
+  }; });
+  document.querySelectorAll('[data-apcrrm]').forEach(function(b){ b.onclick = function(){
+    var id = b.getAttribute('data-apcrrm'), tok = b.getAttribute('data-tok');
+    var d = ((S.adpilot && S.adpilot.drafts) || []).filter(function(x){ return x.id === id; })[0];
+    if (!d) return;
+    b.disabled = true;
+    var urls = (d.creatives || []).filter(function(c){ return c.token !== tok; }).map(function(c){ return c.url; });
+    act('/adpilot/drafts/' + id, { method: 'PUT', body: { creatives: urls } }, 'Removed.').then(function(q){ if (q.ok) pilotLoad(); else b.disabled = false; });
+  }; });
   document.querySelectorAll('[data-apvid]').forEach(function(inp){ inp.onchange = function(){
     var id = inp.getAttribute('data-apvid'), f = inp.files && inp.files[0], lab = inp.parentNode;
     if (!f) return;
@@ -7854,6 +7941,40 @@ function apWire(){
   document.head.appendChild(st);
 })();
 
+/* ---------------------------------------------------------- Pages by business type
+   (18 Oct 2026) A business sees the pages for what it sells. A shop (type
+   "shop": products, ordered and delivered) has no appointments, calendar,
+   treatments, packages or visit entry. A service business (clinic, salon,
+   gym, academy, other) has no delivery orders, and sees Products and
+   Inventory only if it sells products (a clinic's retail stock). A
+   restaurant takes both orders and reservations, so it keeps everything, as
+   does a business whose type is not chosen yet. The owner changes the type on
+   Business & agent; sections hidden there (hidden_sections) still apply. */
+var TYPE_HIDE = {
+  product: ['appointments', 'calendar', 'services', 'catalogue', 'packages', 'dailyentry'],
+  service: ['orders']
+};
+function bizMode(){
+  var t = typeof BP !== 'undefined' && BP.data && BP.data.business_type;
+  if (!t || t === 'restaurant') return null;
+  return t === 'shop' ? 'product' : 'service';
+}
+function typeHidden(id){
+  var m = bizMode();
+  if (!m) return false;
+  if (TYPE_HIDE[m].indexOf(id) !== -1) return true;
+  return m === 'service' && (id === 'products' || id === 'inventory') && !(BP.data.products_count > 0);
+}
+(function(){
+  // a shop's overview: no "upcoming appointments" tile
+  var base = VIEWS.overview;
+  VIEWS.overview = function(){
+    var out = base.apply(this, arguments);
+    if (bizMode() !== 'product') return out;
+    return out.replace(/<div class="card"><div class="card-label">Upcoming [^<]*<\/div><div class="card-value[^"]*">[^<]*<\/div>(<div class="card-note">[^<]*<\/div>)?<\/div>/g, '');
+  };
+})();
+
 /* =====================================================================
    Ten-module layout (approved 16 Oct 2026).
    Same pages, same APIs: every existing menu item is kept, including the
@@ -7906,6 +8027,7 @@ function apWire(){
       if (seen[id] || !VIEWS[id]) return;
       if (!own && OWNER_ONLY_NAV[id]) return;
       if (id !== 'console' && hidden.indexOf(id) !== -1) return;
+      if (typeHidden(id)) return;
       seen[id] = 1; list.push({ id: id, name: LABEL[id] || it.name });
     }); });
     Object.keys(NEW).forEach(function(id){

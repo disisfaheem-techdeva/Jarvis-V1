@@ -126,4 +126,13 @@
     & .scrim { @apply fixed inset-0 z-[39] hidden bg-[var(--overlay)]; }
     & .scrim.on { @apply block; }
   }
+
+  /* campaign creatives and the planner's plan (Campaigns) */
+  & .ap-cr { @apply flex flex-wrap gap-2; }
+  & .ap-cr-i { @apply relative h-24 w-24 rounded-lg border border-line bg-black; }
+  & .ap-cr-i img, & .ap-cr-i video { @apply h-full w-full rounded-lg object-cover; }
+  & .ap-cr-i.off { @apply opacity-45; }
+  & .ap-cr-tag { @apply absolute bottom-0 left-0 right-0 rounded-b-lg bg-[rgb(0_0_0/0.6)] px-1.5 py-0.5 text-[11px] text-white; }
+  & .ap-plan { @apply mt-3 rounded-[var(--card-radius)] border border-accent-line bg-accent-tint px-4 py-3 text-sm leading-relaxed text-fg; }
+  & .ap-plan .tbl-wrap { @apply mt-2; }
 }
