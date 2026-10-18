@@ -61,7 +61,7 @@ services:
       ORDER_WEBHOOK_URL: http://instantgrill-notifier:8080/order-webhook
       ORDER_WEBHOOK_SECRET: ${IG_ORDER_WEBHOOK_SECRET:-}
       # Meta Conversions API (server-side Purchase); empty = off.
-      META_CAPI_TOKEN: ${IG_META_CAPI_TOKEN:-}
+      META_CAPI_TOKEN: ${META_CAPI_TOKEN:-}
     labels:
       - traefik.enable=true
       - "traefik.http.routers.instantgrill-new.rule=Host(`new.instantgrill.shop`)"
