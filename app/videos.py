@@ -11,7 +11,8 @@ Meta fetches the file from GET /media/v/<token>.mp4, public on purpose like the
 pictures: the 160-bit token is the only way to name a video.
 
 Uploaded videos nobody posted are removed after 2 days, posted ones after 30
-(Meta keeps its own copy), so the volume does not fill up."""
+(Meta keeps its own copy), so the volume does not fill up. A video waiting on
+an ad campaign draft is kept until the campaign launches or is discarded."""
 import json
 import os
 import re
@@ -132,6 +133,8 @@ def cleanup(force=False):
                         WHERE NOT v.in_library
                           AND NOT EXISTS (SELECT 1 FROM social_posts p WHERE p.video_token = v.token
                                              AND p.status IN ('draft','scheduled','publishing','failed'))
+                          AND NOT EXISTS (SELECT 1 FROM ad_drafts a WHERE a.video_token = v.token
+                                             AND a.status IN ('draft','failed'))
                           AND (v.created_at < now() - interval '30 days'
                                OR (v.created_at < now() - interval '2 days'
                                    AND NOT EXISTS (SELECT 1 FROM social_posts p WHERE p.video_token = v.token)))

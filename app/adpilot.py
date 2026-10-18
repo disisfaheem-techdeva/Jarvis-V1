@@ -50,7 +50,8 @@ CITIES = {   # centre points for "within N km of the business"
 SETTINGS_COLS = ("auto_pause, max_cost_per_result, min_spend, meta_daily_cap, google_daily_cap, country, city, "
                  "radius_km, website_url, last_check_at, last_auto_launch_at, updated_at")
 DRAFT_COLS = ("id, provider, service, copy, image_token, daily_budget, status, external, error, created_by, "
-              "created_at, launched_at, page_id")
+              "created_at, launched_at, page_id, destination, video_token")
+DESTINATIONS = ("whatsapp", "website")
 
 
 def _who(x_tenant_id, x_role, authorization, session):
@@ -154,29 +155,43 @@ def _clean_settings(body):
 
 # ------------------------------------------------------------------ business facts
 def _business(cur, service=None, exclude=()):
+    """The business name, what to advertise and everything it sells.
+    A clinic sells services; a shop (food, retail) sells products, and its
+    best seller comes from delivered orders, not appointments. The picked item
+    carries kind "service" or "product" so the wording fits."""
     cur.execute("SELECT name FROM tenants WHERE id = current_tenant()")
-    biz = (cur.fetchone() or {}).get("name") or "our clinic"
+    biz = (cur.fetchone() or {}).get("name") or "our business"
     cur.execute("SELECT name, price FROM services WHERE coalesce(active, true) ORDER BY sort_order NULLS LAST, name "
                 "LIMIT 60")
-    services = [{"name": r["name"], "price": float(r["price"]) if r["price"] is not None else None}
+    services = [{"name": r["name"], "price": float(r["price"]) if r["price"] is not None else None, "kind": "service"}
                 for r in cur.fetchall()]
-    pick = None
+    cur.execute("SELECT name, price FROM products WHERE coalesce(active, true) ORDER BY name LIMIT 60")
+    products = [{"name": r["name"], "price": float(r["price"]) if r["price"] is not None else None, "kind": "product"}
+                for r in cur.fetchall()]
+    items = services + products
     skip = {x.lower() for x in exclude}
+    find = lambda name: next((x for x in items if x["name"].lower() == str(name).lower()), None)
+    pick = None
     if service:
-        pick = next((s for s in services if s["name"].lower() == service.lower()), None) or {"name": service,
-                                                                                            "price": None}
+        pick = find(service) or {"name": service, "price": None, "kind": "service" if services else "product"}
     else:
+        cur.execute("""SELECT oi.description AS item, sum(oi.line_total) AS rev
+                         FROM order_items oi JOIN orders o ON o.id = oi.order_id
+                        WHERE o.status = 'delivered' AND o.created_at >= now() - interval '30 days'
+                        GROUP BY 1 ORDER BY 2 DESC LIMIT 10""")
+        sold = [r["item"] for r in cur.fetchall()]
         cur.execute("""SELECT coalesce(nullif(service, ''), '') AS service, sum(coalesce(price, 0)) AS rev
                          FROM appointments WHERE status = 'completed' AND starts_at >= now() - interval '30 days'
                           AND coalesce(service, '') <> '' GROUP BY 1 ORDER BY 2 DESC LIMIT 10""")
-        for top in cur.fetchall():
-            if top["service"].lower() not in skip:
-                pick = next((s for s in services if s["name"].lower() == top["service"].lower()),
-                            {"name": top["service"], "price": None})
+        booked = [r["service"] for r in cur.fetchall()]
+        # a shop's best seller first when it sells by orders, else the clinic's
+        for name in (sold + booked) if (products and not services) else (booked + sold):
+            if name.lower() not in skip and find(name):
+                pick = find(name)
                 break
         if not pick:
-            pick = next((s for s in services if s["name"].lower() not in skip), None)
-    return biz, pick, services
+            pick = next((x for x in (services or products) if x["name"].lower() not in skip), None)
+    return biz, pick, items
 
 
 def _latest_photos(cur, n=8):
@@ -192,12 +207,14 @@ _CLAIMS = re.compile(r"(%|\b(off|offer|offers|discount\w*|free|limited|hurry|sal
                      r"last chance|guarantee\w*|permanent\w*|cure\w*|100|risk[- ]free|no side effects?|"
                      r"painless|instant|miracle|#1|number one)\b)", re.I)
 
-COPY_PROMPT = """You write ads for a small business in Pakistan (clinic, salon, gym, academy).
-Write honest, warm, simple ads for ONE service. Rules:
+COPY_PROMPT = """You write ads for a small business in Pakistan (clinic, salon, gym, academy,
+restaurant or shop). Write honest, warm, simple ads for ONE item: "kind" says
+whether it is a service people book or a product people order. Rules:
 - Never invent an offer, discount, percentage, result, guarantee or number. Use a price
   only if it is given, exactly as given.
 - No medical promises or before/after claims. No ALL CAPS.
-- English, easy words. The call to action is to message on WhatsApp or book a visit.
+- English, easy words. The call to action is exactly "action" (message on WhatsApp, or
+  order on the website). A product is ordered, never booked or "visited".
 Reply with JSON:
 {"meta": {"headline": "<max 40 chars>", "primary_text": "<2-3 short sentences, max 300 chars>",
           "description": "<max 30 chars>", "hashtags": ["<5 to 8 hashtags, no # sign, no spaces>"]},
@@ -212,25 +229,40 @@ def _tag(s):
     return "".join(w[:1].upper() + w[1:] for w in words)[:30]
 
 
-def template_copy(biz, service, city):
+def template_copy(biz, service, city, dest="whatsapp"):
     """Plain wording that needs no AI and makes no claims."""
     svc, where = service["name"], (city.title() if city else "")
     price = (" from PKR {:,.0f}".format(service["price"])) if service.get("price") else ""
     loc = (" in " + where) if where else ""
+    shop = service.get("kind") == "product"
+    web = dest == "website"
+    act_tag = "OrderNow" if shop else "BookNow"
     tags = [t for t in (_tag(svc), _tag(biz), _tag(where) if where else "", _tag(svc + " " + where) if where else "",
-                        "BookNow") if t]
+                        act_tag) if t]
+    if shop:
+        each = (", PKR {:,.0f}".format(service["price"])) if service.get("price") else ""
+        text = ("Get %s from %s%s%s. %s" % (svc, biz, loc, each,
+                "Tap Order now to order on our website." if web else "Message us on WhatsApp to order."))
+        desc = "Order now" if web else "Order on WhatsApp"
+        g_mid = ("Order Online Today", "Order Now", "%s%s" % (svc, " " + where if where else ""))
+        g_desc = ("Order online in a few taps." if web else "Message us on WhatsApp to order.",
+                  "Order now from %s." % biz)
+        kw_tail = svc + (" " + where if where else " online")
+    else:
+        text = ("Looking for %s%s? %s offers %s%s. %s" % (svc, loc, biz, svc, price,
+                "Tap the button to book on our website." if web else "Message us on WhatsApp to book your visit."))
+        desc = "Book now" if web else "Book on WhatsApp"
+        g_mid = ("Book Your Appointment", "Message Us on WhatsApp" if not web else "Book Online", "%s Near You" % svc)
+        g_desc = ("Easy booking. Tell us the day and time that suits you.",
+                  "Book online in a minute." if web else "Message us on WhatsApp and we will reply quickly.")
+        kw_tail = "%s %s" % (svc, where) if where else svc + " clinic"
     return {
-        "meta": {"headline": ("%s at %s" % (svc, biz))[:40],
-                 "primary_text": ("Looking for %s%s? %s offers %s%s. Message us on WhatsApp to book your visit."
-                                  % (svc, loc, biz, svc, price))[:300],
-                 "description": "Book on WhatsApp", "hashtags": list(dict.fromkeys(tags))[:8]},
-        "google": {"headlines": [h[:30] for h in (("%s%s" % (svc, loc)), biz, "Book Your Appointment",
-                                                  "Message Us on WhatsApp", "%s Near You" % svc, svc)],
-                   "descriptions": [d[:90] for d in (("%s offers %s%s%s." % (biz, svc, loc, price)),
-                                                     "Easy booking. Tell us the day and time that suits you.",
-                                                     "Message us on WhatsApp and we will reply quickly.")],
+        "meta": {"headline": ("%s at %s" % (svc, biz))[:40], "primary_text": text[:300],
+                 "description": desc, "hashtags": list(dict.fromkeys(tags))[:8]},
+        "google": {"headlines": [h[:30] for h in (("%s%s" % (svc, loc)), biz) + g_mid + (svc,)],
+                   "descriptions": [d[:90] for d in (("%s offers %s%s%s." % (biz, svc, loc, price)),) + g_desc],
                    "keywords": list(dict.fromkeys(k.lower() for k in (
-                       svc, "%s %s" % (svc, where) if where else svc + " clinic", svc + " near me",
+                       svc, kw_tail, svc + " near me",
                        "best %s %s" % (svc, where) if where else "best " + svc, svc + " price")))},
     }
 
@@ -244,9 +276,9 @@ def _clean_list(v, n_max, each_max, lo=0):
     return out[:n_max] if len(out) >= lo else None
 
 
-def write_copy(biz, service, city, services):
+def write_copy(biz, service, city, services, dest="whatsapp"):
     """AI copy checked field by field; anything off-limits falls back to plain wording."""
-    base = template_copy(biz, service, city)
+    base = template_copy(biz, service, city, dest)
     allowed = {("%.0f" % s["price"]) for s in services if s.get("price")}
     allowed |= {("{:,.0f}".format(s["price"])).replace(",", "") for s in services if s.get("price")}
 
@@ -254,8 +286,9 @@ def write_copy(biz, service, city, services):
         return (all(n.replace(",", "") in allowed for n in _NUM.findall(text or ""))
                 and not _CLAIMS.search(text or ""))
 
-    facts = {"business": biz, "service": service["name"], "city": city.title() if city else "",
-             "price_pkr": service.get("price")}
+    facts = {"business": biz, "item": service["name"], "kind": service.get("kind") or "service",
+             "city": city.title() if city else "", "price_pkr": service.get("price"),
+             "action": "order on our website" if dest == "website" else "message us on WhatsApp"}
     try:
         out = generate_json(COPY_PROMPT, json.dumps(facts), required_keys=("meta", "google"), _retry=False)
     except AIUnavailable:
@@ -289,6 +322,39 @@ def _targeting(s):
     return city, int(s.get("radius_km") or 15), s.get("country") or "PK"
 
 
+VIDEO_WAIT = 45        # seconds Facebook gets to process a video at launch
+
+
+def _meta_video(act, tok, token):
+    """Hand the campaign's video to the ad account; return its id once Facebook
+    has processed it. Meta fetches the file from our public media link."""
+    import time
+    from .videos import video_url
+    up = ads._meta_post("/act_%s/advideos" % act, tok, {"file_url": video_url(token)})
+    vid = str(up.get("id") or "")
+    if not vid:
+        raise AdsError("Facebook did not accept the video.")
+    started = time.time()
+    while True:
+        st = ((ads._meta_get("/%s" % vid, tok, {"fields": "status"}).get("status") or {}).get("video_status") or "")
+        if st == "ready":
+            return vid
+        if st == "error":
+            raise AdsError("Facebook could not process the video. Try an MP4 under 4 minutes.")
+        if time.time() - started > VIDEO_WAIT:
+            raise AdsError("Facebook is still processing the video. Press Launch again in a minute.")
+        time.sleep(3)
+
+
+def _meta_video_thumb(tok, vid):
+    """The cover Facebook picked for the video (a video ad needs one)."""
+    rows = ads._meta_get("/%s/thumbnails" % vid, tok, {}).get("data") or []
+    pick = next((r for r in rows if r.get("is_preferred")), rows[0] if rows else None)
+    if not pick or not pick.get("uri"):
+        raise AdsError("Facebook has not made a cover for the video yet. Add a photo as its cover, or try again.")
+    return pick["uri"]
+
+
 def launch_meta(tid, role, d, s):
     tok, act, creds = ads.connection(tid, role, "meta")
     pages = [str(p.get("id")) for p in (creds.get("pages") or []) if p.get("id")]
@@ -304,40 +370,70 @@ def launch_meta(tid, role, d, s):
         page = pages[0]
     else:
         raise AdsError("Choose which Facebook Page this campaign runs from: press Edit and pick the Page.")
-    if not d.get("image_token"):
-        raise AdsError("Add a photo first: press 'Add a photo' on the campaign, then Launch.")
-    with tenant_session(tid, role) as cur:
-        cur.execute("SELECT bytes FROM social_media WHERE token = %s", (d["image_token"],))
-        img = cur.fetchone()
-    if not img:
-        raise AdsError("That photo is no longer there. Choose another.")
+    if not d.get("image_token") and not d.get("video_token"):
+        raise AdsError("Add a photo or a video first: press 'Add a photo' or 'Add a video' on the campaign, then Launch.")
+    web = (d.get("destination") or "whatsapp") == "website"
+    site = (s.get("website_url") or "").strip()
+    if web and not site:
+        raise AdsError("This campaign's button goes to your website, but no website is set. Add it in the ad "
+                       "autopilot rules, or switch the button to WhatsApp.")
+    img = None
+    if d.get("image_token"):
+        with tenant_session(tid, role) as cur:
+            cur.execute("SELECT bytes FROM social_media WHERE token = %s", (d["image_token"],))
+            img = cur.fetchone()
+        if not img:
+            raise AdsError("That photo is no longer there. Choose another.")
+    video_id = None
+    if d.get("video_token"):
+        # before anything is created, so a video Facebook will not take leaves no half-made campaign
+        video_id = _meta_video(act, tok, d["video_token"])
     acct = ads._meta_get("/act_%s" % act, tok, {"fields": "currency"})
     minor = int(round(float(d["daily_budget"]) * 100))       # PKR, USD, AED, GBP, SAR: 2 decimals at Meta
     name = "TechDeva · %s · %s" % (d["service"] or "Campaign", _dt.date.today().isoformat())
     ext = {"currency": acct.get("currency")}
     c = ads._meta_post("/act_%s/campaigns" % act, tok, {
-        "name": name, "objective": "OUTCOME_ENGAGEMENT", "status": "PAUSED", "buying_type": "AUCTION",
+        "name": name, "objective": "OUTCOME_TRAFFIC" if web else "OUTCOME_ENGAGEMENT", "status": "PAUSED",
+        "buying_type": "AUCTION",
         "special_ad_categories": [], "is_adset_budget_sharing_enabled": False})
     ext["campaign_id"] = str(c["id"])
     try:
-        up = ads._meta_post("/act_%s/adimages" % act, tok, {"bytes": base64.b64encode(bytes(img["bytes"])).decode()})
-        h = next(iter((up.get("images") or {}).values()), {}).get("hash")
-        if not h:
-            raise AdsError("Facebook did not accept the photo.")
+        h = None
+        if img:
+            up = ads._meta_post("/act_%s/adimages" % act, tok, {"bytes": base64.b64encode(bytes(img["bytes"])).decode()})
+            h = next(iter((up.get("images") or {}).values()), {}).get("hash")
+            if not h:
+                raise AdsError("Facebook did not accept the photo.")
         city, radius, country = _targeting(s)
         geo = ({"custom_locations": [{"latitude": city[0], "longitude": city[1], "radius": radius,
                                       "distance_unit": "kilometer"}]} if city else {"countries": [country]})
-        a = ads._meta_post("/act_%s/adsets" % act, tok, {
-            "name": name, "campaign_id": ext["campaign_id"], "daily_budget": minor, "billing_event": "IMPRESSIONS",
-            "optimization_goal": "CONVERSATIONS", "destination_type": "WHATSAPP",
-            "bid_strategy": "LOWEST_COST_WITHOUT_CAP", "promoted_object": {"page_id": page},
-            "targeting": {"geo_locations": geo, "age_min": 18, "age_max": 65}, "status": "ACTIVE"})
+        aset = {"name": name, "campaign_id": ext["campaign_id"], "daily_budget": minor, "billing_event": "IMPRESSIONS",
+                "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+                "targeting": {"geo_locations": geo, "age_min": 18, "age_max": 65}, "status": "ACTIVE"}
+        if web:     # people who tap through to the website to order
+            aset.update(optimization_goal="LINK_CLICKS", destination_type="WEBSITE")
+        else:       # a WhatsApp chat with the business
+            aset.update(optimization_goal="CONVERSATIONS", destination_type="WHATSAPP",
+                        promoted_object={"page_id": page})
+        a = ads._meta_post("/act_%s/adsets" % act, tok, aset)
         ext["adset_id"] = str(a["id"])
-        cr = ads._meta_post("/act_%s/adcreatives" % act, tok, {"name": name, "object_story_spec": {
-            "page_id": page, "link_data": {
+        # a product is ordered, a service is booked
+        cta = ({"type": "ORDER_NOW" if d["copy"].get("kind") == "product" else "BOOK_NOW", "value": {"link": site}} if web else
+               {"type": "WHATSAPP_MESSAGE", "value": {"app_destination": "WHATSAPP"}})
+        if video_id:
+            vd = {"video_id": video_id, "message": meta_message(d["copy"]), "title": d["copy"]["meta"]["headline"],
+                  "link_description": d["copy"]["meta"]["description"], "call_to_action": cta}
+            if h:
+                vd["image_hash"] = h            # the owner's photo is the video's cover
+            else:
+                vd["image_url"] = _meta_video_thumb(tok, video_id)
+            spec = {"page_id": page, "video_data": vd}
+        else:
+            spec = {"page_id": page, "link_data": {
                 "image_hash": h, "message": meta_message(d["copy"]), "name": d["copy"]["meta"]["headline"],
-                "description": d["copy"]["meta"]["description"], "link": "https://api.whatsapp.com/send",
-                "call_to_action": {"type": "WHATSAPP_MESSAGE", "value": {"app_destination": "WHATSAPP"}}}}})
+                "description": d["copy"]["meta"]["description"],
+                "link": site if web else "https://api.whatsapp.com/send", "call_to_action": cta}}
+        cr = ads._meta_post("/act_%s/adcreatives" % act, tok, {"name": name, "object_story_spec": spec})
         ext["creative_id"] = str(cr["id"])
         ad = ads._meta_post("/act_%s/ads" % act, tok, {"name": name, "adset_id": ext["adset_id"],
                                                         "creative": {"creative_id": ext["creative_id"]},
@@ -477,7 +573,7 @@ def draft(tid, role, uid, provider, service=None, by="owner", budget=None, page_
             running = [r["service"] for r in cur.fetchall()]
         biz, svc, services = _business(cur, service, running)
         if not svc:
-            raise HTTPException(400, "Add your services first (Services page), so the planner knows what to advertise.")
+            raise HTTPException(400, "Add your services or products first, so the planner knows what to advertise.")
         photos = _latest_photos(cur)
         page = None
         if provider == "meta":
@@ -488,16 +584,19 @@ def draft(tid, role, uid, provider, service=None, by="owner", budget=None, page_
                 page = str(page_id)
             else:
                 page = _default_page(cur, pages)
-    copy, worded = write_copy(biz, svc, s.get("city") or "", services)
+    # a shop with a website sends people to order there; everyone else to WhatsApp
+    dest = "website" if (svc.get("kind") == "product" and s.get("website_url")) else "whatsapp"
+    copy, worded = write_copy(biz, svc, s.get("city") or "", services, dest)
     cap = float(s[provider + "_daily_cap"] or 0)
     daily = budget or cap or MIN_DAILY[provider] * 2
     if daily < MIN_DAILY[provider]:
         raise HTTPException(400, "The daily budget must be at least %d." % MIN_DAILY[provider])
     with tenant_session(tid, role) as cur:
         cur.execute("INSERT INTO ad_drafts (tenant_id, provider, service, copy, image_token, daily_budget, created_by, "
-                    "page_id) VALUES (current_tenant(), %s, %s, %s, %s, %s, %s, %s) RETURNING " + DRAFT_COLS,
-                    (provider, svc["name"], json.dumps(dict(copy, worded_by=worded)),
-                     photos[0] if (photos and provider == "meta") else None, daily, by, page))
+                    "page_id, destination) VALUES (current_tenant(), %s, %s, %s, %s, %s, %s, %s, %s) RETURNING "
+                    + DRAFT_COLS,
+                    (provider, svc["name"], json.dumps(dict(copy, worded_by=worded, kind=svc.get("kind"))),
+                     photos[0] if (photos and provider == "meta") else None, daily, by, page, dest))
         row = dict(cur.fetchone())
         record(cur, action="adpilot.draft", resource="ad_drafts", resource_id=str(row["id"]), actor=str(uid or by),
                actor_type="human" if by == "owner" else "agent", status="ok",
@@ -590,6 +689,8 @@ def _draft_out(r):
     r["daily_budget"] = float(r["daily_budget"])
     r["image_url"] = ("/media/%s.jpg" % r["image_token"]) if r.get("image_token") else None
     r.pop("image_token", None)
+    r["video_url"] = ("/media/v/%s.mp4" % r["video_token"]) if r.get("video_token") else None
+    r.pop("video_token", None)
     return r
 
 
@@ -716,13 +817,38 @@ def make_adpilot_router():
                 if not cur.fetchone():
                     raise HTTPException(400, "Choose one of your own photos.")
                 img = tok
+            video = d.get("video_token")
+            if "video_url" in body:
+                from .videos import token_from_url, owns_video
+                if not body["video_url"]:
+                    video = None
+                else:
+                    tok = token_from_url(body["video_url"]) or ""
+                    if not tok or not owns_video(cur, tok):
+                        raise HTTPException(400, "Choose one of your own videos.")
+                    video = tok
+            dest = d.get("destination") or "whatsapp"
+            if "destination" in body and body["destination"] != dest:
+                dest = str(body["destination"] or "")
+                if dest not in DESTINATIONS:
+                    raise HTTPException(400, "The button goes to WhatsApp or to your website.")
+                if dest == "website" and not get_settings(cur).get("website_url"):
+                    raise HTTPException(400, "Add your website in the ad autopilot rules first, then choose it here.")
+                # the words must match the new button ("Order now" vs "Message us on WhatsApp");
+                # only the default wording is rewritten, not text the owner typed in the same save
+                if not any(k in body for k in ("headline", "primary_text", "description")):
+                    biz, item, items = _business(cur, d["service"])
+                    fresh = template_copy(biz, item, get_settings(cur).get("city") or "", dest)
+                    m.update({k: fresh["meta"][k] for k in ("primary_text", "description")})
+                    m["hashtags"] = fresh["meta"]["hashtags"]
             page = d["page_id"]
             if "page_id" in body and d["provider"] == "meta":
                 page = str(body["page_id"] or "").strip() or None
                 if page and page not in {p["id"] for p in _page_list(cur, tid)}:
                     raise HTTPException(400, "That Facebook Page is not connected. Choose one of your Pages.")
-            cur.execute("UPDATE ad_drafts SET copy = %s, daily_budget = %s, image_token = %s, page_id = %s "
-                        "WHERE id = %s", (json.dumps(copy), budget, img, page, d["id"]))
+            cur.execute("UPDATE ad_drafts SET copy = %s, daily_budget = %s, image_token = %s, page_id = %s, "
+                        "video_token = %s, destination = %s WHERE id = %s",
+                        (json.dumps(copy), budget, img, page, video, dest, d["id"]))
             record(cur, action="adpilot.draft_edit", resource="ad_drafts", resource_id=draft_id,
                    actor=str(uid or role), actor_type="human", status="ok",
                    detail={"fields": sorted(body)}, error=None)
