@@ -40,6 +40,15 @@ PROVIDERS = ("meta", "google")
 CHECK_EVERY = _dt.timedelta(hours=6)
 AUTO_LAUNCH_EVERY = _dt.timedelta(days=7)
 MIN_DAILY = {"meta": 300.0, "google": 300.0}        # below this the platforms refuse or never deliver
+# A/B test of creatives: one ad per creative in one ad set (same text, same
+# audience), so only the picture or video differs.
+AB_MAX_ADS = 4          # more ads than this split a small budget too thin to learn
+AB_PER_AD = 500.0       # PKR a day each ad needs to gather results in a week
+AB_DAYS = 7             # first decision
+AB_MAX_DAYS = 14        # too close at day 7: keep testing, then keep the cheapest
+AB_MIN_RESULTS = 20     # between all the ads, before any 95% verdict
+AB_CHECK_EVERY = _dt.timedelta(hours=6)
+MAX_CREATIVES = 10
 COUNTRIES = {"PK": 2586, "AE": 2784, "SA": 2682, "GB": 2826, "US": 2840}
 CITIES = {   # centre points for "within N km of the business"
     "lahore": (31.5204, 74.3587), "karachi": (24.8607, 67.0011), "islamabad": (33.6844, 73.0479),
@@ -50,7 +59,7 @@ CITIES = {   # centre points for "within N km of the business"
 SETTINGS_COLS = ("auto_pause, max_cost_per_result, min_spend, meta_daily_cap, google_daily_cap, country, city, "
                  "radius_km, website_url, last_check_at, last_auto_launch_at, updated_at")
 DRAFT_COLS = ("id, provider, service, copy, image_token, daily_budget, status, external, error, created_by, "
-              "created_at, launched_at, page_id, destination, video_token")
+              "created_at, launched_at, page_id, destination, video_token, creatives, test")
 DESTINATIONS = ("whatsapp", "website")
 
 
@@ -322,6 +331,54 @@ def _targeting(s):
     return city, int(s.get("radius_km") or 15), s.get("country") or "PK"
 
 
+def creatives_of(d):
+    """The creatives a campaign runs: the owner's attached list, else the one
+    photo or video set on the draft (the planner's pick)."""
+    out = [c for c in (d.get("creatives") or []) if c.get("kind") in ("image", "video") and c.get("token")]
+    if out:
+        return out
+    if d.get("video_token"):
+        return [{"kind": "video", "token": d["video_token"]}]
+    return [{"kind": "image", "token": d["image_token"]}] if d.get("image_token") else []
+
+
+def ab_plan(d):
+    """How many ads run and why, worked out from the creatives and the budget.
+    The planner decides; this is what the owner is told before Launch."""
+    cs = creatives_of(d) if d.get("provider") == "meta" else []
+    budget = float(d.get("daily_budget") or 0)
+    if d.get("provider") != "meta":
+        return {"ads": 1, "test": False, "picked": [], "left_out": 0,
+                "text": "1 search ad with your headlines and keywords. Google tries the headlines itself."}
+    if not cs:
+        return {"ads": 0, "test": False, "picked": [], "left_out": 0,
+                "text": "Add at least one photo, flyer or video. With two or more, the planner tests them against each other."}
+    room = max(1, int(budget // AB_PER_AD))
+    n = min(len(cs), AB_MAX_ADS, room)
+    # videos first (they usually hold attention longest), then pictures in the order given
+    order = [c for c in cs if c["kind"] == "video"] + [c for c in cs if c["kind"] == "image"]
+    picked = order[:n]
+    cur = "PKR"
+    if n == 1:
+        text = "1 ad will run with %s." % ("this video" if picked[0]["kind"] == "video" else "this picture")
+        if len(cs) > 1:
+            text += (" To test your %d creatives against each other, raise the daily budget to at least %s %s "
+                     "(about %s %s for each ad)." % (min(len(cs), AB_MAX_ADS), cur,
+                                                    "{:,.0f}".format(AB_PER_AD * min(len(cs), AB_MAX_ADS)),
+                                                    cur, "{:,.0f}".format(AB_PER_AD)))
+    else:
+        text = ("%d ads will run, one for each creative, sharing %s %s a day (about %s %s each). After %d days the "
+                "planner keeps the one that gets results cheapest and pauses the others; if it is too close to call, "
+                "it keeps testing up to %d days." % (n, cur, "{:,.0f}".format(budget), cur,
+                                                     "{:,.0f}".format(budget / n), AB_DAYS, AB_MAX_DAYS))
+        left = len(cs) - n
+        if left > 0:
+            text += (" %d creative%s left out: %s" % (left, "" if left == 1 else "s",
+                     "at most %d ads are tested at once." % AB_MAX_ADS if n == AB_MAX_ADS else
+                     "each ad needs about %s %s a day, so raise the budget to test more." % (cur, "{:,.0f}".format(AB_PER_AD))))
+    return {"ads": n, "test": n >= 2, "picked": picked, "left_out": len(cs) - n, "text": text}
+
+
 VIDEO_WAIT = 45        # seconds Facebook gets to process a video at launch
 
 
@@ -344,6 +401,14 @@ def _meta_video(act, tok, token):
         if time.time() - started > VIDEO_WAIT:
             raise AdsError("Facebook is still processing the video. Press Launch again in a minute.")
         time.sleep(3)
+
+
+def _meta_image(act, tok, data):
+    up = ads._meta_post("/act_%s/adimages" % act, tok, {"bytes": base64.b64encode(data).decode()})
+    h = next(iter((up.get("images") or {}).values()), {}).get("hash")
+    if not h:
+        raise AdsError("Facebook did not accept a picture.")
+    return h
 
 
 def _meta_video_thumb(tok, vid):
@@ -370,24 +435,36 @@ def launch_meta(tid, role, d, s):
         page = pages[0]
     else:
         raise AdsError("Choose which Facebook Page this campaign runs from: press Edit and pick the Page.")
-    if not d.get("image_token") and not d.get("video_token"):
-        raise AdsError("Add a photo or a video first: press 'Add a photo' or 'Add a video' on the campaign, then Launch.")
+    plan = ab_plan(d)
+    if not plan["picked"]:
+        raise AdsError("Add a photo, flyer or video first: press 'Add creatives' on the campaign, then Launch.")
     web = (d.get("destination") or "whatsapp") == "website"
     site = (s.get("website_url") or "").strip()
     if web and not site:
         raise AdsError("This campaign's button goes to your website, but no website is set. Add it in the ad "
                        "autopilot rules, or switch the button to WhatsApp.")
-    img = None
-    if d.get("image_token"):
-        with tenant_session(tid, role) as cur:
+    items = []
+    with tenant_session(tid, role) as cur:
+        for c in plan["picked"]:
+            if c["kind"] == "image":
+                cur.execute("SELECT bytes FROM social_media WHERE token = %s", (c["token"],))
+                row = cur.fetchone()
+                if not row:
+                    raise AdsError("One of the pictures is no longer there. Remove it and add it again.")
+                items.append(dict(c, bytes=bytes(row["bytes"])))
+            else:
+                items.append(dict(c))
+        cover = None
+        # the draft's photo is a video's cover only when the owner attached no creatives of their own
+        if not d.get("creatives") and d.get("image_token") and any(c["kind"] == "video" for c in items):
             cur.execute("SELECT bytes FROM social_media WHERE token = %s", (d["image_token"],))
-            img = cur.fetchone()
-        if not img:
-            raise AdsError("That photo is no longer there. Choose another.")
-    video_id = None
-    if d.get("video_token"):
-        # before anything is created, so a video Facebook will not take leaves no half-made campaign
-        video_id = _meta_video(act, tok, d["video_token"])
+            row = cur.fetchone()
+            cover = bytes(row["bytes"]) if row else None
+    # videos go to Facebook before anything is created, so one it will not
+    # take leaves no half-made campaign
+    for it in items:
+        if it["kind"] == "video":
+            it["video_id"] = _meta_video(act, tok, it["token"])
     acct = ads._meta_get("/act_%s" % act, tok, {"fields": "currency"})
     minor = int(round(float(d["daily_budget"]) * 100))       # PKR, USD, AED, GBP, SAR: 2 decimals at Meta
     name = "TechDeva · %s · %s" % (d["service"] or "Campaign", _dt.date.today().isoformat())
@@ -398,12 +475,6 @@ def launch_meta(tid, role, d, s):
         "special_ad_categories": [], "is_adset_budget_sharing_enabled": False})
     ext["campaign_id"] = str(c["id"])
     try:
-        h = None
-        if img:
-            up = ads._meta_post("/act_%s/adimages" % act, tok, {"bytes": base64.b64encode(bytes(img["bytes"])).decode()})
-            h = next(iter((up.get("images") or {}).values()), {}).get("hash")
-            if not h:
-                raise AdsError("Facebook did not accept the photo.")
         city, radius, country = _targeting(s)
         geo = ({"custom_locations": [{"latitude": city[0], "longitude": city[1], "radius": radius,
                                       "distance_unit": "kilometer"}]} if city else {"countries": [country]})
@@ -420,25 +491,31 @@ def launch_meta(tid, role, d, s):
         # a product is ordered, a service is booked
         cta = ({"type": "ORDER_NOW" if d["copy"].get("kind") == "product" else "BOOK_NOW", "value": {"link": site}} if web else
                {"type": "WHATSAPP_MESSAGE", "value": {"app_destination": "WHATSAPP"}})
-        if video_id:
-            vd = {"video_id": video_id, "message": meta_message(d["copy"]), "title": d["copy"]["meta"]["headline"],
-                  "link_description": d["copy"]["meta"]["description"], "call_to_action": cta}
-            if h:
-                vd["image_hash"] = h            # the owner's photo is the video's cover
+        cover_hash = None
+        if cover:
+            cover_hash = _meta_image(act, tok, cover)
+        ext["ads"] = []
+        for n, it in enumerate(items, 1):
+            if it["kind"] == "video":
+                vd = {"video_id": it["video_id"], "message": meta_message(d["copy"]), "title": d["copy"]["meta"]["headline"],
+                      "link_description": d["copy"]["meta"]["description"], "call_to_action": cta}
+                if cover_hash:
+                    vd["image_hash"] = cover_hash          # the owner's photo is the video's cover
+                else:
+                    vd["image_url"] = _meta_video_thumb(tok, it["video_id"])
+                spec = {"page_id": page, "video_data": vd}
             else:
-                vd["image_url"] = _meta_video_thumb(tok, video_id)
-            spec = {"page_id": page, "video_data": vd}
-        else:
-            spec = {"page_id": page, "link_data": {
-                "image_hash": h, "message": meta_message(d["copy"]), "name": d["copy"]["meta"]["headline"],
-                "description": d["copy"]["meta"]["description"],
-                "link": site if web else "https://api.whatsapp.com/send", "call_to_action": cta}}
-        cr = ads._meta_post("/act_%s/adcreatives" % act, tok, {"name": name, "object_story_spec": spec})
-        ext["creative_id"] = str(cr["id"])
-        ad = ads._meta_post("/act_%s/ads" % act, tok, {"name": name, "adset_id": ext["adset_id"],
-                                                        "creative": {"creative_id": ext["creative_id"]},
-                                                        "status": "ACTIVE"})
-        ext["ad_id"] = str(ad["id"])
+                spec = {"page_id": page, "link_data": {
+                    "image_hash": _meta_image(act, tok, it["bytes"]), "message": meta_message(d["copy"]),
+                    "name": d["copy"]["meta"]["headline"], "description": d["copy"]["meta"]["description"],
+                    "link": site if web else "https://api.whatsapp.com/send", "call_to_action": cta}}
+            label = name if len(items) == 1 else "%s · creative %d" % (name, n)
+            cr = ads._meta_post("/act_%s/adcreatives" % act, tok, {"name": label, "object_story_spec": spec})
+            ad = ads._meta_post("/act_%s/ads" % act, tok, {"name": label, "adset_id": ext["adset_id"],
+                                                            "creative": {"creative_id": str(cr["id"])}, "status": "ACTIVE"})
+            ext["ads"].append({"ad_id": str(ad["id"]), "creative_id": str(cr["id"]), "kind": it["kind"],
+                               "token": it["token"], "n": n})
+        ext["creative_id"], ext["ad_id"] = ext["ads"][0]["creative_id"], ext["ads"][0]["ad_id"]
         ads.meta_set_status(tok, ext["campaign_id"], True)        # the switch, last
     except AdsError as e:
         raise AdsError("%s (the half-made campaign stays paused)" % e, ) from None
@@ -521,10 +598,14 @@ def launch(tid, role, uid, draft_id, by):
         ok, err = True, None
     except AdsError as e:
         ext, ok, err = d.get("external") or {}, False, str(e)
+    test = {}
+    if ok and len(ext.get("ads") or []) >= 2:
+        test = {"status": "testing", "started_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                "days": AB_DAYS, "max_days": AB_MAX_DAYS, "ads": ext["ads"], "results": {}}
     with tenant_session(tid, role) as cur:
         cur.execute("UPDATE ad_drafts SET status = %s, external = %s, error = %s, launched_at = CASE WHEN %s "
-                    "THEN now() END WHERE id = %s",
-                    ("launched" if ok else "failed", json.dumps(ext), err, ok, d["id"]))
+                    "THEN now() END, test = %s WHERE id = %s",
+                    ("launched" if ok else "failed", json.dumps(ext), err, ok, json.dumps(test), d["id"]))
         _log(cur, d["provider"], "launch", ext.get("campaign_id") or "", "TechDeva · " + (d["service"] or ""),
              "Daily budget %s" % ("{:,.0f}".format(float(d["daily_budget"]))), by, ok, err)
         record(cur, action="adpilot.launch", resource="ad_drafts", resource_id=str(d["id"]), actor=str(uid or by),
@@ -663,6 +744,129 @@ def run_tenant(tid):
     return done
 
 
+# ------------------------------------------------------------------ A/B test rounds
+def _norm_cdf(z):
+    import math
+    return 0.5 * (1 + math.erf(z / math.sqrt(2)))
+
+
+def ab_verdict(rows, min_results=AB_MIN_RESULTS):
+    """rows: [{ad_id, impressions, results, spend}]. The ad with the lowest cost
+    per result wins if it also gets more results per view than the runner-up
+    with 95% confidence (two-proportion z-test). Returns (winner_row | None, why)."""
+    import math
+    live = [r for r in rows if r["impressions"] > 0]
+    total = sum(r["results"] for r in live)
+    if len(live) < 2:
+        return None, "not enough ads have been shown yet"
+    if total < min_results:
+        return None, "%d results so far, %d needed to compare" % (total, min_results)
+    cpr = lambda r: r["spend"] / r["results"] if r["results"] else float("inf")
+    by_rate = sorted(live, key=lambda r: -r["results"] / r["impressions"])
+    best, second = by_rate[0], by_rate[1]
+    pool = (best["results"] + second["results"]) / (best["impressions"] + second["impressions"])
+    se = math.sqrt(pool * (1 - pool) * (1 / best["impressions"] + 1 / second["impressions"])) if 0 < pool < 1 else 0
+    z = ((best["results"] / best["impressions"]) - (second["results"] / second["impressions"])) / se if se else 0
+    conf = 2 * _norm_cdf(abs(z)) - 1
+    if conf < 0.95:
+        return None, "too close to call (%d%% sure, 95%% needed)" % min(99, int(conf * 100))
+    if cpr(best) > min(cpr(r) for r in live):
+        return None, "the ad with the most results is not the cheapest per result"
+    return best, "%d%% sure it gets more results per view, and it costs less per result" % min(99, int(conf * 100))
+
+
+def ab_rows(tok, campaign_id, ads_list, website):
+    """Results per ad since launch, from Facebook."""
+    body = ads._meta_get("/%s/insights" % campaign_id, tok, {
+        "level": "ad", "date_preset": "maximum", "limit": 50,
+        "fields": "ad_id,spend,impressions,clicks,inline_link_clicks,actions"})
+    got = {str(r.get("ad_id")): r for r in body.get("data") or []}
+    rows = []
+    for a in ads_list:
+        r = got.get(str(a["ad_id"])) or {}
+        acts = r.get("actions")
+        res = (float(r.get("inline_link_clicks") or 0) if website else
+               ads._action(acts, "onsite_conversion.messaging_conversation_started_7d")
+               + ads._action(acts, "lead", "onsite_conversion.lead_grouped"))
+        rows.append({"ad_id": str(a["ad_id"]), "n": a.get("n"), "kind": a.get("kind"), "token": a.get("token"),
+                     "spend": float(r.get("spend") or 0), "impressions": int(float(r.get("impressions") or 0)),
+                     "clicks": int(float(r.get("clicks") or 0)), "results": res})
+    return rows
+
+
+def ab_round(tid, force=False):
+    """Check this business's running tests; keep each winner, pause the rest."""
+    role = "owner"
+    now = _dt.datetime.now(_dt.timezone.utc)
+    with tenant_session(tid, role) as cur:
+        cur.execute("SELECT %s FROM ad_drafts WHERE test->>'status' = 'testing' AND status = 'launched'" % DRAFT_COLS)
+        tests = [dict(r) for r in cur.fetchall()]
+    done = 0
+    for d in tests:
+        t = dict(d["test"])
+        checked = t.get("checked_at")
+        if not force and checked and now - _dt.datetime.fromisoformat(checked) < AB_CHECK_EVERY:
+            continue
+        try:
+            tok, act, _ = ads.connection(tid, role, "meta")
+            rows = ab_rows(tok, d["external"]["campaign_id"], t["ads"], d.get("destination") == "website")
+        except AdsError as e:
+            t.update(checked_at=now.isoformat(), note="Could not read the results: %s" % e)
+            rows, tok = None, None
+        if rows is not None:
+            age = (now - _dt.datetime.fromisoformat(t["started_at"])).total_seconds() / 86400
+            t.update(results={r["ad_id"]: r for r in rows}, checked_at=now.isoformat(), day=int(age) + 1)
+            win, why = ab_verdict(rows) if age >= t.get("days", AB_DAYS) else (None, "")
+            if not win and age >= t.get("max_days", AB_MAX_DAYS):
+                # out of time: keep the cheapest per result (or, with no results at all, the most clicked)
+                withres = [r for r in rows if r["results"] > 0]
+                win = (min(withres, key=lambda r: r["spend"] / r["results"]) if withres
+                       else max(rows, key=lambda r: r["clicks"]))
+                why = ("no clear winner after %d days, so the planner kept the one with the lowest cost per result"
+                       % int(age) if withres else "no results after %d days, so the planner kept the most clicked ad" % int(age))
+            if win:
+                paused, failed = [], []
+                for r in rows:
+                    if r["ad_id"] == win["ad_id"]:
+                        continue
+                    try:
+                        ads.meta_set_status(tok, r["ad_id"], False)
+                        paused.append(r["ad_id"])
+                    except AdsError:
+                        failed.append(r["ad_id"])
+                t.update(status="done", winner=win["ad_id"], winner_n=win.get("n"), reason=why,
+                         paused=paused, pause_failed=failed, decided_at=now.isoformat())
+                done += 1
+            else:
+                t["note"] = ("Testing: day %d of %d." % (int(age) + 1, t.get("days", AB_DAYS)) if age < t.get("days", AB_DAYS)
+                             else "Still testing: %s. The planner decides by day %d." % (why, t.get("max_days", AB_MAX_DAYS)))
+        with tenant_session(tid, role) as cur:
+            cur.execute("UPDATE ad_drafts SET test = %s WHERE id = %s", (json.dumps(t, default=str), d["id"]))
+            if t.get("status") == "done" and t.get("decided_at") == now.isoformat():
+                _log(cur, "meta", "ab_winner", d["external"].get("campaign_id") or "", "TechDeva · " + (d["service"] or ""),
+                     "Kept creative %s: %s" % (t.get("winner_n"), t.get("reason")), "planner", not t.get("pause_failed"))
+                record(cur, action="adpilot.ab_winner", resource="ad_drafts", resource_id=str(d["id"]), actor="planner",
+                       actor_type="agent", status="ok", detail={"winner": t.get("winner"), "paused": t.get("paused"),
+                                                                 "reason": t.get("reason")}, error=None)
+    return done
+
+
+def ab_due():
+    """Scheduler hook: every business with a test still running (on Pro)."""
+    with tenant_session(None, "techdeva_admin") as cur:
+        cur.execute("""SELECT DISTINCT d.tenant_id FROM ad_drafts d
+                         JOIN client_accounts a ON a.tenant_id = d.tenant_id AND a.plan_key = ANY(%s)
+                        WHERE d.test->>'status' = 'testing' AND d.status = 'launched'""", (list(PLANS),))
+        due = [str(r["tenant_id"]) for r in cur.fetchall()]
+    n = 0
+    for tid in due:
+        try:
+            n += ab_round(tid)
+        except Exception as e:                      # one business's trouble never stops the rest
+            print("[adpilot] A/B %s skipped: %s" % (tid, type(e).__name__), flush=True)
+    return n
+
+
 def run_due():
     """Scheduler hook: businesses on Pro with the autopilot switched on, whose
     last round is older than CHECK_EVERY."""
@@ -674,7 +878,7 @@ def run_due():
                           AND (s.last_check_at IS NULL OR s.last_check_at < now() - %s::interval)""",
                     (list(PLANS), "%d hours" % int(CHECK_EVERY.total_seconds() // 3600)))
         due = [str(r["tenant_id"]) for r in cur.fetchall()]
-    n = 0
+    n = ab_due()
     for tid in due:
         try:
             n += run_tenant(tid)
@@ -689,8 +893,14 @@ def _draft_out(r):
     r["daily_budget"] = float(r["daily_budget"])
     r["image_url"] = ("/media/%s.jpg" % r["image_token"]) if r.get("image_token") else None
     r.pop("image_token", None)
+    plan = ab_plan(r)
+    r["plan"] = {"ads": plan["ads"], "test": plan["test"], "left_out": plan["left_out"], "text": plan["text"],
+                 "picked": [c["token"] for c in plan["picked"]]}
     r["video_url"] = ("/media/v/%s.mp4" % r["video_token"]) if r.get("video_token") else None
     r.pop("video_token", None)
+    r["creatives"] = [{"kind": c["kind"], "token": c["token"],
+                       "url": ("/media/v/%s.mp4" if c["kind"] == "video" else "/media/%s.jpg") % c["token"]}
+                      for c in (r.get("creatives") or [])]
     return r
 
 
@@ -817,6 +1027,27 @@ def make_adpilot_router():
                 if not cur.fetchone():
                     raise HTTPException(400, "Choose one of your own photos.")
                 img = tok
+            creatives = d.get("creatives") or []
+            if "creatives" in body:
+                from .videos import token_from_url, owns_video
+                if not isinstance(body["creatives"], list) or len(body["creatives"]) > MAX_CREATIVES:
+                    raise HTTPException(400, "Up to %d creatives per campaign." % MAX_CREATIVES)
+                creatives = []
+                for u in body["creatives"]:
+                    u = str(u or "")
+                    vt = token_from_url(u)
+                    if vt:
+                        if not owns_video(cur, vt):
+                            raise HTTPException(400, "Choose your own videos.")
+                        c = {"kind": "video", "token": vt}
+                    else:
+                        it = u.rsplit("/", 1)[-1].replace(".jpg", "")
+                        cur.execute("SELECT token FROM social_media WHERE token = %s", (it,))
+                        if not cur.fetchone():
+                            raise HTTPException(400, "Choose your own photos and flyers.")
+                        c = {"kind": "image", "token": it}
+                    if c not in creatives:
+                        creatives.append(c)
             video = d.get("video_token")
             if "video_url" in body:
                 from .videos import token_from_url, owns_video
@@ -847,8 +1078,8 @@ def make_adpilot_router():
                 if page and page not in {p["id"] for p in _page_list(cur, tid)}:
                     raise HTTPException(400, "That Facebook Page is not connected. Choose one of your Pages.")
             cur.execute("UPDATE ad_drafts SET copy = %s, daily_budget = %s, image_token = %s, page_id = %s, "
-                        "video_token = %s, destination = %s WHERE id = %s",
-                        (json.dumps(copy), budget, img, page, video, dest, d["id"]))
+                        "video_token = %s, destination = %s, creatives = %s WHERE id = %s",
+                        (json.dumps(copy), budget, img, page, video, dest, json.dumps(creatives), d["id"]))
             record(cur, action="adpilot.draft_edit", resource="ad_drafts", resource_id=draft_id,
                    actor=str(uid or role), actor_type="human", status="ok",
                    detail={"fields": sorted(body)}, error=None)

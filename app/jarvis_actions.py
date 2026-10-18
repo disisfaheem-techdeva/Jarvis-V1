@@ -383,15 +383,22 @@ def run(tid, role, uid, action, args, founder=False):
         note = None
         if imgs and d.get("id") and prov == "meta":
             try:
-                _call(tid, role, uid, "PUT", "/adpilot/drafts/%s" % d["id"], {"image_url": imgs[0]})
-                note = "with your picture"
+                out = _call(tid, role, uid, "PUT", "/adpilot/drafts/%s" % d["id"], {"creatives": imgs})
+                n = len(imgs)
+                note = "with your picture" if n == 1 else "with your %d pictures" % n
             except ActionError as e:
-                note = "but I could not put your picture on it (%s); press Edit on the campaign to choose one" % e
+                note = "but I could not put your pictures on it (%s); press Add creatives on the campaign" % e
         elif prov == "meta" and not d.get("image_url"):
             note = "with no picture yet: attach one, or upload it on the campaign"
+        plan = ""
+        try:     # the planner's plan for this draft: how many ads will run, and why
+            mine = [x for x in (_call(tid, role, uid, "GET", "/adpilot").get("drafts") or []) if x.get("id") == d.get("id")]
+            plan = ((mine[0].get("plan") or {}).get("text") or "").rstrip(".") if mine else ""
+        except ActionError:
+            pass
         return {"navigate": "marketing", "refresh": ["campaigns"], "draft": d}, (
-            "I wrote a %s campaign for %s as a draft%s. Nothing runs until you press Launch on Campaigns" % (
+            "I wrote a %s campaign for %s as a draft%s.%s Nothing runs until you press Launch on Campaigns" % (
                 "Facebook and Instagram" if prov == "meta" else "Google", d.get("service") or "your best seller",
-                (" " + note) if note else ""))
+                (" " + note) if note else "", (" " + plan + ".") if plan else ""))
 
     raise ActionError("I cannot do that from here yet")
