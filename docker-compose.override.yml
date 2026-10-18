@@ -44,7 +44,7 @@ services:
     build:
       context: ../instantgrill-preview/instantgrill-web
       args:
-        NEXT_PUBLIC_META_PIXEL_ID: "2004450143551169"
+        NEXT_PUBLIC_META_PIXEL_ID: "1140593618463651"
         NEXT_PUBLIC_GA4_ID: ""
     restart: unless-stopped
     environment:
