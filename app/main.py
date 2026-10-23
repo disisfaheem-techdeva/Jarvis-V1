@@ -136,6 +136,9 @@ trial.install(app)
 from . import roles
 roles.install(app)
 app.include_router(roles.make_roles_router())
+# Safer sign-in: lockout from login_attempts, email verification
+from .security import make_security_router
+app.include_router(make_security_router())
 # Storefront: orders, enquiries and messages from a tenant's own website (docs/STOREFRONT.md)
 app.include_router(make_storefront_router(P))
 
@@ -636,8 +639,13 @@ def public_signup(body: SignupIn, request: Request):
                             WHERE tenants.id = %s AND c.slug = %s AND c.active""",
                         ((body.business_type_other or "").strip()[:80] or None if body.business_type == "other" else None,
                          tenant_id, body.business_type))
+    verify = None
+    if pw_hash and body.contact_email:
+        # ask them to confirm the email straight away (app/security.py); never blocks the sign-up
+        from .security import send_verification
+        verify = send_verification({"email": body.contact_email.strip().lower(), "name": body.contact_name})
     return {"signup_id": signup_id, "tenant_id": tenant_id,
-            "status": "trial_started",
+            "status": "trial_started", "verification": verify,
             "login_created": pw_hash is not None,
             "portal": "/portal",
             "message": "Analysis in progress — your report is being prepared."}

@@ -94,6 +94,20 @@ def make_alerts_router():
                                  "link": "usage", "count": a["used"]})
         except Exception as e:  # noqa: BLE001 -- the count failing must not hide the other alerts
             print("[alerts] credits check skipped: %s" % str(e)[:200], flush=True)
+        if role in ("owner", "techdeva_admin"):
+            try:                   # wrong passwords on this business's logins in the last day (app/security.py)
+                from .security import failed_signins
+                with tenant_session(None, "techdeva_admin") as cur:
+                    bad = failed_signins(cur, tid)
+                n = sum(x["n"] for x in bad)
+                if n >= 3:
+                    items.append({"kind": "signin.failed", "severity": "warn" if n < 10 else "critical",
+                                  "title": "%d wrong password%s on your team's logins today" % (n, "" if n == 1 else "s"),
+                                  "detail": ", ".join("%s (%d)" % (x["name"], x["n"]) for x in bad[:5]) +
+                                            ". If that was not them, change their password or PIN.",
+                                  "link": "team", "count": n})
+            except Exception as e:  # noqa: BLE001
+                print("[alerts] sign-in check skipped: %s" % str(e)[:200], flush=True)
         return {"checks": items, "count": len(items)}
 
     return router

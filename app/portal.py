@@ -29,7 +29,7 @@ import re
 import time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Header, Cookie, HTTPException, Response
+from fastapi import APIRouter, Header, Cookie, HTTPException, Request, Response
 from pydantic import BaseModel, field_validator
 
 from .auth import (AuthError, SESSION_COOKIE, SESSION_TTL_SECONDS, auth_required,
@@ -163,18 +163,36 @@ def make_portal_router(P) -> APIRouter:
 
     # ------------------------------------------------------------------- login
     @router.post("/auth/login")
-    def login(body: LoginIn, response: Response):
+    def login(body: LoginIn, response: Response, request: Request):
+        from . import security
         key = body.email.strip().lower()
+        ip = security.client_ip(request)
+        try:                       # the lockout lives in the database (db/73), across restarts
+            wait, which = security.locked_for(key, ip)
+        except Exception as e:     # noqa: BLE001 -- database away: the in-memory limit still holds
+            print("[login] lockout check skipped: %s" % type(e).__name__, flush=True)
+            wait, which = 0, None
+        if wait:
+            raise HTTPException(429, security.lock_message(wait, which))
         if _throttled(key):
             raise HTTPException(429, "too many failed attempts — try again later")
 
         user = P.find_user_by_email(body.email)
         # one generic message for both branches: never reveal whether an account exists
-        if not user or not verify_password(body.password, user.get("password_hash")):
+        # (and just as slow without an account, so timing does not tell either)
+        if not security.check_password(body.password, user.get("password_hash") if user else None):
             _record_fail(key)
+            try:
+                security.record_attempt(key, ip, False, user)
+            except Exception:      # noqa: BLE001
+                pass
             raise HTTPException(401, "invalid email or password")
 
         _LOGIN_FAILS.pop(key, None)
+        try:
+            security.record_attempt(key, ip, True, user)
+        except Exception:          # noqa: BLE001
+            pass
         P.touch_login(user["id"])
         token = issue_token(tenant_id=user["tenant_id"], user_id=user["id"],
                             role=user["role"])

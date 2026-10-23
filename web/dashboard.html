@@ -113,7 +113,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=9ad309a44d">
+<link rel="stylesheet" href="/assets/td.css?v=3cbe60da60">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -9140,6 +9140,64 @@ window.TD_ROLE = undefined;
   var _p3Render = renderShell;
   renderShell = function(){ loadRole(); _p3Render(); wire(); };
   window.addEventListener('hashchange', function(){ if (currentView() === 'roles') { S.p3_roles = undefined; R.msg = null; } });
+})();
+
+/* =====================================================================
+   Confirm your email (23 Oct 2026): a slim notice until the signed-in
+   person has confirmed their email (app/security.py). Never blocks anything.
+   ===================================================================== */
+(function(){
+  var V = { data: undefined, msg: null, hide: false, busy: false };
+  var q = (location.search.match(/[?&]verified=([a-z0-9]+)/) || [])[1];
+  if (q) {
+    V.msg = q === '1' ? { text: 'Thank you, your email is confirmed.' } : { text: 'That link has expired or was already used. Send a new one below.', bad: true };
+    try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {}
+  }
+  try { V.hide = sessionStorage.getItem('td-verify-hide') === '1'; } catch (e) {}
+  function load(){
+    if (V.data !== undefined || !S.me) return;
+    V.data = null;
+    api('/auth/security').then(function(r){ V.data = r.ok ? r.data : { needs_verification: false }; renderShell(); });
+  }
+  function banner(){
+    var d = V.data;
+    var need = d && d.needs_verification && !V.hide;
+    if (!need && !V.msg) return '';
+    var h = '<div class="p4-banner' + (V.msg && V.msg.bad ? ' bad' : '') + '" role="status">';
+    if (V.msg) h += '<span>' + esc(V.msg.text) + '</span>';
+    if (need) h += '<span>Please confirm your email <b>' + esc(d.email) + '</b>. Password reset links only go to a confirmed email.' +
+      (d.can_send ? '' : ' (This server cannot send emails yet; TechDeva will confirm it with you.)') + '</span>' +
+      (d.can_send ? '<button type="button" class="btn primary" id="p4-send"' + (V.busy ? ' disabled' : '') + '>' + (V.busy ? 'Sending...' : 'Send the link') + '</button>' : '') +
+      '<button type="button" class="btn" id="p4-later">Later</button>';
+    else h += '<button type="button" class="btn" id="p4-ok">OK</button>';
+    return h + '</div>';
+  }
+  function place(){
+    var c = document.querySelector('main.content');
+    if (!c || c.querySelector('.p4-banner')) return;
+    var html = banner();
+    if (!html) return;
+    var box = document.createElement('div'); box.innerHTML = html;
+    var head = c.querySelector('.tdm-head');
+    c.insertBefore(box.firstChild, head ? head.nextSibling : c.firstChild);
+    var s = document.getElementById('p4-send');
+    if (s) s.onclick = function(){
+      V.busy = true; renderShell();
+      api('/auth/verify-email/send', { method: 'POST' }).then(function(r){
+        V.busy = false;
+        V.msg = r.ok ? { text: r.data.already ? 'Your email is already confirmed.' : 'Sent. Open the link in the email to ' + r.data.sent_to + ' (check spam too).' }
+                     : { text: (r.data && r.data.detail) || 'The link was not sent.', bad: true };
+        if (r.ok && r.data.already) V.data = undefined;
+        renderShell();
+      });
+    };
+    var l = document.getElementById('p4-later');
+    if (l) l.onclick = function(){ V.hide = true; V.msg = null; try { sessionStorage.setItem('td-verify-hide', '1'); } catch (e) {} renderShell(); };
+    var o = document.getElementById('p4-ok');
+    if (o) o.onclick = function(){ V.msg = null; renderShell(); };
+  }
+  var _p4Render = renderShell;
+  renderShell = function(){ load(); _p4Render(); place(); };
 })();
 
 boot();

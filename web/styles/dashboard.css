@@ -171,4 +171,10 @@
   & .p3-name { @apply mb-3 flex max-w-sm flex-col gap-1.5 text-xs text-fg-muted; }
   & .p3-name input { @apply min-h-11 rounded-lg border border-line-strong bg-bg-elevated px-2.5 font-[inherit] text-sm text-fg; }
   & .p3-new { @apply my-3; }
+
+  /* confirm your email */
+  & .p4-banner { @apply mb-4 flex flex-wrap items-center gap-3 rounded-[var(--card-radius)] border border-accent-line bg-accent-tint px-4 py-3 text-sm text-fg; }
+  & .p4-banner > span { @apply min-w-0 flex-1 basis-64; }
+  & .p4-banner.bad { @apply border-danger bg-danger-tint; }
+  & .p4-banner .btn { @apply min-h-11; }
 }
