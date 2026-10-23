@@ -132,6 +132,10 @@ from .social_agent import make_meta_webhook_router, make_social_inbox_router
 app.include_router(make_meta_webhook_router())
 app.include_router(make_social_inbox_router())
 trial.install(app)
+# Team roles: a login with a role may only use the sections and actions it allows
+from . import roles
+roles.install(app)
+app.include_router(roles.make_roles_router())
 # Storefront: orders, enquiries and messages from a tenant's own website (docs/STOREFRONT.md)
 app.include_router(make_storefront_router(P))
 

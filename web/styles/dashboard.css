@@ -160,4 +160,15 @@
   & .p2-meter i.warn { @apply bg-warning; }
   & .p2-meter i.bad { @apply bg-danger; }
   & .p2-meter-note { @apply mt-2.5 mb-1 text-sm text-fg; }
+
+  /* Team roles */
+  & .p3-pad { @apply px-5 py-3; }
+  & .p3-grid th, & .p3-grid td { @apply text-center; }
+  & .p3-grid th:first-child, & .p3-grid td:first-child { @apply text-left; }
+  & .p3-grid input[type=checkbox] { @apply h-5 w-5 accent-[var(--accent)]; }
+  & .p3-no { @apply text-fg-subtle; }
+  & .p3-sel { @apply min-h-11 rounded-lg border border-line-strong bg-bg-elevated px-2.5 font-[inherit] text-sm text-fg; }
+  & .p3-name { @apply mb-3 flex max-w-sm flex-col gap-1.5 text-xs text-fg-muted; }
+  & .p3-name input { @apply min-h-11 rounded-lg border border-line-strong bg-bg-elevated px-2.5 font-[inherit] text-sm text-fg; }
+  & .p3-new { @apply my-3; }
 }
