@@ -113,7 +113,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=2ca15298a7">
+<link rel="stylesheet" href="/assets/td.css?v=9ad309a44d">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -7993,7 +7993,7 @@ function typeHidden(id){
     // Management (23 Oct 2026): the day-to-day pages sit together, Operations next to CRM and Team
     { num:'04', name:'CRM',            icon:'users', ids:['leads','sales','clientwork','customers','pipeline','appointments','calendar'], group:'Management' },
     { num:'05', name:'Operations',     icon:'box',   ids:['orders','inventory','dailyentry'] },
-    { num:'06', name:'Team & HR',      icon:'badge', ids:['team','attendance','hr'] },
+    { num:'06', name:'Team & HR',      icon:'badge', ids:['team','attendance','hr','roles'] },
     { num:'07', name:'Marketing',      icon:'mega',  ids:['marketing','posts','captions','autopilot','advisor','analytics'], sep:true },
     { num:'08', name:'Business',       icon:'store', ids:['services','products','packages','deals','settings'] },
     { num:'09', name:'Finance',        icon:'wallet',ids:['revenue','invoices','expenses','dayclose','pnl'] },
@@ -8001,7 +8001,7 @@ function typeHidden(id){
   ];
   // the pages added in this block (they are not in NAV)
   var NEW = { alerts:'Alerts', history:'Execution History', tools:'Tools', pipeline:'Pipeline',
-              analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer', usage:'AI usage' };
+              analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer', usage:'AI usage', roles:'Roles' };
   // tab names that follow the approved structure; everything else keeps its own name
   var LABEL = { overview:'Overview', console:'Jarvis Assistant', ai:'AI Agents', needshuman:'Approval Queue',
                 marketing:'Campaigns', posts:'Social Media Publisher', autopilot:'Content Calendar',
@@ -8035,10 +8035,20 @@ function typeHidden(id){
     }); });
     Object.keys(NEW).forEach(function(id){
       if (seen[id] || hidden.indexOf(id) !== -1) return;
-      if (!own && (id === 'permissions' || id === 'analytics' || id === 'captions' || id === 'usage')) return;
+      if (!own && (id === 'permissions' || id === 'analytics' || id === 'captions' || id === 'usage' || id === 'roles')) return;
+      if (id === 'roles' && window.TD_ROLE && TD_ROLE.permissions) return;
       seen[id] = 1; list.push({ id: id, name: NEW[id] });
     });
+    // a login with a role sees only the sections it may view (app/roles.py)
+    var rp = window.TD_ROLE && TD_ROLE.permissions;
+    if (rp) list = list.filter(function(x){ var s = sectionOf(x.id); return s && rp[s] && rp[s].indexOf('view') !== -1; });
     return list;
+  }
+  var MOD_SECTION = { '01':'dashboard', '02':'jarvis', '03':'chats', '04':'crm', '05':'operations', '06':'team',
+                      '07':'marketing', '08':'business', '09':'finance', '10':'admin' };
+  function sectionOf(id){
+    for (var i = 0; i < MODS.length; i++) if (MODS[i].ids.indexOf(id) !== -1) return MOD_SECTION[MODS[i].num];
+    return 'admin';
   }
   function grouped(){
     var list = available(), byId = {}, placed = {}, out = [];
@@ -9011,6 +9021,125 @@ function siWire(){
     return out;
   };
   window.addEventListener('hashchange', function(){ if (currentView() === 'usage') S.p2_usage = undefined; });
+})();
+
+/* =====================================================================
+   Team roles (23 Oct 2026): which sections and actions each login may use.
+   The server enforces it (app/roles.py); this page sets it and the sidebar
+   hides what a role cannot see.
+   ===================================================================== */
+window.TD_ROLE = undefined;
+(function(){
+  function loadRole(){
+    if (window.TD_ROLE !== undefined || !S.me) return;
+    window.TD_ROLE = null;
+    api('/team/roles/mine').then(function(r){ window.TD_ROLE = r.ok ? r.data : { permissions: null }; renderShell(); });
+  }
+  var ACT = { view: 'See', create: 'Add', edit: 'Change', delete: 'Delete', approve: 'Approve / publish', manage: 'Settings' };
+  var R = { edit: null, msg: null };   // edit: {key|null, name, permissions}
+  function say(t, bad){ R.msg = { text: t, bad: !!bad }; renderShell(); }
+  function grid(d, perms, editable){
+    return '<div class="tbl-wrap"><table class="p3-grid"><thead><tr><th>Section</th>' + d.actions.map(function(a){ return '<th>' + esc(ACT[a]) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+      Object.keys(d.sections).map(function(sec){
+        return '<tr><td>' + esc(d.sections[sec]) + '</td>' + d.actions.map(function(a){
+          var on = (perms[sec] || []).indexOf(a) !== -1;
+          return '<td>' + (editable ? '<input type="checkbox" data-p3="' + sec + ':' + a + '"' + (on ? ' checked' : '') + ' aria-label="' + esc(d.sections[sec] + ': ' + ACT[a]) + '">'
+                                    : (on ? '<span class="tdm-st ok" aria-label="yes">Yes</span>' : '<span class="p3-no" aria-label="no">—</span>')) + '</td>';
+        }).join('') + '</tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  VIEWS.roles = function(){
+    if (!isOwner() || (window.TD_ROLE && TD_ROLE.permissions)) return ownerOnlyPage('roles');
+    var out = '<h1>Roles</h1><p class="sub">Give each person a role. A role decides which parts of the dashboard they can see and what they can do there. ' +
+      'Changing someone’s role signs them out, so it applies from their next sign-in.</p>';
+    if (!need('p3_roles', '/team/roles')) return out + panel('Team', loading('Loading roles...'));
+    var d = S.p3_roles;
+    if (d === null) return out + panel('Team', errState(S.p3_roles_detail || 'The roles service did not respond.'));
+    if (R.msg) out += '<p class="card-note p1-msg' + (R.msg.bad ? ' bad' : '') + '" role="status">' + esc(R.msg.text) + '</p>';
+    var all = d.presets.concat(d.custom);
+    function opts(cur, base){
+      var o = '<option value="staff"' + (!cur && base === 'operator' ? ' selected' : '') + '>Staff (as before roles)</option>' +
+              '<option value="full"' + (!cur && base === 'owner' ? ' selected' : '') + '>Full access</option>';
+      return o + all.map(function(r){ return '<option value="' + esc(r.key) + '"' + (r.key === cur ? ' selected' : '') + '>' + esc(r.name) + '</option>'; }).join('');
+    }
+    out += panel('Team', '<div class="tbl-wrap"><table><thead><tr><th>Person</th><th>Signs in with</th><th>Role</th></tr></thead><tbody>' +
+      d.people.map(function(p){
+        var owner = p.me || (p.base === 'owner' && !p.staff_role && p.has_email);
+        return '<tr><td>' + esc(p.name) + (p.me ? ' <span class="card-note">(you)</span>' : '') + '</td><td>' + (p.has_email ? 'Email' : 'PIN') + '</td><td>' +
+          (p.me ? '<b>Owner</b>' : '<select class="p3-sel" data-p3who="' + esc(p.id) + '" aria-label="Role for ' + esc(p.name) + '">' + opts(p.staff_role, p.base) + '</select>') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' + '<p class="card-note p3-pad">New team logins are added under Team &amp; HR &gt; Team. Then give them a role here.</p>');
+    if (R.edit) {
+      out += '<div class="panel"><div class="panel-head"><div class="panel-title">' + (R.edit.key ? 'Change role' : 'New role') + '</div></div><div class="p3-pad">' +
+        '<label class="p3-name">Role name<input id="p3-name" maxlength="60" value="' + esc(R.edit.name) + '" placeholder="e.g. Cashier"></label>' +
+        grid(d, R.edit.permissions, true) +
+        '<div class="p1-cap-acts"><button type="button" class="btn primary" id="p3-save">Save role</button><button type="button" class="btn" id="p3-cancel">Cancel</button>' +
+        (R.edit.key ? '<button type="button" class="btn" id="p3-del">Delete role</button>' : '') + '</div></div></div>';
+    } else out += '<div class="p1-cap-acts p3-new"><button type="button" class="btn primary" id="p3-new">New custom role</button></div>';
+    out += '<h2>Roles</h2>' + all.map(function(r){
+      return panel(r.name + (r.custom ? '' : ' (preset)'), (r.about ? '<p class="card-note p3-pad">' + esc(r.about) + '</p>' : '') + grid(d, r.permissions, false) +
+        (r.custom ? '<div class="p1-cap-acts p3-pad"><button type="button" class="btn" data-p3edit="' + esc(r.key) + '">Change</button></div>'
+                  : '<div class="p1-cap-acts p3-pad"><button type="button" class="btn" data-p3copy="' + esc(r.key) + '">Copy as a custom role</button></div>'));
+    }).join('');
+    return out;
+  };
+  function wire(){
+    if (currentView() !== 'roles') return;
+    var d = S.p3_roles; if (!d) return;
+    var byKey = {}; d.presets.concat(d.custom).forEach(function(r){ byKey[r.key] = r; });
+    document.querySelectorAll('[data-p3who]').forEach(function(sel){
+      sel.onchange = function(){
+        var who = sel.getAttribute('data-p3who');
+        api('/team/logins/' + encodeURIComponent(who) + '/role', { method: 'PUT', body: { role: sel.value } }).then(function(r){
+          S.p3_roles = undefined;
+          say(r.ok ? r.data.name + ' is now: ' + r.data.role + '. They sign in again to start with it.' : ((r.data && r.data.detail) || 'Not saved.'), !r.ok);
+        });
+      };
+    });
+    function copy(p){ var o = {}; Object.keys(p || {}).forEach(function(k){ o[k] = p[k].slice(); }); return o; }
+    var nb = document.getElementById('p3-new');
+    if (nb) nb.onclick = function(){ R.edit = { key: null, name: '', permissions: { dashboard: ['view'] } }; R.msg = null; renderShell(); };
+    document.querySelectorAll('[data-p3copy]').forEach(function(b){ b.onclick = function(){
+      var r = byKey[b.getAttribute('data-p3copy')]; R.edit = { key: null, name: r.name + ' (custom)', permissions: copy(r.permissions) }; R.msg = null; renderShell(); window.scrollTo(0, 0); }; });
+    document.querySelectorAll('[data-p3edit]').forEach(function(b){ b.onclick = function(){
+      var r = byKey[b.getAttribute('data-p3edit')]; R.edit = { key: r.key, name: r.name, permissions: copy(r.permissions) }; R.msg = null; renderShell(); window.scrollTo(0, 0); }; });
+    document.querySelectorAll('[data-p3]').forEach(function(c){ c.onchange = function(){
+      var sa = c.getAttribute('data-p3').split(':'), p = R.edit.permissions, l = p[sa[0]] = p[sa[0]] || [];
+      if (c.checked) { if (l.indexOf(sa[1]) === -1) l.push(sa[1]); if (sa[1] !== 'view' && l.indexOf('view') === -1) l.push('view'); }
+      else { p[sa[0]] = sa[1] === 'view' ? [] : l.filter(function(x){ return x !== sa[1]; }); }
+      var n = document.getElementById('p3-name'); if (n) R.edit.name = n.value;
+      renderShell();
+    }; });
+    var nm = document.getElementById('p3-name');
+    if (nm) nm.oninput = function(){ R.edit.name = nm.value; };
+    var cancel = document.getElementById('p3-cancel');
+    if (cancel) cancel.onclick = function(){ R.edit = null; renderShell(); };
+    var save = document.getElementById('p3-save');
+    if (save) save.onclick = function(){
+      var e = R.edit, id = e.key ? e.key.slice(7) : null;
+      api('/team/roles' + (id ? '/' + id : ''), { method: id ? 'PUT' : 'POST', body: { name: e.name, permissions: e.permissions } }).then(function(r){
+        if (r.ok) { R.edit = null; S.p3_roles = undefined; }
+        say(r.ok ? 'Role saved.' + (r.data.logins ? ' ' + r.data.logins + ' people on it sign in again.' : '') : ((r.data && r.data.detail) || 'Not saved.'), !r.ok);
+      });
+    };
+    var del = document.getElementById('p3-del');
+    if (del) del.onclick = function(){
+      if (!confirm('Delete the role "' + R.edit.name + '"?')) return;
+      api('/team/roles/' + R.edit.key.slice(7), { method: 'DELETE' }).then(function(r){
+        if (r.ok) { R.edit = null; S.p3_roles = undefined; }
+        say(r.ok ? 'Role deleted.' : ((r.data && r.data.detail) || 'Not deleted.'), !r.ok);
+      });
+    };
+  }
+  // team logins and PINs belong to Administration: a role without it sees a note instead
+  var _tpinHTML = tpinHTML;
+  tpinHTML = function(){
+    var rp = window.TD_ROLE && TD_ROLE.permissions;
+    if (rp && !(rp.admin && rp.admin.length)) return '<p class="card-note p3-pad">Team logins and PINs are managed by the owner.</p>';
+    return _tpinHTML.apply(this, arguments);
+  };
+  var _p3Render = renderShell;
+  renderShell = function(){ loadRole(); _p3Render(); wire(); };
+  window.addEventListener('hashchange', function(){ if (currentView() === 'roles') { S.p3_roles = undefined; R.msg = null; } });
 })();
 
 boot();
