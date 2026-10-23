@@ -154,6 +154,13 @@ def read_website(url):
 
 # ------------------------------------------------------------------ one business
 def read_business(tid, force=False):
+    """Charged to the business's AI credits (app/usage.py)."""
+    from .usage import meter
+    with meter(tid, "setup", "page_read"):
+        return _read_business_unmetered(tid, force)
+
+
+def _read_business_unmetered(tid, force=False):
     """Read this business's page and site into a suggestion. Returns the status."""
     from .setup_reader import read_text
     with tenant_session(None, "techdeva_admin") as cur:

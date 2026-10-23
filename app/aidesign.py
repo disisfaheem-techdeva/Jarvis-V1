@@ -46,6 +46,10 @@ def _generate(prompt, ratio):
     key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not key:
         raise HTTPException(503, "The AI picture maker is not set up on this server.")
+    from . import usage
+    why = usage.check()
+    if why:
+        raise HTTPException(402, why)
     tried, refused = [], False
 
     def why(r):
@@ -81,6 +85,7 @@ def _generate(prompt, ratio):
                 d = p.get("inlineData") or p.get("inline_data") or {}
                 mime = d.get("mimeType") or d.get("mime_type") or ""
                 if mime.startswith("image/") and d.get("data"):
+                    usage.charge("picture", True, provider="gemini", model=m, ms=(time.time() - started) * 1000)
                     return mime, d["data"], m
             refused = refused or cand.get("finishReason") in ("SAFETY", "IMAGE_SAFETY", "PROHIBITED_CONTENT", "OTHER")
             tried.append("%s: no picture (%s)" % (m, cand.get("finishReason") or "empty"))

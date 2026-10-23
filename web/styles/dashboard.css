@@ -152,4 +152,12 @@
   & .p1-cap-acts .btn { @apply min-h-11; }
   & .p1-msg { @apply my-2 text-success; }
   & .p1-msg.bad { @apply text-danger; }
+
+  /* AI usage: this month's credits */
+  & .p2-pad { @apply px-5 py-4; }
+  & .p2-meter { @apply h-3 w-full overflow-hidden rounded-full bg-surface-2; }
+  & .p2-meter i { @apply block h-full rounded-full bg-accent; }
+  & .p2-meter i.warn { @apply bg-warning; }
+  & .p2-meter i.bad { @apply bg-danger; }
+  & .p2-meter-note { @apply mt-2.5 mb-1 text-sm text-fg; }
 }

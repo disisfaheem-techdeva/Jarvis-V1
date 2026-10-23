@@ -94,6 +94,10 @@ class AIUnavailable(Exception):
     """Generation could not happen honestly. Carries a reason fit to show a human."""
 
 
+class CreditsUsedUp(AIUnavailable):
+    """The business has used this month's AI credits (AI_CREDITS_MODE=lock only)."""
+
+
 # The provider currently being attempted. generate() sets it while it walks the
 # chain, so model_name() and _key() pick the right model and key for whichever
 # provider is being tried rather than for the one named in AI_PROVIDER.
@@ -358,10 +362,29 @@ _TRANSPORT = {"anthropic": _call_anthropic, "gemini": _call_gemini, "openai": _c
 
 
 def generate(system: str, prompt: str) -> str:
-    """Raw text generation. Raises AIUnavailable rather than returning anything fake."""
+    """Raw text generation. Raises AIUnavailable rather than returning anything fake.
+    Every call is counted against the business's AI credits (app/usage.py)."""
     global _ACTIVE
     if configured_provider() == "none":
         raise AIUnavailable("generation disabled (AI_PROVIDER=none)")
+    from . import usage
+    why = usage.check()
+    if why:
+        raise CreditsUsedUp(why)
+    t0 = time.time()
+    try:
+        text = _generate(system, prompt)
+    except AIUnavailable as e:
+        usage.charge("text", False, ms=(time.time() - t0) * 1000, chars_in=len(system) + len(prompt), error=str(e))
+        raise
+    p, _, m = (last_model() or ":").partition(":")
+    usage.charge("text", True, provider=p or None, model=m or None, ms=(time.time() - t0) * 1000,
+                 chars_in=len(system) + len(prompt), chars_out=len(text))
+    return text
+
+
+def _generate(system: str, prompt: str) -> str:
+    global _ACTIVE
 
     global _ACTIVE_MODEL
     chain = chain_entries()

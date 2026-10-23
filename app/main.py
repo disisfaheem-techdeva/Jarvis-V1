@@ -118,6 +118,11 @@ app.include_router(make_orders_router())
 # Voice: the AI phone agent's call log and number settings (calls answered by app/voice_bridge.py)
 from .voice import make_voice_router
 app.include_router(make_voice_router())
+# AI credits: AI calls made while serving a request count against the signed-in business
+from .usage import CreditMeter
+app.add_middleware(CreditMeter)
+from .usage import make_usage_router
+app.include_router(make_usage_router())
 # Alerts: what needs a person in this business (shown with the incidents)
 from .alerts import make_alerts_router
 app.include_router(make_alerts_router())

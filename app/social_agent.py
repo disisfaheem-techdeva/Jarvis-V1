@@ -393,6 +393,13 @@ def _alert_owner(tid, th, verdict, text):
 
 
 def respond(tid, thread_id):
+    """Charged to the business's AI credits (app/usage.py)."""
+    from .usage import meter
+    with meter(tid, "social_inbox", "reply"):
+        return _respond_unmetered(tid, thread_id)
+
+
+def _respond_unmetered(tid, thread_id):
     """One AI turn for a conversation, and everything that follows from it."""
     from . import ai
     from .agents.guards import unbacked_claims

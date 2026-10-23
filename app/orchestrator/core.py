@@ -85,7 +85,9 @@ class Orchestrator:
 
         res = None
         try:
-            res = agent.run(task, ctx)
+            from ..usage import meter   # the agent's AI calls count against this business's credits
+            with meter(tenant_id, agent.name, task_row["type"]):
+                res = agent.run(task, ctx)
         except Exception as e:  # transient/agent error -> retry then dead-letter
             outcome = self.persist.retry_or_fail(tenant_id, task.id, f"exception: {e}")
             return

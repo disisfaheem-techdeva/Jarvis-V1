@@ -97,6 +97,13 @@ def _ai_unlisted(replies, f):
 
 
 def check_tenant(tid):
+    """Charged to the business's AI credits (app/usage.py)."""
+    from .usage import meter
+    with meter(tid, "quality", "reply_check"):
+        return _check_tenant_unmetered(tid)
+
+
+def _check_tenant_unmetered(tid):
     """One pass for one business. Returns the number of new findings."""
     from .categories import PROTECTED, facts, sync_knowledge
     sync_knowledge(tid)

@@ -352,6 +352,13 @@ def _row(cur, week):
 
 
 def _build(tid, role, uid, week):
+    """Charged to the business's AI credits (app/usage.py)."""
+    from .usage import meter
+    with meter(tid, "advisor", "weekly_advice"):
+        return __build_unmetered(tid, role, uid, week)
+
+
+def __build_unmetered(tid, role, uid, week):
     with tenant_session(tid, role) as cur:
         f = gather(cur)
     ad = ad_numbers(tid, role)
