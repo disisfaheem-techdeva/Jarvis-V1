@@ -139,6 +139,9 @@ app.include_router(roles.make_roles_router())
 # Safer sign-in: lockout from login_attempts, email verification
 from .security import make_security_router
 app.include_router(make_security_router())
+# The business's AI agents: on/off switches, per-agent figures and memory
+from .agent_admin import make_agent_admin_router
+app.include_router(make_agent_admin_router())
 # Storefront: orders, enquiries and messages from a tenant's own website (docs/STOREFRONT.md)
 app.include_router(make_storefront_router(P))
 

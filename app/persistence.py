@@ -9,6 +9,7 @@ is uniformly event-driven.
 from .trial import TRIAL_DAYS
 import os
 import json
+import time
 import redis
 from psycopg.types.json import Json
 from .db import tenant_session
@@ -230,17 +231,53 @@ class Persistence:
             self.r.rpush(TASKS_Q, json.dumps({"tenant_id": str(tenant_id), "task_id": str(tid)}))
         return tid
 
+    _TASK_LIMITS: dict = {}
+    deferred = False                 # the last load_task left the task queued: the business was at its limit
+
+    def task_limit(self, tenant_id) -> int:
+        """Agent tasks a business may run at once: its plan's max_concurrent_tasks (cached 60 s)."""
+        hit = self._TASK_LIMITS.get(str(tenant_id))
+        if hit and hit[0] > time.time():
+            return hit[1]
+        try:
+            from .plans import plan_for
+            n = int(plan_for(tenant_id).get("max_concurrent_tasks") or 2)
+        except Exception:  # noqa: BLE001 -- the limit failing must never stop a business's work
+            n = 50
+        self._TASK_LIMITS[str(tenant_id)] = (time.time() + 60, n)
+        return n
+
     def load_task(self, tenant_id, task_id) -> dict | None:
         """Concurrency-safe claim: only one worker wins a task. Returns None if it
-        was already claimed by another worker or isn't runnable."""
+        was already claimed by another worker or isn't runnable.
+        A business already running its plan's number of tasks at once
+        (max_concurrent_tasks) waits: the task stays queued and goes to the back
+        of the queue (self.deferred = True). A task 'running' longer than
+        STUCK_RUNNING_MINUTES is a lost one (the reaper re-queues it): it does
+        not hold a place."""
+        self.deferred = False
+        limit = self.task_limit(tenant_id)
         with self._sess(tenant_id) as cur:
-            cur.execute("""UPDATE tasks SET status='running', attempts=attempts+1,
-                             updated_at=now()
-                           WHERE id=%s AND status='queued'
-                             AND (run_after IS NULL OR run_after <= now())
-                           RETURNING id, agent, type, payload, attempts, max_attempts""",
-                        (task_id,))
-            return cur.fetchone()
+            # count and claim in one transaction, one claim at a time per business,
+            # so two workers can never both take the last place
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('td-tasks:' || %s))", (str(tenant_id),))
+            cur.execute("""SELECT count(*) AS c FROM tasks WHERE status='running'
+                             AND updated_at > now() - make_interval(mins => %s)""", (self.STUCK_RUNNING_MINUTES,))
+            if cur.fetchone()["c"] >= limit:
+                cur.execute("SELECT 1 FROM tasks WHERE id=%s AND status='queued'", (task_id,))
+                self.deferred = cur.fetchone() is not None
+                row = None
+            else:
+                cur.execute("""UPDATE tasks SET status='running', attempts=attempts+1,
+                                 updated_at=now()
+                               WHERE id=%s AND status='queued'
+                                 AND (run_after IS NULL OR run_after <= now())
+                               RETURNING id, agent, type, payload, attempts, max_attempts""",
+                            (task_id,))
+                row = cur.fetchone()
+        if self.deferred:          # back of the queue: it runs when a place frees up
+            self.r.rpush(TASKS_Q, json.dumps({"tenant_id": str(tenant_id), "task_id": str(task_id)}))
+        return row
 
     def retry_or_fail(self, tenant_id, task_id, reason):
         """Transient failure: re-queue until max_attempts, then dead-letter."""

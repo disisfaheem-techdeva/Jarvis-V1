@@ -51,6 +51,10 @@ class Worker:
             task_row = self.p.load_task(tenant_id, msg["task_id"])
             if task_row:                       # None => another worker already claimed it
                 self.orch.run_task(tenant_id, task_row)
+            elif getattr(self.p, "deferred", False):
+                # the business is at its plan's tasks-at-once: the task went to the
+                # back of the queue; a short pause stops this loop spinning on it
+                time.sleep(0.5)
         return True
 
     def maybe_tick(self):
