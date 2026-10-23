@@ -118,6 +118,9 @@ app.include_router(make_orders_router())
 # Voice: the AI phone agent's call log and number settings (calls answered by app/voice_bridge.py)
 from .voice import make_voice_router
 app.include_router(make_voice_router())
+# Alerts: what needs a person in this business (shown with the incidents)
+from .alerts import make_alerts_router
+app.include_router(make_alerts_router())
 from .autopilot import make_autopilot_router
 app.include_router(make_autopilot_router())
 from .social_agent import make_meta_webhook_router, make_social_inbox_router
@@ -405,7 +408,7 @@ def list_tasks(x_tenant_id: str | None = Header(None), x_role: str | None = Head
                 td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
     tid, role = scope(x_tenant_id, x_role, authorization, td_session)
     with tenant_session(tid, role) as cur:
-        cur.execute("""SELECT agent, type, status, payload, result
+        cur.execute("""SELECT id, agent, type, status, payload, result, attempts, created_at, updated_at
                        FROM tasks ORDER BY created_at DESC LIMIT 50""")
         return {"tasks": cur.fetchall()}
 
@@ -517,6 +520,8 @@ class SignupIn(BaseModel):
     contact_phone: str | None = None
     contact_name: str | None = None
     password: str | None = None             # the client's own portal login
+    business_type: str | None = None        # a business_categories slug picked at signup
+    business_type_other: str | None = None  # their own words when the type is "other"
 
     @field_validator("business_name")
     @classmethod
@@ -613,6 +618,15 @@ def public_signup(body: SignupIn, request: Request):
         body.social_links, body.competitors, body.contact_email, body.contact_phone)
     tenant_id = P.provision_tenant_from_signup(
         signup_id, owner_name=body.contact_name, password_hash=pw_hash)
+    if body.business_type:
+        # the type picked at signup sets the dashboard (services or products)
+        # from the first login, instead of asking again behind a gate
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("""UPDATE tenants SET business_type = c.slug, business_type_other = %s
+                             FROM business_categories c
+                            WHERE tenants.id = %s AND c.slug = %s AND c.active""",
+                        ((body.business_type_other or "").strip()[:80] or None if body.business_type == "other" else None,
+                         tenant_id, body.business_type))
     return {"signup_id": signup_id, "tenant_id": tenant_id,
             "status": "trial_started",
             "login_created": pw_hash is not None,
@@ -628,6 +642,14 @@ class DemoRequestIn(BaseModel):
     message: str | None = None
     website: str | None = None      # honeypot: a hidden field people never fill
     topic: str | None = None        # "data_deletion" from the website's deletion page
+
+
+@app.get("/public/business-types")
+def public_business_types():
+    """PUBLIC: the business types the signup form offers (same list as the dashboard)."""
+    with tenant_session(None, "techdeva_admin") as cur:
+        cur.execute("SELECT slug, name, blurb FROM business_categories WHERE active ORDER BY sort_order, name")
+        return {"types": [dict(r) for r in cur.fetchall()]}
 
 
 @app.post("/public/demo-request")

@@ -113,7 +113,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=7a05541bdd">
+<link rel="stylesheet" href="/assets/td.css?v=e3f73717f1">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -7960,6 +7960,8 @@ function bizMode(){
   return t === 'shop' ? 'product' : 'service';
 }
 function typeHidden(id){
+  // Calls: only where TechDeva set up a phone line (or calls were taken); unknown until the profile loads
+  if (id === 'calls' && typeof BP !== 'undefined' && BP.data && BP.data.phone_lines === 0) return true;
   var m = bizMode();
   if (!m) return false;
   if (TYPE_HIDE[m].indexOf(id) !== -1) return true;
@@ -7987,18 +7989,19 @@ function typeHidden(id){
   var MODS = [
     { num:'01', name:'Dashboard',      icon:'grid',  ids:['overview','reports','alerts'] },
     { num:'02', name:'Jarvis & AI',    icon:'spark', ids:['console','ai','hermes','bizagent','needshuman','history','tools'], sep:true },
-    { num:'03', name:'Chats',          icon:'chat',  ids:['inbox','calls'] },
-    { num:'04', name:'CRM',            icon:'users', ids:['leads','sales','clientwork','customers','pipeline','appointments','calendar'], sep:true },
-    { num:'05', name:'Marketing',      icon:'mega',  ids:['marketing','posts','autopilot','advisor','analytics'] },
-    { num:'06', name:'Business',       icon:'store', ids:['services','products','packages','deals','settings'] },
-    { num:'07', name:'Team & HR',      icon:'badge', ids:['team','attendance','hr'] },
-    { num:'08', name:'Finance',        icon:'wallet',ids:['revenue','invoices','expenses','dayclose','pnl'], sep:true },
-    { num:'09', name:'Operations',     icon:'box',   ids:['inventory','orders','dailyentry'] },
-    { num:'10', name:'Administration', icon:'shield',ids:['integrations','whatsapp','billing','permissions'] }
+    { num:'03', name:'Chats',          icon:'chat',  ids:['inbox','socialinbox','calls'] },
+    // Management (23 Oct 2026): the day-to-day pages sit together, Operations next to CRM and Team
+    { num:'04', name:'CRM',            icon:'users', ids:['leads','sales','clientwork','customers','pipeline','appointments','calendar'], group:'Management' },
+    { num:'05', name:'Operations',     icon:'box',   ids:['orders','inventory','dailyentry'] },
+    { num:'06', name:'Team & HR',      icon:'badge', ids:['team','attendance','hr'] },
+    { num:'07', name:'Marketing',      icon:'mega',  ids:['marketing','posts','captions','autopilot','advisor','analytics'], sep:true },
+    { num:'08', name:'Business',       icon:'store', ids:['services','products','packages','deals','settings'] },
+    { num:'09', name:'Finance',        icon:'wallet',ids:['revenue','invoices','expenses','dayclose','pnl'] },
+    { num:'10', name:'Administration', icon:'shield',ids:['integrations','whatsapp','billing','permissions'], sep:true }
   ];
   // the pages added in this block (they are not in NAV)
   var NEW = { alerts:'Alerts', history:'Execution History', tools:'Tools', pipeline:'Pipeline',
-              analytics:'Analytics', deals:'Deals', permissions:'Permissions' };
+              analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer' };
   // tab names that follow the approved structure; everything else keeps its own name
   var LABEL = { overview:'Overview', console:'Jarvis Assistant', ai:'AI Agents', needshuman:'Approval Queue',
                 marketing:'Campaigns', posts:'Social Media Publisher', autopilot:'Content Calendar',
@@ -8032,7 +8035,7 @@ function typeHidden(id){
     }); });
     Object.keys(NEW).forEach(function(id){
       if (seen[id] || hidden.indexOf(id) !== -1) return;
-      if (!own && (id === 'permissions' || id === 'analytics')) return;
+      if (!own && (id === 'permissions' || id === 'analytics' || id === 'captions')) return;
       seen[id] = 1; list.push({ id: id, name: NEW[id] });
     });
     return list;
@@ -8068,7 +8071,8 @@ function typeHidden(id){
       } else if (m.num === '04' && S.leads && S.leads.length) {
         badge = '<span class="pill count">' + esc(S.leads.length) + '</span>';
       }
-      if (m.sep) out += '<div class="tdm-sep"></div>';
+      if (m.group) out += '<div class="tdm-group" role="presentation">' + esc(m.group) + '</div>';
+      else if (m.sep) out += '<div class="tdm-sep"></div>';
       out += '<a href="#/' + x.items[0].id + '" class="tdm-link' + (m === cur ? ' active' : '') + '" title="' + esc(m.name) + '">' +
         '<span class="tdm-num">' + m.num + '</span>' + svg(m.icon) + '<span class="tdm-label">' + esc(m.name) + '</span>' + badge + '</a>';
     });
@@ -8770,6 +8774,201 @@ function siWire(){
   var _siRender = renderShell;
   renderShell = function(){ _siRender(); siWire(); };
   window.addEventListener('hashchange', function(){ SI.msg = null; if (currentView() === 'socialinbox') SI.data = undefined; });
+})();
+
+/* =====================================================================
+   Phase 1 (23 Oct 2026): alerts that need a person, AI task status,
+   a report picker and a caption writer. Added on top of the pages above;
+   nothing above is replaced.
+   ===================================================================== */
+(function(){
+  function pill(txt, cls){ return '<span class="tdm-st ' + (cls || '') + '">' + esc(txt) + '</span>'; }
+
+  /* ---- Alerts: the platform's incidents plus what needs a person here ---- */
+  var baseAlerts = VIEWS.alerts;
+  VIEWS.alerts = function(){
+    var out = baseAlerts.apply(this, arguments), p;
+    if (!need('p1_checks', '/alerts/checks')) p = panel('Needs you', loading('Checking your business...'));
+    else if (S.p1_checks === null) p = panel('Needs you', errState('The alerts check did not respond.'));
+    else {
+      var list = S.p1_checks.checks || [];
+      p = panel('Needs you', list.length ? '<ul class="p1-alerts">' + list.map(function(c){
+        var cls = c.severity === 'critical' ? 'bad' : (c.severity === 'warn' ? 'warn' : 'info');
+        return '<li><div>' + pill(c.severity === 'critical' ? 'Urgent' : 'To do', cls) + '</div>' +
+          '<div class="p1-alert-txt"><b>' + esc(c.title) + '</b>' + (c.detail ? '<div class="sub">' + esc(c.detail) + '</div>' : '') + '</div>' +
+          '<a class="btn" href="#/' + esc(c.link) + '">Open</a></li>';
+      }).join('') + '</ul>' : empty('Nothing needs you', 'No expired connections, approvals, low stock, overdue invoices or failed ads.'));
+    }
+    // "Needs you" first, under the page heading, then the platform's own alerts
+    var i = out.indexOf('<div class="panel');
+    return i === -1 ? out + p : out.slice(0, i) + p + out.slice(i);
+  };
+
+  /* ---- AI Workforce: each task and whether it finished ---- */
+  var TASK_STATE = { queued: ['Waiting', 'info'], waiting: ['Waiting', 'info'], running: ['Running', 'info live'],
+    done: ['Finished', 'ok'], needs_human: ['Needs you', 'warn'], failed: ['Failed, will retry', 'warn'], dead: ['Failed', 'bad'] };
+  function words(s){ s = String(s || '').replace(/[_.]+/g, ' ').trim(); return s ? s.charAt(0).toUpperCase() + s.slice(1) : '—'; }
+  var baseAi = VIEWS.ai;
+  VIEWS.ai = function(){
+    var out = baseAi.apply(this, arguments);
+    if (!need('p1_tasks', '/tasks')) return out + '<h2>Tasks</h2>' + panel('Recent tasks', loading('Loading tasks...'));
+    if (S.p1_tasks === null) return out + '<h2>Tasks</h2>' + panel('Recent tasks', errState('The task list did not respond.'));
+    var ts = S.p1_tasks.tasks || [];
+    return out + '<h2>Tasks</h2>' + panel('Recent tasks', ts.length
+      ? '<div class="tbl-wrap"><table><thead><tr><th>Task</th><th>Agent</th><th>Status</th><th>Started</th><th>Last update</th></tr></thead><tbody>' +
+        ts.map(function(t){
+          var s = TASK_STATE[t.status] || [words(t.status), ''];
+          return '<tr><td>' + esc(words(t.type)) + '</td><td>' + esc(words(t.agent)) + '</td><td>' + pill(s[0], s[1]) +
+            (t.status === 'needs_human' ? ' <a href="#/needshuman">Decide</a>' : '') + '</td><td>' + esc(when(t.created_at)) + '</td><td>' + esc(when(t.updated_at)) + '</td></tr>';
+        }).join('') + '</tbody></table></div>'
+      : empty('No tasks yet', 'Each job your AI team takes on is listed here with whether it finished.'));
+  };
+
+  /* ---- Reports: pick the report you want ---- */
+  var REPORTS = [
+    ['all', 'Full report'], ['money', 'Money'], ['activity', 'Customers & bookings'],
+    ['sales', 'Sales by product'], ['marketing', 'Marketing & ads'], ['ai', 'AI findings']
+  ];
+  var REP = { kind: 'all' };
+  try { REP.kind = localStorage.getItem('td-report') || 'all'; } catch (e) {}
+  // which headings of the full report belong to each report
+  var SECTIONS = { money: ['Money', 'Where the money went', 'How customers paid'], activity: ['Activity'], ai: ['What your AI team found', 'Latest analysis'] };
+  var baseReports = VIEWS.reports;
+  VIEWS.reports = function(){
+    var full = baseReports.apply(this, arguments);
+    var kinds = REPORTS.filter(function(r){ return r[0] !== 'sales' || bizMode() !== 'service'; });
+    if (!kinds.some(function(r){ return r[0] === REP.kind; })) REP.kind = 'all';
+    var pick = '<div class="p1-rep-pick" role="group" aria-label="Choose a report">' + kinds.map(function(r){
+      return '<button type="button" class="btn' + (REP.kind === r[0] ? ' primary' : '') + '" aria-pressed="' + (REP.kind === r[0]) + '" data-rep="' + r[0] + '">' + esc(r[1]) + '</button>';
+    }).join('') + '</div>';
+    var sub = full.indexOf('</p>') + 4;
+    var page = full.slice(0, sub) + pick + full.slice(sub);
+    if (REP.kind === 'all') return page;
+    // the period buttons and Print stay; the chosen report replaces the rest
+    var bar = full.indexOf('</div>', sub) + 6;
+    if (REP.kind === 'sales') return full.slice(0, sub) + pick + full.slice(sub, bar) + salesReport();
+    if (REP.kind === 'marketing') return full.slice(0, sub) + pick + full.slice(sub, bar) + marketingReport();
+    return page;   // money / activity / ai: the full report, other parts hidden after render (p1Wire)
+  };
+  function salesReport(){
+    var r = rangeDates(RANGE), key = 'p1_sales_' + RANGE;
+    if (!need(key, '/orders/by-product?start=' + r.start + '&end=' + r.end)) return panel('Sales by product', loading('Adding up orders...'));
+    var d = S[key];
+    if (d === null) return panel('Sales by product', errState('The orders service did not respond.'));
+    var rows = d.products || [];
+    return '<div class="card-note">' + esc(d.start) + ' to ' + esc(d.end) + '</div>' +
+      '<div class="grid">' + metric('Orders', d.orders) + metric('Order value', money(d.total), 'Cancelled orders left out') + metric('Products sold', rows.length) + '</div>' +
+      panel('Sales by product', rows.length ? '<div class="tbl-wrap"><table><thead><tr><th>Product</th><th>Quantity</th><th>Amount</th></tr></thead><tbody>' +
+        rows.map(function(x){ return '<tr><td>' + esc(x.name) + '</td><td>' + esc(x.quantity) + '</td><td>' + money(x.amount) + '</td></tr>'; }).join('') +
+        '</tbody></table></div>' : empty('No orders in this period', 'Orders from your website, WhatsApp or the dashboard are added up here.'));
+  }
+  function marketingReport(){
+    if (!need('tdm_attr', '/attribution/report')) return panel('Marketing & ads', loading('Loading ad results...'));
+    var a = S.tdm_attr;
+    if (a === null) return panel('Marketing & ads', errState('The ads report did not respond.'));
+    function pk(v){ return v === null || v === undefined ? null : money(v); }
+    var cs = a.campaigns || [];
+    return '<div class="grid">' + metric('Ad spend', pk(a.total_spend)) + metric('Revenue from ads', pk(a.attributed_revenue)) +
+      metric('Return on ad spend', a.account_roas === null || a.account_roas === undefined ? null : a.account_roas + '×') + '</div>' +
+      panel('Campaign results', cs.length ? '<div class="tbl-wrap"><table><thead><tr><th>Campaign</th><th>Spend</th><th>Leads</th><th>Revenue</th><th>Cost per lead</th></tr></thead><tbody>' +
+        cs.map(function(c){ return '<tr><td>' + esc(c.name) + '</td><td>' + money(c.spend) + '</td><td>' + esc(c.leads === null ? '—' : c.leads) + '</td><td>' + money(c.revenue) + '</td><td>' + money(c.cpl) + '</td></tr>'; }).join('') +
+        '</tbody></table></div>' : empty('No campaign results yet', 'Connect your ad account under Administration > Integrations; results appear after the first day of spend.'));
+  }
+
+  /* ---- Caption Writer: AI captions for any business, or write your own ---- */
+  var CAP = { busy: false, list: null, err: null, msg: null, topic: '', offers: '', language: 'english', tone: 'friendly', own: '' };
+  VIEWS.captions = function(){
+    if (!isOwner()) return ownerOnlyPage('captions');
+    var out = '<h1>Caption Writer</h1><p class="sub">Captions for a Facebook or Instagram post, written from your own services, products and prices. ' +
+      'Nothing is posted: pick one, edit it, and it becomes a draft on the Social Media Publisher.</p>';
+    function opt(v, cur, label){ return '<option value="' + v + '"' + (v === cur ? ' selected' : '') + '>' + label + '</option>'; }
+    out += '<div class="panel"><div class="panel-head"><div class="panel-title">Write with AI</div></div><form id="cap-f" class="tdm-form">' +
+      '<label class="wide">What is the post about? *<input name="topic" required minlength="3" maxlength="400" value="' + esc(CAP.topic) + '" placeholder="e.g. weekend BBQ platter, Hair PRP results, new batch starting Monday"></label>' +
+      '<label class="wide">Offer to mention (optional)<input name="offers" maxlength="600" value="' + esc(CAP.offers) + '" placeholder="Only a real offer, e.g. 10% off this Friday"></label>' +
+      '<label>Language<select name="language">' + opt('english', CAP.language, 'English') + opt('mix', CAP.language, 'English with some Roman Urdu') + opt('urdu', CAP.language, 'Roman Urdu') + '</select></label>' +
+      '<label>Tone<select name="tone">' + opt('friendly', CAP.tone, 'Friendly') + opt('premium', CAP.tone, 'Premium') + opt('fun', CAP.tone, 'Fun') + opt('urgent', CAP.tone, 'Urgent') + '</select></label>' +
+      '<div class="wide"><button class="btn primary" type="submit"' + (CAP.busy ? ' disabled' : '') + '>' + (CAP.busy ? 'Writing...' : (CAP.list ? 'Write 3 more' : 'Write 3 captions')) + '</button></div></form></div>';
+    if (CAP.msg) out += '<p class="card-note p1-msg' + (CAP.msg.bad ? ' bad' : '') + '" role="status">' + esc(CAP.msg.text) + '</p>';
+    if (CAP.busy) out += panel('Captions', loading('Writing from your business details...'));
+    else if (CAP.err) out += panel('Captions', errState(CAP.err));
+    else if (CAP.list) out += CAP.list.map(function(c, i){
+      var text = c.caption + (c.hashtags.length ? '\n\n' + c.hashtags.join(' ') : '');
+      return panel('Option ' + (i + 1),
+        '<textarea class="p1-cap" data-capi="' + i + '" rows="6" aria-label="Caption option ' + (i + 1) + '">' + esc(text) + '</textarea>' +
+        (c.unbacked && c.unbacked.length ? '<p class="card-note p1-msg bad">Check before posting: ' + esc(c.unbacked.join('; ')) + ' is not in your business details.</p>' : '') +
+        '<div class="p1-cap-acts"><button type="button" class="btn primary" data-capuse="' + i + '">Make it a draft post</button><button type="button" class="btn" data-capcopy="' + i + '">Copy</button></div>');
+    }).join('');
+    out += panel('Write your own',
+      '<textarea class="p1-cap" id="cap-own" rows="5" maxlength="2200" aria-label="Your own caption" placeholder="Type your caption here">' + esc(CAP.own) + '</textarea>' +
+      '<div class="p1-cap-acts"><button type="button" class="btn primary" id="cap-own-use">Make it a draft post</button><span class="card-note" id="cap-own-n">' + CAP.own.length + ' / 2200</span></div>');
+    return out;
+  };
+  function capDraft(text){
+    text = String(text || '').trim();
+    if (text.length < 2) { CAP.msg = { text: 'Write the caption first.', bad: true }; renderShell(); return; }
+    api('/social/posts', { method: 'POST', body: { caption: text } }).then(function(r){
+      CAP.msg = r.ok ? { text: 'Saved as a draft. Add a picture and publish it from the Social Media Publisher.' }
+                     : { text: (r.data && r.data.detail) || 'The draft was not saved.', bad: true };
+      if (r.ok) { CAP.own = ''; S.posts = undefined; }
+      renderShell();
+    });
+  }
+  function capWire(){
+    var f = document.getElementById('cap-f');
+    if (!f) return;
+    f.onsubmit = function(e){
+      e.preventDefault();
+      var d = new FormData(f);
+      CAP.topic = String(d.get('topic') || '').trim(); CAP.offers = String(d.get('offers') || '').trim();
+      CAP.language = d.get('language'); CAP.tone = d.get('tone');
+      CAP.busy = true; CAP.err = null; CAP.msg = null; renderShell();
+      api('/autopilot/caption', { method: 'POST', body: { topic: CAP.topic, offers: CAP.offers, language: CAP.language, tone: CAP.tone } }).then(function(r){
+        CAP.busy = false;
+        if (r.ok) CAP.list = r.data.captions; else CAP.err = (r.data && r.data.detail) || 'The caption writer did not answer.';
+        renderShell();
+      });
+    };
+    function capText(i){ var t = document.querySelector('[data-capi="' + i + '"]'); return t ? t.value : ''; }
+    document.querySelectorAll('[data-capuse]').forEach(function(b){ b.onclick = function(){ capDraft(capText(b.getAttribute('data-capuse'))); }; });
+    document.querySelectorAll('[data-capcopy]').forEach(function(b){ b.onclick = function(){
+      var t = capText(b.getAttribute('data-capcopy'));
+      (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function(){ b.textContent = 'Copied'; }, function(){ b.textContent = 'Select the text and copy'; });
+    }; });
+    var own = document.getElementById('cap-own');
+    if (own) own.oninput = function(){ CAP.own = own.value; var n = document.getElementById('cap-own-n'); if (n) n.textContent = own.value.length + ' / 2200'; };
+    var use = document.getElementById('cap-own-use');
+    if (use) use.onclick = function(){ capDraft(own.value); };
+  }
+
+  function repWire(){
+    document.querySelectorAll('[data-rep]').forEach(function(b){
+      b.onclick = function(){ REP.kind = b.getAttribute('data-rep'); try { localStorage.setItem('td-report', REP.kind); } catch (e) {} renderShell(); };
+    });
+    var keep = SECTIONS[REP.kind];
+    if (!keep || currentView() !== 'reports') return;
+    // hide what is not in the chosen report: a heading and what follows it, and
+    // panels by their own title (some panels sit under another heading)
+    var c = document.querySelector('main.content') || document.body, on = true;
+    Array.prototype.forEach.call(c.querySelectorAll('h2, h2 ~ *'), function(el){
+      if (el.closest('.tdm-head')) return;
+      if (el.tagName === 'H2') { on = keep.indexOf(el.textContent.trim()) !== -1; el.hidden = !on; return; }
+      var t = el.classList.contains('panel') && el.querySelector('.panel-title');
+      el.hidden = t ? keep.indexOf(t.textContent.trim()) === -1 : !on;
+    });
+  }
+  var _p1Render = renderShell;
+  renderShell = function(){
+    _p1Render();
+    var v = currentView();
+    if (v === 'captions') capWire();
+    if (v === 'reports') repWire();
+  };
+  window.addEventListener('hashchange', function(){
+    var v = currentView();
+    if (v === 'alerts') S.p1_checks = undefined;
+    if (v === 'ai') S.p1_tasks = undefined;
+    if (v !== 'captions') CAP.msg = null;
+  });
 })();
 
 boot();

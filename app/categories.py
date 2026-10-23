@@ -239,6 +239,9 @@ def make_categories_router():
             s = cur.fetchone()
             cur.execute("SELECT count(*) AS n FROM agent_reply_flags WHERE tenant_id = %s AND status = 'open'", (tid,))
             flags = cur.fetchone()["n"]
+            # the Calls page shows only where a phone line is set up (or calls were taken)
+            cur.execute("SELECT (SELECT count(*) FROM voice_numbers) + (SELECT count(*) FROM (SELECT 1 FROM calls LIMIT 1) c) AS n")
+            phone_lines = cur.fetchone()["n"]
             sug = None
             if role in ("owner", "techdeva_admin"):
                 cur.execute("""SELECT id::text, draft, sources FROM setup_suggestions
@@ -255,6 +258,7 @@ def make_categories_router():
                 "needs_type": not t["business_type"], "category": f["category"],
                 "services_count": len(f["services"]) + len(f.get("products") or []), "hours_set": bool(f["hours"]),
                 "products_count": len(f.get("products") or []),
+                "phone_lines": phone_lines,
                 "knowledge": f["knowledge"], "open_flags": flags,
                 "sync": dict(s) if s else {"status": "never", "synced_at": None},
                 "suggestion": sug,

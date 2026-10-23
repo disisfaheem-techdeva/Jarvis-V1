@@ -43,6 +43,14 @@ LANG = {
            "(e.g. 'yaar', 'mazay', 'dawat', 'khana'). Never Urdu script.",
     "urdu": "Write in Roman Urdu (Urdu in English letters), with English for prices and brand names.",
 }
+CAPTION_TONES = {
+    "friendly": "Warm and friendly, like the owner talking to a regular customer.",
+    "premium": "Calm, premium and confident. No slang, few emojis.",
+    "fun": "Playful and energetic, with a little humour.",
+    "urgent": "Short and urgent: a clear reason to act today (only real offers or real limits).",
+}
+CAPTIONS_PER_HOUR = 30         # per business: the caption writer calls the AI each time
+_CAPTION_CALLS: dict = {}
 INSIGHTS_EVERY = 6 * 3600      # how often results are read back from Meta
 INSIGHTS_WINDOW_DAYS = 30      # posts younger than this get their numbers refreshed
 _LAST_INSIGHTS = [0.0]
@@ -519,6 +527,63 @@ def make_autopilot_router():
             if not row:
                 raise HTTPException(404, "That video is not in this business.")
         return {"id": row["id"]}
+
+    @router.post("/caption")
+    def caption(body: dict = Body(...),
+                x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                authorization: str | None = Header(None),
+                td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Write captions for one post, for any kind of business, from its own records.
+        Nothing is saved or posted: the owner copies one into a post or edits it."""
+        tid, role, uid = _who(x_tenant_id, x_role, authorization, td_session)
+        topic = str(body.get("topic") or "").strip()[:400]
+        if len(topic) < 3:
+            raise HTTPException(400, "Say what the post is about, e.g. 'weekend BBQ platter' or 'Hair PRP results'.")
+        offers = str(body.get("offers") or "").strip()[:600]
+        language = body.get("language") if body.get("language") in LANG else "english"
+        tone = body.get("tone") if body.get("tone") in CAPTION_TONES else "friendly"
+        now = time.time()
+        recent = [t for t in _CAPTION_CALLS.get(tid, []) if now - t < 3600]
+        if len(recent) >= CAPTIONS_PER_HOUR:
+            raise HTTPException(429, "That is %d caption requests this hour. Try again a little later." % CAPTIONS_PER_HOUR)
+        from . import ai
+        if not ai.available():
+            raise HTTPException(503, "The AI is not set up on this platform yet, so it cannot write captions.")
+        _CAPTION_CALLS[tid] = recent + [now]
+        brief, allowed = _grounding(tid)
+        prompt = """BUSINESS
+{brief}
+
+THE POST IS ABOUT: {topic}
+OFFERS YOU MAY MENTION: {offers}
+TONE: {tone}
+LANGUAGE: {lang}
+
+Write 3 different captions for this one Facebook and Instagram post: different hooks and angles.
+Return {{"captions": [{{"caption": "the full caption without hashtags", "hashtags": ["#tag", ...]}}]}}""".format(
+            brief=brief, topic=topic, offers=offers or "None given: do not mention discounts.",
+            tone=CAPTION_TONES[tone], lang=LANG[language])
+        try:
+            out = ai.generate_json(SYSTEM, prompt, required_keys=("captions",))
+        except Exception as e:  # noqa: BLE001
+            print("[caption] %s: %s" % (tid, str(e)[:200]), flush=True)
+            raise HTTPException(502, "The AI did not answer. Try again in a minute, or write the caption yourself.")
+        caps = []
+        for c in (out.get("captions") or [])[:3] if isinstance(out.get("captions"), list) else []:
+            if not isinstance(c, dict):
+                continue
+            text = re.sub(r"\s+\n", "\n", str(c.get("caption") or "")).strip()[:2000]
+            tags = [t if t.startswith("#") else "#" + t for t in
+                    (re.sub(r"[^\w#]", "", str(x)) for x in (c.get("hashtags") or [])[:12]) if len(t) > 1]
+            if len(text) < 10:
+                continue
+            caps.append({"caption": text, "hashtags": tags, "unbacked": check_caption(text, allowed, offers)})
+        if not caps:
+            raise HTTPException(502, "The AI's answer had no usable caption. Try again, or write the caption yourself.")
+        with tenant_session(tid, role) as cur:
+            record(cur, action="caption.write", resource="caption", actor=str(uid) if uid else None,
+                   detail={"topic": topic[:120], "language": language, "tone": tone, "count": len(caps)})
+        return {"captions": caps}
 
     @router.post("/plan")
     def plan(background: BackgroundTasks, body: dict = Body(...),
