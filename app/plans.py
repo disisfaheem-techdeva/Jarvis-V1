@@ -42,8 +42,10 @@ def month_start():
     return int(dt.datetime(now.year, now.month, 1, tzinfo=PKT).timestamp())
 
 
-def all_plans(cur):
-    cur.execute("SELECT key, name, price_pkr, price_usd, max_numbers, max_conversations FROM plans ORDER BY sort, key")
+def all_plans(cur, hidden=False):
+    """The price list. Plans not published yet (Lite, Custom) only for the founder (hidden=True)."""
+    cur.execute("SELECT key, name, price_pkr, price_usd, max_numbers, max_conversations, ai_credits, "
+                "max_concurrent_tasks, published FROM plans" + ("" if hidden else " WHERE published") + " ORDER BY sort, key")
     out = []
     for r in cur.fetchall():
         r = dict(r)
@@ -57,6 +59,8 @@ def plan_for(tenant_id):
     """The plan a business is on (Starter limits when none is set)."""
     with tenant_session(None, "techdeva_admin") as cur:
         cur.execute("""SELECT p.key, p.name, p.price_pkr, p.max_numbers, p.max_conversations,
+                              COALESCE(a.ai_credits_override, p.ai_credits) AS ai_credits, p.max_concurrent_tasks,
+                              (a.ai_credits_override IS NOT NULL) AS ai_credits_custom,
                               (a.plan_key IS NOT NULL) AS chosen
                          FROM plans p
                          LEFT JOIN client_accounts a ON a.tenant_id = %s
@@ -64,7 +68,8 @@ def plan_for(tenant_id):
         r = cur.fetchone()
     if not r:
         return {"key": DEFAULT_PLAN, "name": "Starter", "price_pkr": None, "max_numbers": 1,
-                "max_conversations": 300, "chosen": False}
+                "max_conversations": 300, "ai_credits": None, "max_concurrent_tasks": 2,
+                "ai_credits_custom": False, "chosen": False}
     r = dict(r)
     r["price_pkr"] = float(r["price_pkr"]) if r["price_pkr"] is not None else None
     return r
@@ -163,10 +168,18 @@ def make_plans_router():
         return out
 
     @router.get("/plans")
-    def price_list():
-        """Public price list (the website shows it)."""
+    def price_list(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                   authorization: str | None = Header(None),
+                   td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Public price list (the website shows it). The founder also sees plans not published yet."""
+        founder = False
+        if authorization or td_session:
+            try:
+                founder = resolve_scope(x_tenant_id, x_role, authorization, td_session)[1] == "techdeva_admin"
+            except AuthError:
+                founder = False
         with tenant_session(None, "techdeva_admin") as cur:
-            return {"plans": all_plans(cur)}
+            return {"plans": all_plans(cur, hidden=founder)}
 
     def _admin(*a):
         _t, role, uid = _scope(*a)
@@ -214,6 +227,28 @@ def make_plans_router():
                 if not lo <= v <= hi:
                     raise HTTPException(400, "%s must be between %d and %d." % (k, lo, hi))
                 sets.append("%s = %%s" % k); vals.append(v)
+        if "ai_credits" in body:
+            raw = body.get("ai_credits")
+            if raw in (None, ""):
+                credits = None                      # no limit
+            else:
+                try:
+                    credits = int(str(raw).replace(",", ""))
+                except ValueError:
+                    raise HTTPException(400, "AI credits must be a whole number (or empty for no limit).")
+                if not 0 <= credits <= 10000000:
+                    raise HTTPException(400, "AI credits must be between 0 and 10,000,000.")
+            sets.append("ai_credits = %s"); vals.append(credits)
+        if "max_concurrent_tasks" in body:
+            try:
+                v = int(body.get("max_concurrent_tasks"))
+            except (TypeError, ValueError):
+                raise HTTPException(400, "max_concurrent_tasks must be a whole number.")
+            if not 1 <= v <= 50:
+                raise HTTPException(400, "max_concurrent_tasks must be between 1 and 50.")
+            sets.append("max_concurrent_tasks = %s"); vals.append(v)
+        if "published" in body:
+            sets.append("published = %s"); vals.append(bool(body.get("published")))
         if not sets:
             raise HTTPException(400, "Nothing to change.")
         with tenant_session(None, "techdeva_admin") as cur:
@@ -222,8 +257,9 @@ def make_plans_router():
             if not cur.fetchone():
                 raise HTTPException(404, "No such plan.")
             record(cur, action="techdeva.plan.edit", resource="plans", resource_id=key, actor=uid,
-                   status="ok", detail={k: body.get(k) for k in ("price_pkr", "price_usd", "max_numbers", "max_conversations") if k in body})
-            return {"plans": all_plans(cur)}
+                   status="ok", detail={k: body.get(k) for k in ("price_pkr", "price_usd", "max_numbers", "max_conversations",
+                                                                 "ai_credits", "max_concurrent_tasks", "published") if k in body})
+            return {"plans": all_plans(cur, hidden=True)}
 
     @router.put("/techdeva/clients/{tenant_id}/plan")
     def set_plan(tenant_id: str, body: dict = Body(...),

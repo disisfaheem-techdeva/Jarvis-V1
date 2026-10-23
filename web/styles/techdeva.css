@@ -87,4 +87,10 @@
   & .dot.warn { @apply bg-warning; }
   & .pay { @apply mt-2 hidden gap-2; }
   & .err { @apply min-h-5 text-sm text-danger; }
+
+  /* AI usage & API log */
+  & .aiu-tag { @apply inline-flex h-6 items-center rounded-full bg-surface-3 px-2.5 text-xs font-medium text-fg-muted; }
+  & .aiu-tag.warn { @apply bg-warning-tint text-warning; }
+  & .aiu-tag.bad { @apply bg-danger-tint text-danger; }
+  & .plans-card input.fee { @apply w-24 min-w-0; }
 }

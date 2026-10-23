@@ -281,6 +281,13 @@ def _make_drafts(cur, tid, uid, plan_id, posts, items, days, used_this_week):
 
 
 def generate_plan(tid, uid, plan_id):
+    """Charged to the business's AI credits (app/usage.py)."""
+    from .usage import meter
+    with meter(tid, "content", "plan"):
+        return _generate_plan_unmetered(tid, uid, plan_id)
+
+
+def _generate_plan_unmetered(tid, uid, plan_id):
     """Write the plan's drafts, a week at a time. Runs after the request returns."""
     from . import ai
     try:
@@ -565,6 +572,8 @@ Return {{"captions": [{{"caption": "the full caption without hashtags", "hashtag
             tone=CAPTION_TONES[tone], lang=LANG[language])
         try:
             out = ai.generate_json(SYSTEM, prompt, required_keys=("captions",))
+        except ai.CreditsUsedUp as e:
+            raise HTTPException(402, str(e))
         except Exception as e:  # noqa: BLE001
             print("[caption] %s: %s" % (tid, str(e)[:200]), flush=True)
             raise HTTPException(502, "The AI did not answer. Try again in a minute, or write the caption yourself.")

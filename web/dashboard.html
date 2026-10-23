@@ -113,7 +113,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=e3f73717f1">
+<link rel="stylesheet" href="/assets/td.css?v=2ca15298a7">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -7997,11 +7997,11 @@ function typeHidden(id){
     { num:'07', name:'Marketing',      icon:'mega',  ids:['marketing','posts','captions','autopilot','advisor','analytics'], sep:true },
     { num:'08', name:'Business',       icon:'store', ids:['services','products','packages','deals','settings'] },
     { num:'09', name:'Finance',        icon:'wallet',ids:['revenue','invoices','expenses','dayclose','pnl'] },
-    { num:'10', name:'Administration', icon:'shield',ids:['integrations','whatsapp','billing','permissions'], sep:true }
+    { num:'10', name:'Administration', icon:'shield',ids:['integrations','whatsapp','billing','usage','permissions'], sep:true }
   ];
   // the pages added in this block (they are not in NAV)
   var NEW = { alerts:'Alerts', history:'Execution History', tools:'Tools', pipeline:'Pipeline',
-              analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer' };
+              analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer', usage:'AI usage' };
   // tab names that follow the approved structure; everything else keeps its own name
   var LABEL = { overview:'Overview', console:'Jarvis Assistant', ai:'AI Agents', needshuman:'Approval Queue',
                 marketing:'Campaigns', posts:'Social Media Publisher', autopilot:'Content Calendar',
@@ -8035,7 +8035,7 @@ function typeHidden(id){
     }); });
     Object.keys(NEW).forEach(function(id){
       if (seen[id] || hidden.indexOf(id) !== -1) return;
-      if (!own && (id === 'permissions' || id === 'analytics' || id === 'captions')) return;
+      if (!own && (id === 'permissions' || id === 'analytics' || id === 'captions' || id === 'usage')) return;
       seen[id] = 1; list.push({ id: id, name: NEW[id] });
     });
     return list;
@@ -8969,6 +8969,48 @@ function siWire(){
     if (v === 'ai') S.p1_tasks = undefined;
     if (v !== 'captions') CAP.msg = null;
   });
+})();
+
+/* =====================================================================
+   AI usage (23 Oct 2026): this month's AI credits, by agent and by day,
+   and the latest AI calls. Credits come with the plan (app/usage.py).
+   ===================================================================== */
+(function(){
+  function n(v){ return Number(v || 0).toLocaleString(); }
+  var KIND = { text: 'Writing', photo_read: 'Reading a photo', voice: 'Voice', picture: 'AI picture', video: 'AI video' };
+  VIEWS.usage = function(){
+    if (!isOwner()) return ownerOnlyPage('usage');
+    var out = '<h1>AI usage</h1><p class="sub">Every time Jarvis or one of your AI agents uses the AI it costs credits. Your plan includes a number each month; they renew on the 1st.</p>';
+    if (!need('p2_usage', '/usage/ai')) return out + panel('This month', loading('Adding up your AI use...'));
+    var d = S.p2_usage;
+    if (d === null) return out + panel('This month', errState('The usage service did not respond.'));
+    var pct = d.percent, cls = d.warning === 'over' ? 'bad' : (d.warning === 'near' ? 'warn' : 'ok');
+    var meter = d.cap === null
+      ? '<p class="p2-meter-note">' + n(d.used) + ' credits used since ' + esc(d.since) + '. Your plan has no monthly limit.</p>'
+      : '<div class="p2-meter" role="meter" aria-valuemin="0" aria-valuemax="' + d.cap + '" aria-valuenow="' + d.used + '" aria-label="AI credits used this month">' +
+          '<i class="' + cls + '" style="width:' + Math.min(100, pct || 0) + '%"></i></div>' +
+        '<p class="p2-meter-note"><b>' + n(d.used) + '</b> of ' + n(d.cap) + ' credits used since ' + esc(d.since) + ' (' + pct + '%).' +
+          (d.warning === 'over' ? (d.mode === 'lock' ? ' Jarvis, captions and pictures are paused until the 1st; customer replies keep working.' : ' You are over this month\'s credits.') :
+           d.warning === 'near' ? ' Nearly used.' : '') + '</p>';
+    out += panel('This month', '<div class="p2-pad">' + meter + '<p class="card-note">What one use costs: ' +
+      Object.keys(d.costs).filter(function(k){ return k !== 'video'; }).map(function(k){ return esc(KIND[k] || k) + ' ' + d.costs[k]; }).join(' · ') + ' credits.</p></div>');
+    var ag = d.by_agent || [];
+    out += panel('By agent', ag.length ? '<div class="tbl-wrap"><table><thead><tr><th>Agent</th><th>Credits</th><th>Uses</th><th>Did not work</th></tr></thead><tbody>' +
+      ag.map(function(a){ return '<tr><td>' + esc(a.name) + '</td><td>' + n(a.credits) + '</td><td>' + n(a.calls) + '</td><td>' + n(a.failed) + '</td></tr>'; }).join('') +
+      '</tbody></table></div>' : empty('No AI used yet this month', 'Ask Jarvis something or write a caption, and it is counted here.'));
+    var days = d.by_day || [], max = days.reduce(function(m, x){ return Math.max(m, x.credits); }, 0) || 1;
+    if (days.length) out += panel('By day', '<div class="tdm-bars">' + days.map(function(x){
+      return '<div class="tdm-bar"><span>' + esc(x.day.slice(5)) + '</span><div class="tdm-track"><i style="width:' + (100 * x.credits / max).toFixed(1) + '%"></i></div><span class="mono">' + n(x.credits) + '</span></div>';
+    }).join('') + '</div>');
+    if ((d.months || []).length > 1) out += panel('Earlier months', '<div class="tbl-wrap"><table><thead><tr><th>Month</th><th>Credits</th></tr></thead><tbody>' +
+      d.months.slice().reverse().map(function(m){ return '<tr><td>' + esc(m.month) + '</td><td>' + n(m.credits) + '</td></tr>'; }).join('') + '</tbody></table></div>');
+    var rc = d.recent || [];
+    if (rc.length) out += panel('Latest uses', '<div class="tbl-wrap"><table><thead><tr><th>When</th><th>Agent</th><th>What</th><th>Credits</th><th>Result</th></tr></thead><tbody>' +
+      rc.slice(0, 20).map(function(r){ return '<tr><td>' + esc(when(r.at)) + '</td><td>' + esc(r.name) + '</td><td>' + esc(KIND[r.kind] || r.kind) + '</td><td>' + n(r.credits) + '</td><td>' +
+        '<span class="tdm-st ' + (r.ok ? 'ok' : 'bad') + '">' + (r.ok ? 'Done' : 'Did not work (not charged)') + '</span></td></tr>'; }).join('') + '</tbody></table></div>');
+    return out;
+  };
+  window.addEventListener('hashchange', function(){ if (currentView() === 'usage') S.p2_usage = undefined; });
 })();
 
 boot();

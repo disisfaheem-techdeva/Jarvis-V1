@@ -113,7 +113,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=e3f73717f1">
+<link rel="stylesheet" href="/assets/td.css?v=2ca15298a7">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-techdeva min-h-screen bg-bg text-fg">
@@ -173,7 +173,7 @@ const NAV = [
   ['MONEY', [
     ['revenue','My revenue'], ['clientmoney','Client business'], ['invoices','Invoices out']]],
   ['PLATFORM', [
-    ['health','Health'], ['incidents','Incidents']]]
+    ['health','Health'], ['incidents','Incidents'], ['aiusage','AI usage & API log']]]
 ];
 const TITLES = {jarvis:['Jarvis','Pick a client, then say or type what to change for them.'],
   overview:['Overview','The whole business on one screen.'],
@@ -188,7 +188,8 @@ const TITLES = {jarvis:['Jarvis','Pick a client, then say or type what to change
   clientmoney:['Client business','Money moving through your clients businesses.'],
   invoices:['Invoices out','Invoices TechDeva has issued to clients, and their status.'],
   health:['Health','Queues, workers and the AI chain.'],
-  incidents:['Incidents','Anything the monitor has opened.']};
+  incidents:['Incidents','Anything the monitor has opened.'],
+  aiusage:['AI usage & API log','AI credits each client used this month, and every AI call (who, which agent, model, time, result; never the text).']};
 
 async function api(path, opts){
   opts = opts || {};
@@ -255,6 +256,14 @@ function show(){
 }
 function current(){ return (location.hash.replace('#/','') || 'overview'); }
 
+function wireAiUsage(){
+  document.querySelectorAll('[data-aisave]').forEach(b => b.onclick = async () => {
+    const id = b.getAttribute('data-aisave'), v = document.querySelector('[data-aic="' + id + '"]').value.trim();
+    try { await api('/techdeva/clients/' + id + '/ai-credits', {method:'PUT', body: JSON.stringify({ai_credits: v})}); D.aiu = undefined; paint(); }
+    catch (e) { alert(e.message); }
+  });
+}
+
 async function load(){
   const [book, health, ops, ai, inc, over, invoices, agents, claims, resets, plans, conns] = await Promise.all([
     api('/techdeva/book'),
@@ -312,6 +321,7 @@ function paint(){
   if (v === 'invoices') wireInvoices();
   if (v === 'jarvis') wireJarvis();
   if (v === 'requests') wireRequests();
+  if (v === 'aiusage') wireAiUsage();
 }
 
 /* ---- Jarvis voice helpers ----
@@ -515,6 +525,38 @@ function clientRows(rows){
 }
 
 const VIEWS = {
+  aiusage(){
+    if (D.aiu === undefined) { D.aiu = null; api('/techdeva/ai-usage').then(d => { D.aiu = d; if (current() === 'aiusage') paint(); }).catch(e => { D.aiu = {error: e.message}; if (current() === 'aiusage') paint(); }); }
+    const u = D.aiu, nf = x => Number(x || 0).toLocaleString('en-US');
+    if (!u) return '<div class="empty">Adding up AI usage...</div>';
+    if (u.error) return '<div class="empty">Could not read AI usage: ' + esc(u.error) + '</div>';
+    const real = u.clients.filter(c => !c.is_test), total = real.reduce((n, c) => n + c.credits, 0);
+    return '<div class="kpis">' + kpi('Credits this month', nf(total), 'real clients, since ' + u.since) +
+        kpi('AI calls', nf(real.reduce((n, c) => n + c.calls, 0)), 'real clients') +
+        kpi('Not for a client', nf(u.platform.calls), nf(u.platform.credits) + ' credits: platform or unattributed') +
+        kpi('Mode', u.mode === 'lock' ? 'Lock' : 'Count only', u.mode === 'lock' ? 'owner tools stop at 100%' : 'nobody is stopped yet') + '</div>' +
+      '<section><h2>Clients</h2><div class="card" style="padding:6px 8px">' +
+      tbl('<th>Business</th><th>Plan</th><th class="num">Credits used</th><th class="num">Allowance</th><th class="num">Used</th><th class="num">Calls</th><th class="num">Failed</th><th class="num">Avg time</th><th>Own allowance</th>',
+        u.clients.filter(c => !c.is_test || c.calls).map(c => '<tr><td class="name">' + esc(c.name) + (c.is_test ? ' <span class="aiu-tag">test</span>' : '') + '</td><td>' + esc(c.plan) + '</td>' +
+          '<td class="num">' + nf(c.credits) + '</td><td class="num">' + (c.cap == null ? 'no limit' : nf(c.cap)) + '</td>' +
+          '<td class="num">' + (c.percent == null ? '—' : '<span class="aiu-tag' + (c.percent >= 100 ? ' bad' : c.percent >= 80 ? ' warn' : '') + '">' + c.percent + '%</span>') + '</td>' +
+          '<td class="num">' + nf(c.calls) + '</td><td class="num">' + nf(c.failed) + '</td><td class="num">' + (c.avg_ms == null ? '—' : (c.avg_ms / 1000).toFixed(1) + 's') + '</td>' +
+          '<td><input class="fee" data-aic="' + esc(c.tenant_id) + '" value="' + (c.custom_cap ? c.cap : '') + '" placeholder="plan\'s" aria-label="Own AI credits for ' + esc(c.name) + '"> ' +
+          '<button class="tiny" data-aisave="' + esc(c.tenant_id) + '">Save</button></td></tr>')) +
+      '<div class="sub" style="margin-top:6px">Credits per use: ' + Object.keys(u.costs).map(k => esc(k) + ' ' + u.costs[k]).join(' · ') +
+      '. "Own allowance" overrides the plan for one client (a Custom deal); empty uses the plan\'s.</div></div></section>' +
+      '<section><h2>Models</h2><div class="card" style="padding:6px 8px">' +
+      tbl('<th>Model</th><th class="num">Calls</th><th class="num">Failed</th><th class="num">Avg time</th>', (u.models || []).map(m =>
+        '<tr><td>' + esc(m.model || '(none: failed before a model answered)') + '</td><td class="num">' + nf(m.calls) + '</td><td class="num">' + nf(m.failed) + '</td><td class="num">' + (m.avg_ms == null ? '—' : (m.avg_ms / 1000).toFixed(1) + 's') + '</td></tr>')) +
+      '</div></section>' +
+      '<section><h2>API log: latest 50 AI calls</h2><div class="card" style="padding:6px 8px;overflow-x:auto">' +
+      tbl('<th>When</th><th>Business</th><th>Agent</th><th>Feature</th><th>Model</th><th class="num">Time</th><th class="num">Sent / got (chars)</th><th class="num">Credits</th><th>Result</th>',
+        (u.calls || []).slice(0, 50).map(c => '<tr><td>' + esc(String(c.at).slice(0, 19).replace('T', ' ')) + '</td><td>' + esc(c.name || '(platform)') + '</td><td>' + esc(c.agent) + '</td><td>' + esc(c.feature) + '</td>' +
+          '<td>' + esc(c.model || '—') + '</td><td class="num">' + (c.ms == null ? '—' : (c.ms / 1000).toFixed(1) + 's') + '</td>' +
+          '<td class="num">' + (c.chars_in == null ? '—' : nf(c.chars_in)) + ' / ' + (c.chars_out == null ? '—' : nf(c.chars_out)) + '</td><td class="num">' + nf(c.credits) + '</td>' +
+          '<td>' + (c.ok ? '<span class="aiu-tag">ok</span>' : '<span class="aiu-tag bad" title="' + esc(c.error || '') + '">failed</span> <span class="sub">' + esc((c.error || '').slice(0, 80)) + '</span>') + '</td></tr>')) +
+      '</div></section>';
+  },
   connections(){
     const c = D.conns;
     if (!c) return '<div class="empty">Could not read the connections.</div>';
@@ -583,16 +625,21 @@ const VIEWS = {
             clientRows(b.clients)) + '</div>' +
       '<div class="sub" style="margin-top:8px">Pick a plan and the fee becomes the plan price (type a different fee after, for a discount). ' +
       'Type a fee and press Tab to save it. Hide removes a client from this book without deleting anything.</div></section>' +
-      '<section><h2>Plans</h2><div class="card" style="padding:6px 8px">' +
-      tbl('<th>Plan</th><th class="num">Price (PKR / month)</th><th class="num">Abroad (USD / month)</th><th class="num">WhatsApp numbers</th><th class="num">Conversations / month</th><th></th>',
+      '<section><h2>Plans</h2><div class="card plans-card" style="padding:6px 8px;overflow-x:auto">' +
+      tbl('<th>Plan</th><th class="num">PKR / month</th><th class="num">USD / month</th><th class="num">WhatsApp numbers</th><th class="num">Chats / month</th>' +
+          '<th class="num">AI credits / month</th><th class="num">Tasks at once</th><th>Shown</th><th></th>',
         ((D.plans && D.plans.plans) || []).map(p => '<tr><td class="name">' + esc(p.name) + '</td>' +
           '<td class="num"><input class="fee" data-pp="' + esc(p.key) + '" value="' + (p.price_pkr != null ? Math.round(p.price_pkr) : '') + '" placeholder="talk to us"></td>' +
           '<td class="num"><input class="fee" data-pu="' + esc(p.key) + '" value="' + (p.price_usd != null ? Math.round(p.price_usd) : '') + '" placeholder="talk to us"></td>' +
           '<td class="num"><input class="fee" data-pn="' + esc(p.key) + '" value="' + p.max_numbers + '"></td>' +
           '<td class="num"><input class="fee" data-pc="' + esc(p.key) + '" value="' + p.max_conversations + '"></td>' +
+          '<td class="num"><input class="fee" data-pa="' + esc(p.key) + '" value="' + (p.ai_credits != null ? p.ai_credits : '') + '" placeholder="no limit" aria-label="AI credits a month, ' + esc(p.name) + '"></td>' +
+          '<td class="num"><input class="fee" data-pt="' + esc(p.key) + '" value="' + (p.max_concurrent_tasks || 2) + '" aria-label="Agent tasks at once, ' + esc(p.name) + '"></td>' +
+          '<td><label><input type="checkbox" data-pv="' + esc(p.key) + '"' + (p.published !== false ? ' checked' : '') + '> ' + (p.published !== false ? 'Yes' : 'Hidden') + '</label></td>' +
           '<td><button class="tiny primary" data-psave="' + esc(p.key) + '">Save</button></td></tr>')) +
       '<div class="sub" style="margin-top:6px">Clients see these on their Plan &amp; Billing page and on the website. An empty price shows "Talk to us". ' +
-      'A conversation is one customer writing in a month. Going over is warned, never cut off.</div></div></section>';
+      'A conversation is one customer writing in a month. Going over is warned, never cut off. ' +
+      'AI credits: empty means no limit; usage per client is under Platform &gt; AI usage. A hidden plan is not on the website or client pages, but you can still put a client on it.</div></div></section>';
   },
   requests(){
     const ag = (D.agents && D.agents.requests) || [], cl = (D.claims && D.claims.claims) || [],
@@ -809,7 +856,9 @@ function wireClients(){
   });
   el.querySelectorAll('[data-psave]').forEach(b => b.onclick = async () => {
     const k = b.getAttribute('data-psave'), v = a => el.querySelector('[' + a + '="' + k + '"]').value;
-    try { await api('/techdeva/plans/' + k, {method:'PUT', body: JSON.stringify({price_pkr: v('data-pp'), price_usd: v('data-pu'), max_numbers: v('data-pn'), max_conversations: v('data-pc')})});
+    const shown = el.querySelector('[data-pv="' + k + '"]').checked;
+    try { await api('/techdeva/plans/' + k, {method:'PUT', body: JSON.stringify({price_pkr: v('data-pp'), price_usd: v('data-pu'), max_numbers: v('data-pn'), max_conversations: v('data-pc'),
+                                                                               ai_credits: v('data-pa'), max_concurrent_tasks: v('data-pt'), published: shown})});
           b.textContent = 'Saved'; load(); }
     catch (e) { alert(e.message); }
   });

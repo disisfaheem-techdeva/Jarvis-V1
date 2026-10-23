@@ -28,7 +28,7 @@ from fastapi import APIRouter, Body, Cookie, Header, HTTPException, Response
 
 from . import business as biz
 from . import jarvis_actions as ja
-from .ai import AIUnavailable, generate_json, fast as ai_fast, last_model as ai_last_model
+from .ai import AIUnavailable, CreditsUsedUp, generate_json, fast as ai_fast, last_model as ai_last_model
 from .audit import record
 from .auth import AuthError, SESSION_COOKIE, resolve_scope
 from .db import tenant_session
@@ -593,6 +593,10 @@ def _tts(text: str, urdu: bool) -> bytes:
     key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not key:
         raise HTTPException(503, "Voice is not set up on this server.")
+    from . import usage
+    why = usage.check()
+    if why:
+        raise HTTPException(402, why)
     style = ("Read this aloud in natural, warm Pakistani Urdu, like a friendly assistant: "
              if urdu else "Read this aloud in a warm, friendly, clear voice: ")
     last = "no model tried"
@@ -617,6 +621,7 @@ def _tts(text: str, urdu: bool) -> bytes:
             part = r.json()["candidates"][0]["content"]["parts"][0]["inlineData"]
             data = base64.b64decode(part["data"])
             mime = part.get("mimeType", "")
+            usage.charge("voice", True, provider="gemini", model=m, ms=(time.time() - started) * 1000, chars_in=len(text))
             if "wav" in mime:
                 return data
             mm = re.search(r"rate=(\d+)", mime)
@@ -767,6 +772,8 @@ def make_console_router():
                                     required_keys=("kind",), _retry=False)
             response.headers["Server-Timing"] = "think;dur=%d" % int((time.time() - t0) * 1000)
             response.headers["X-Jarvis-Model"] = ai_last_model() or ""
+        except CreditsUsedUp as e:          # this month's AI credits are used (lock mode)
+            raise HTTPException(402, str(e))
         except AIUnavailable as e:
             # Better to say the console is deaf than to guess at an instruction
             # that might change what the business says to its customers.

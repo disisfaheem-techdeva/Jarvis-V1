@@ -236,7 +236,10 @@ def _photo_openai(ai, key, model, b64, mime):
 def photo_to_text(data, mime):
     """Read the words off a menu or price-list photo with the AI this server is set
     up with, trying each model in its chain. Raises RuntimeError with a plain reason."""
-    from . import ai
+    from . import ai, usage
+    why = usage.check()
+    if why:
+        raise RuntimeError(why)
     b64 = base64.b64encode(data).decode()
     calls = {"gemini": _photo_gemini, "openai": _photo_openai}
     import os, time
@@ -255,6 +258,7 @@ def photo_to_text(data, mime):
             codes.append(0)
             continue
         if code == 200 and str(text).strip():
+            usage.charge("photo_read", True, provider=p, model=m, ms=(time.time() - started) * 1000, chars_out=len(str(text)))
             return str(text)[:MAX_TEXT]
         print("[setup] photo via %s:%s answered %s" % (p, m, code), flush=True)
         codes.append(code)

@@ -81,6 +81,19 @@ def make_alerts_router():
         tid, role, _uid = _identity(x_tenant_id, x_role, authorization, td_session)
         with tenant_session(tid, role) as cur:
             items = business_checks(cur)
+        try:
+            from .usage import MODE, allowance
+            a = allowance(tid)
+            if a["percent"] is not None and a["percent"] >= 80:
+                over = a["percent"] >= 100
+                items.insert(0, {"kind": "ai.credits", "severity": "critical" if over else "warn",
+                                 "title": ("This month's AI credits are used" if over else "%d%% of this month's AI credits used" % a["percent"]),
+                                 "detail": "%s of %s credits. %s" % (format(a["used"], ","), format(a["cap"], ","),
+                                           "Jarvis, captions and pictures are paused until the 1st or a bigger plan."
+                                           if over and MODE == "lock" else "They renew on the 1st. A bigger plan gives more."),
+                                 "link": "usage", "count": a["used"]})
+        except Exception as e:  # noqa: BLE001 -- the count failing must not hide the other alerts
+            print("[alerts] credits check skipped: %s" % str(e)[:200], flush=True)
         return {"checks": items, "count": len(items)}
 
     return router
