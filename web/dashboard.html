@@ -113,7 +113,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=3cbe60da60">
+<link rel="stylesheet" href="/assets/td.css?v=4c32264a99">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -8000,7 +8000,7 @@ function typeHidden(id){
     { num:'10', name:'Administration', icon:'shield',ids:['integrations','whatsapp','billing','usage','permissions'], sep:true }
   ];
   // the pages added in this block (they are not in NAV)
-  var NEW = { alerts:'Alerts', history:'Execution History', tools:'Tools', pipeline:'Pipeline',
+  var NEW = { alerts:'Alerts', history:'Execution History', tools:'Agents', pipeline:'Pipeline',
               analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer', usage:'AI usage', roles:'Roles' };
   // tab names that follow the approved structure; everything else keeps its own name
   var LABEL = { overview:'Overview', console:'Jarvis Assistant', ai:'AI Agents', needshuman:'Approval Queue',
@@ -8827,7 +8827,7 @@ function siWire(){
     return out + '<h2>Tasks</h2>' + panel('Recent tasks', ts.length
       ? '<div class="tbl-wrap"><table><thead><tr><th>Task</th><th>Agent</th><th>Status</th><th>Started</th><th>Last update</th></tr></thead><tbody>' +
         ts.map(function(t){
-          var s = TASK_STATE[t.status] || [words(t.status), ''];
+          var s = (t.result && t.result.skipped) ? ['Skipped (agent off)', ''] : (TASK_STATE[t.status] || [words(t.status), '']);
           return '<tr><td>' + esc(words(t.type)) + '</td><td>' + esc(words(t.agent)) + '</td><td>' + pill(s[0], s[1]) +
             (t.status === 'needs_human' ? ' <a href="#/needshuman">Decide</a>' : '') + '</td><td>' + esc(when(t.created_at)) + '</td><td>' + esc(when(t.updated_at)) + '</td></tr>';
         }).join('') + '</tbody></table></div>'
@@ -9198,6 +9198,60 @@ window.TD_ROLE = undefined;
   }
   var _p4Render = renderShell;
   renderShell = function(){ load(); _p4Render(); place(); };
+})();
+
+/* =====================================================================
+   Agents (23 Oct 2026): every backend agent, on/off per business, its work
+   and AI credits this month, and what it may remember (app/agent_admin.py).
+   Replaces the "Tools: not built yet" placeholder.
+   ===================================================================== */
+(function(){
+  var AG = { msg: null, busy: {} };
+  function n(v){ return Number(v || 0).toLocaleString(); }
+  var MEM = { integrations: 'which accounts are connected', learning: 'your corrections', meta_credentials: 'your Facebook access',
+    meta_credentials_error: 'Facebook access problems', latest_analysis: 'the growth report', current_growth_plan: 'the growth plan',
+    current_content_plan: 'the content plan', campaign_performance: 'ad results', last_optimization: 'its last suggestions',
+    attribution_rows: 'where customers came from', last_report: 'its last report', last_service_discussed: 'the last service discussed',
+    lessons: 'what you taught Jarvis' };
+  VIEWS.tools = function(){
+    var out = '<h1>Agents</h1><p class="sub">The AI agents working for your business. Switch one off and its work stops; switch it on again any time. ' +
+      'Each agent only sees the part of your business memory it needs.</p>';
+    if (!need('p5_agents', '/ai/agents')) return out + panel('Agents', loading('Loading your agents...'));
+    var d = S.p5_agents;
+    if (d === null) return out + panel('Agents', errState(S.p5_agents_detail || 'The agents service did not respond.'));
+    if (AG.msg) out += '<p class="card-note p1-msg' + (AG.msg.bad ? ' bad' : '') + '" role="status">' + esc(AG.msg.text) + '</p>';
+    return out + '<div class="p5-list">' + d.agents.map(function(a){
+      var sw = a.can_switch && d.can_change
+        ? '<label class="p5-switch"><input type="checkbox" data-p5="' + esc(a.agent) + '"' + (a.enabled ? ' checked' : '') + (AG.busy[a.agent] ? ' disabled' : '') +
+          ' aria-label="' + esc(a.name) + ' on"><span>' + (a.enabled ? 'On' : 'Off') + '</span></label>'
+        : '<span class="tdm-st ' + (a.enabled ? 'ok' : '') + '">' + (a.can_switch ? (a.enabled ? 'On' : 'Off') : 'Always on') + '</span>';
+      return '<div class="panel p5-agent' + (a.enabled ? '' : ' off') + '"><div class="p5-top"><div><b>' + esc(a.name) + '</b><div class="card-note">' + esc(a.about) + '</div></div>' + sw + '</div>' +
+        '<div class="p5-stats"><span><b>' + n(a.done) + '</b> finished</span><span><b>' + n(a.open) + '</b> in progress</span>' +
+        (a.needs_you ? '<span><b>' + n(a.needs_you) + '</b> <a href="#/needshuman">need you</a></span>' : '') +
+        (a.failed ? '<span><b>' + n(a.failed) + '</b> failed</span>' : '') + (a.skipped ? '<span><b>' + n(a.skipped) + '</b> skipped while off</span>' : '') +
+        '<span><b>' + n(a.credits) + '</b> AI credits</span><span>Last ran: ' + (a.last_run ? esc(when(a.last_run)) : '—') + '</span></div>' +
+        '<div class="card-note p5-mem">Can see: ' + a.reads.map(function(k){ return esc(MEM[k] || k); }).join(', ') + '.' +
+        (a.remembers.length ? ' Has saved: ' + a.remembers.map(function(k){ return esc(MEM[k] || k); }).join(', ') + '.' : '') + '</div></div>';
+    }).join('') + '</div><p class="card-note">Figures since ' + esc(d.since) + '. Your WhatsApp agent and social inbox replies have their own switches on their pages.</p>';
+  };
+  function wire(){
+    if (currentView() !== 'tools') return;
+    document.querySelectorAll('[data-p5]').forEach(function(c){
+      c.onchange = function(){
+        var a = c.getAttribute('data-p5'), on = c.checked;
+        if (!on && !confirm('Switch this agent off? Its work stops until you switch it on again.')) { c.checked = true; return; }
+        AG.busy[a] = true; renderShell();
+        api('/ai/agents/' + a, { method: 'PUT', body: { enabled: on } }).then(function(r){
+          AG.busy[a] = false; S.p5_agents = undefined;
+          AG.msg = r.ok ? { text: (on ? 'Switched on.' : 'Switched off. Its queued work will be skipped.') } : { text: (r.data && r.data.detail) || 'Not changed.', bad: true };
+          renderShell();
+        });
+      };
+    });
+  }
+  var _p5Render = renderShell;
+  renderShell = function(){ _p5Render(); wire(); };
+  window.addEventListener('hashchange', function(){ if (currentView() === 'tools') { S.p5_agents = undefined; AG.msg = null; } });
 })();
 
 boot();

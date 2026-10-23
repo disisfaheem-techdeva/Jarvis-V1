@@ -177,4 +177,16 @@
   & .p4-banner > span { @apply min-w-0 flex-1 basis-64; }
   & .p4-banner.bad { @apply border-danger bg-danger-tint; }
   & .p4-banner .btn { @apply min-h-11; }
+
+  /* Agents: switches and figures */
+  & .p5-list { @apply grid gap-3; }
+  & .p5-agent { @apply m-0 px-5 py-4; }
+  & .p5-agent.off { @apply opacity-70; }
+  & .p5-top { @apply flex flex-wrap items-start justify-between gap-3; }
+  & .p5-top > div { @apply min-w-0 flex-1 basis-60; }
+  & .p5-stats { @apply mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm text-fg-muted; }
+  & .p5-stats b { @apply text-fg; }
+  & .p5-mem { @apply mt-2; }
+  & .p5-switch { @apply inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm font-medium text-fg; }
+  & .p5-switch input { @apply h-5 w-5 accent-[var(--accent)]; }
 }

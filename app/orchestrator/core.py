@@ -55,6 +55,10 @@ class Orchestrator:
             prev = self.persist.enqueue_task(tenant_id, spec)
 
     def _queue(self, tenant_id: str, spec: dict):
+        # no new work for an agent the owner switched off
+        from ..agent_admin import enabled
+        if not enabled(tenant_id, spec["agent"]):
+            return
         # prevent duplicate work: don't queue an identical open task
         if self.persist.has_open_task(tenant_id, spec["agent"], spec["type"], spec.get("payload", {})):
             return
@@ -76,9 +80,18 @@ class Orchestrator:
             self.persist.fail_task(tenant_id, task_row["id"], "human_active: hermes stood down")
             return
 
+        # an agent the owner switched off: skip, recorded as skipped, so a pipeline carries on
+        from ..agent_admin import enabled, memory_for
+        if not enabled(tenant_id, agent.name):
+            self.persist.complete_task(tenant_id, task_row["id"],
+                                       {"skipped": "%s is switched off for this business" % agent.name})
+            self.persist.release_dependents(tenant_id, task_row["id"])
+            return
+
+        # each agent sees only its own part of the business memory (app/agent_admin.py)
         ctx = Context(tenant_id=tenant_id,
                       config=self.load_config(tenant_id),
-                      store=self.load_context(tenant_id))
+                      store=memory_for(agent.name, self.load_context(tenant_id)))
         task = Task(id=task_row["id"], tenant_id=tenant_id,
                     agent=agent.name, type=task_row["type"],
                     payload=payload)
