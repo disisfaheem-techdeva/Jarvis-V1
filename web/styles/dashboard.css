@@ -135,4 +135,21 @@
   & .ap-cr-tag { @apply absolute bottom-0 left-0 right-0 rounded-b-lg bg-[rgb(0_0_0/0.6)] px-1.5 py-0.5 text-[11px] text-white; }
   & .ap-plan { @apply mt-3 rounded-[var(--card-radius)] border border-accent-line bg-accent-tint px-4 py-3 text-sm leading-relaxed text-fg; }
   & .ap-plan .tbl-wrap { @apply mt-2; }
+
+  /* Phase 1: the Management heading in the sidebar, alerts, reports, captions */
+  & .tdm-group { @apply mt-3 mb-1 px-2.5 text-[11px] font-semibold tracking-[0.12em] text-fg-subtle uppercase; }
+  & .app.tdm-collapsed .tdm-group { @apply mx-1.5 my-2 h-px overflow-hidden bg-line p-0 text-[0]; }
+  & .p1-alerts { @apply m-0 list-none p-0; }
+  & .p1-alerts li { @apply flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5 last:border-b-0; }
+  & .p1-alert-txt { @apply min-w-0 flex-1 basis-56; }
+  & .p1-alert-txt .sub { @apply m-0 mt-1; }
+  & .p1-alerts .btn { @apply min-h-11; }
+  & .p1-rep-pick { @apply my-2.5 flex flex-wrap gap-2; }
+  & .p1-rep-pick .btn { @apply min-h-11; }
+  & .p1-cap { @apply block w-full resize-y rounded-lg border border-line-strong bg-bg-elevated p-3 font-[inherit] text-sm leading-relaxed text-fg; }
+  & .panel > .p1-cap, & .panel > .p1-msg, & .panel > .p1-cap-acts { @apply mx-4 my-3 w-[calc(100%-2rem)]; }
+  & .p1-cap-acts { @apply flex flex-wrap items-center gap-2; }
+  & .p1-cap-acts .btn { @apply min-h-11; }
+  & .p1-msg { @apply my-2 text-success; }
+  & .p1-msg.bad { @apply text-danger; }
 }

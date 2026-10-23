@@ -20,6 +20,7 @@ are human steps. Cancelling is for the owner, and never after money was taken.
 """
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import re
 
@@ -550,6 +551,29 @@ def make_orders_router():
         tid, role, uid = who(x_tenant_id, x_role, authorization, td_session)
         with tenant_session(tid, role) as cur:
             return summary(cur, role)
+
+    @router.get("/orders/by-product")
+    def orders_by_product(start: str, end: str, x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                          authorization: str | None = Header(None),
+                          td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Reports > Sales by product: what sold between two dates (cancelled orders left out). Owner only: money."""
+        tid, role, uid = who(x_tenant_id, x_role, authorization, td_session)
+        if role not in MONEY_ROLES:
+            raise HTTPException(403, "Sales figures are for the owner.")
+        try:
+            d0, d1 = dt.date.fromisoformat(start[:10]), dt.date.fromisoformat(end[:10])
+        except ValueError:
+            raise HTTPException(400, "Dates are YYYY-MM-DD.")
+        with tenant_session(tid, role) as cur:
+            cur.execute("""SELECT COALESCE(p.name, i.description) AS name, sum(i.quantity) AS quantity, sum(i.line_total) AS amount
+                             FROM order_items i JOIN orders o ON o.id = i.order_id LEFT JOIN products p ON p.id = i.product_id
+                            WHERE o.status <> 'cancelled' AND (o.created_at AT TIME ZONE 'Asia/Karachi')::date BETWEEN %s AND %s
+                            GROUP BY 1 ORDER BY 3 DESC, 1""", (d0, d1))
+            rows = [{"name": r["name"], "quantity": float(r["quantity"]), "amount": _money(r["amount"])} for r in cur.fetchall()]
+            cur.execute("""SELECT count(*) AS n, COALESCE(sum(total), 0) AS total FROM orders
+                            WHERE status <> 'cancelled' AND (created_at AT TIME ZONE 'Asia/Karachi')::date BETWEEN %s AND %s""", (d0, d1))
+            t = cur.fetchone()
+        return {"start": d0.isoformat(), "end": d1.isoformat(), "orders": t["n"], "total": _money(t["total"]), "products": rows}
 
     @router.get("/orders/catalogue")
     def orders_catalogue(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),

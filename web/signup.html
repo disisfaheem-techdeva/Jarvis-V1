@@ -119,7 +119,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=7a05541bdd">
+<link rel="stylesheet" href="/assets/td.css?v=e3f73717f1">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-signup min-h-screen bg-bg text-fg">
@@ -164,8 +164,21 @@
         </div>
         <div class="field">
           <label for="industry">Industry <span aria-hidden="true" class="text-fg-subtle">*</span></label>
-          <input id="industry" required placeholder="e.g. limousine, salon, dental">
+          <select id="industry" required>
+            <option value="">Choose your industry</option>
+            <option value="restaurant">Restaurant, café or food</option>
+            <option value="clinic">Clinic (aesthetic, dental, medical)</option>
+            <option value="salon">Salon, barber or spa</option>
+            <option value="gym">Gym or fitness studio</option>
+            <option value="academy">Academy, training or school</option>
+            <option value="shop">Shop &amp; products</option>
+            <option value="other">Other service business</option>
+          </select>
         </div>
+      </div>
+      <div class="field" id="industry_other_f" hidden>
+        <label for="industry_other">What does your business do? <span aria-hidden="true" class="text-fg-subtle">*</span></label>
+        <input id="industry_other" maxlength="80" placeholder="e.g. limousine hire, car rental, printing">
       </div>
       <div class="field">
         <label for="website_url">Website</label>
@@ -238,6 +251,21 @@ document.getElementById('addComp').onclick = addComp;
 addComp();
 
 const val = id => document.getElementById(id).value.trim();
+// Industry: the same business types as the dashboard (the list above is the fallback).
+const ind = document.getElementById('industry'), indOther = document.getElementById('industry_other');
+function syncOther(){
+  const on = ind.value === 'other';
+  document.getElementById('industry_other_f').hidden = !on;
+  indOther.required = on;
+}
+ind.addEventListener('change', syncOther);
+fetch('/public/business-types').then(r => r.ok ? r.json() : null).then(d => {
+  if (!d || !Array.isArray(d.types) || !d.types.length) return;
+  const keep = ind.value;
+  ind.replaceChildren(new Option('Choose your industry', ''), ...d.types.map(t => new Option(t.name, t.slug)));
+  ind.value = keep;
+  syncOther();
+}).catch(() => {});
 // The server's reason as one sentence, never "[object Object]".
 function errText(data, status){
   const d = data && data.detail;
@@ -270,7 +298,9 @@ document.getElementById('f').addEventListener('submit', async (e) => {
     const r = await fetch('/signup', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
-        business_name: val('business_name'), industry: val('industry') || 'general',
+        business_name: val('business_name'),
+        industry: (ind.value === 'other' ? val('industry_other') : ind.options[ind.selectedIndex].text) || 'general',
+        business_type: ind.value || null, business_type_other: ind.value === 'other' ? val('industry_other') : null,
         website_url: val('website_url') || null, social_links: social, competitors,
         contact_email: val('contact_email'), contact_phone: val('contact_phone') || null,
         contact_name: val('contact_name') || null, password: val('password')
