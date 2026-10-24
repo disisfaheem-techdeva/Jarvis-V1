@@ -113,7 +113,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=4c32264a99">
+<link rel="stylesheet" href="/assets/td.css?v=50c373e3a8">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -4970,7 +4970,7 @@ function jvConfirm(yes){
   var p = JV.pending; JV.pending = null;
   if (!p) return;
   try { if (JV.rec) JV.rec.abort(); } catch (e) {}
-  if (!yes) { jvHist('user', 'No'); jvLocal(p.no || 'Okay, I\'ve left it as it is.'); return; }
+  if (!yes) { jvHist('user', 'No'); jvNote('No', p.no || 'Okay, I\'ve left it as it is.'); jvLocal(p.no || 'Okay, I\'ve left it as it is.'); return; }
   consoleSend({ confirm: p.confirm, label: 'Yes' });
 }
 function jvLocal(reply){
@@ -5014,7 +5014,7 @@ function consoleSend(opt){
     JV.designing.then(function(){ jvSet('idle', ''); consoleSend(opt); });
     return;
   }
-  if (opt && opt.confirm) { body = { confirm: opt.confirm }; msg = opt.label || 'Yes'; }
+  if (opt && opt.confirm) { body = { confirm: opt.confirm, said: opt.label || 'Yes' }; msg = opt.label || 'Yes'; }
   else {
     if (!box || !box.value.trim()) return;
     if (jvImgsBusy()) { jvSet('error', 'The pictures are still uploading. Try again in a moment.'); return; }
@@ -5022,13 +5022,14 @@ function consoleSend(opt){
     if (JV.pending) {
       var p = JV.pending, yn = jvYesNo(msg); JV.pending = null;
       if (yn === 'yes') { box.value = ''; return consoleSend({ confirm: p.confirm, label: msg }); }
-      if (yn === 'no') { box.value = ''; jvHist('user', msg); return jvLocal(p.no || 'Okay, I\'ve left it as it is.'); }
+      if (yn === 'no') { box.value = ''; jvHist('user', msg); jvNote(msg, p.no || 'Okay, I\'ve left it as it is.'); return jvLocal(p.no || 'Okay, I\'ve left it as it is.'); }
     }
     body = { message: msg, history: JV.hist.slice(-8) };
     if (jvImgUrls().length) body.image_urls = jvImgUrls();
   }
   var spoken = !!(JARVIS_SPOKEN || JV.conv); JARVIS_SPOKEN = false;
   body.voice = spoken;
+  if (JV.convId) body.conversation_id = JV.convId;   // kept on the server (db/75), so a refresh can continue it
   if (box) box.value = '';
   jvHist('user', msg); JV.extra = '';
   var t0 = Date.now(); JV.timing = '';
@@ -5037,6 +5038,8 @@ function consoleSend(opt){
     .then(function(r){
       var st = r.headers.get('Server-Timing') || '', m = /think;dur=(\d+)/.exec(st);
       JV.timing = 'thinking ' + (m ? (m[1] / 1000).toFixed(1) : ((Date.now() - t0) / 1000).toFixed(1)) + 's';
+      var cid = r.headers.get('X-Jarvis-Conversation');
+      if (cid) { JV.convId = cid; JVC.list = undefined; }
       return r.text().then(function(t){ var d = null; try { d = JSON.parse(t); } catch (e) {} return { ok: r.ok, status: r.status, data: d }; });
     })
     .catch(function(){ return { ok: false, status: 0, data: null }; })
@@ -7987,7 +7990,7 @@ function typeHidden(id){
    ===================================================================== */
 (function(){
   var MODS = [
-    { num:'01', name:'Dashboard',      icon:'grid',  ids:['overview','reports','alerts'] },
+    { num:'01', name:'Dashboard',      icon:'grid',  ids:['overview'] },
     { num:'02', name:'Jarvis & AI',    icon:'spark', ids:['console','ai','hermes','bizagent','needshuman','history','tools'], sep:true },
     { num:'03', name:'Chats',          icon:'chat',  ids:['inbox','socialinbox','calls'] },
     // Management (23 Oct 2026): the day-to-day pages sit together, Operations next to CRM and Team
@@ -7995,12 +7998,12 @@ function typeHidden(id){
     { num:'05', name:'Operations',     icon:'box',   ids:['orders','inventory','dailyentry'] },
     { num:'06', name:'Team & HR',      icon:'badge', ids:['team','attendance','hr','roles'] },
     { num:'07', name:'Marketing',      icon:'mega',  ids:['marketing','posts','captions','autopilot','advisor','analytics'], sep:true },
-    { num:'08', name:'Business',       icon:'store', ids:['services','products','packages','deals','settings'] },
+    { num:'08', name:'Business',       icon:'store', ids:['services','products','packages','deals','reports','settings'] },
     { num:'09', name:'Finance',        icon:'wallet',ids:['revenue','invoices','expenses','dayclose','pnl'] },
     { num:'10', name:'Administration', icon:'shield',ids:['integrations','whatsapp','billing','usage','permissions'], sep:true }
   ];
   // the pages added in this block (they are not in NAV)
-  var NEW = { alerts:'Alerts', history:'Execution History', tools:'Agents', pipeline:'Pipeline',
+  var NEW = { history:'Execution History', tools:'Agents', pipeline:'Pipeline',
               analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer', usage:'AI usage', roles:'Roles' };
   // tab names that follow the approved structure; everything else keeps its own name
   var LABEL = { overview:'Overview', console:'Jarvis Assistant', ai:'AI Agents', needshuman:'Approval Queue',
@@ -8250,19 +8253,6 @@ function typeHidden(id){
     return '<div class="tdm-build"><h3><span class="tdm-build-tag">NEEDS BACKEND</span>' + esc(title) + '</h3><p>' + esc(why) + '</p>' +
       (needs && needs.length ? '<ul>' + needs.map(function(n){ return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
   }
-
-  if (!VIEWS.alerts) VIEWS.alerts = function(){
-    var out = hd('Alerts', 'Problems the platform has noticed for this business.');
-    if (!need('tdm_inc', '/incidents')) return out + panel('Open alerts', loading('Loading alerts...'));
-    if (S.tdm_inc === null) return out + panel('Open alerts', errState('The alerts service did not respond.'));
-    var list = S.tdm_inc.incidents || [];
-    if (!list.length) return out + panel('Open alerts', empty('No open alerts', 'Everything the platform watches is fine right now.'));
-    return out + panel('Open alerts', tb(['Severity', 'Alert', 'Since', 'Seen'], list.map(function(i){
-      var cls = i.severity === 'critical' ? 'bad' : (i.severity === 'warn' ? 'warn' : 'info');
-      return '<tr><td>' + st(i.severity, cls) + '</td><td style="white-space:normal"><b>' + esc(i.title) + '</b>' +
-        (i.detail ? '<div class="sub" style="margin:4px 0 0">' + esc(i.detail) + '</div>' : '') + '</td><td>' + at(i.opened_at) + '</td><td>' + esc(i.seen_count) + '</td></tr>';
-    })));
-  };
 
   if (!VIEWS.history) VIEWS.history = function(){
     var out = hd('Execution History', 'Every recorded action, by a person or an AI agent.');
@@ -8787,32 +8777,12 @@ function siWire(){
 })();
 
 /* =====================================================================
-   Phase 1 (23 Oct 2026): alerts that need a person, AI task status,
-   a report picker and a caption writer. Added on top of the pages above;
+   Phase 1 (23 Oct 2026): AI task status, a report picker and a caption
+   writer. (Alerts were removed on 24 Oct 2026.) Added on top of the pages above;
    nothing above is replaced.
    ===================================================================== */
 (function(){
   function pill(txt, cls){ return '<span class="tdm-st ' + (cls || '') + '">' + esc(txt) + '</span>'; }
-
-  /* ---- Alerts: the platform's incidents plus what needs a person here ---- */
-  var baseAlerts = VIEWS.alerts;
-  VIEWS.alerts = function(){
-    var out = baseAlerts.apply(this, arguments), p;
-    if (!need('p1_checks', '/alerts/checks')) p = panel('Needs you', loading('Checking your business...'));
-    else if (S.p1_checks === null) p = panel('Needs you', errState('The alerts check did not respond.'));
-    else {
-      var list = S.p1_checks.checks || [];
-      p = panel('Needs you', list.length ? '<ul class="p1-alerts">' + list.map(function(c){
-        var cls = c.severity === 'critical' ? 'bad' : (c.severity === 'warn' ? 'warn' : 'info');
-        return '<li><div>' + pill(c.severity === 'critical' ? 'Urgent' : 'To do', cls) + '</div>' +
-          '<div class="p1-alert-txt"><b>' + esc(c.title) + '</b>' + (c.detail ? '<div class="sub">' + esc(c.detail) + '</div>' : '') + '</div>' +
-          '<a class="btn" href="#/' + esc(c.link) + '">Open</a></li>';
-      }).join('') + '</ul>' : empty('Nothing needs you', 'No expired connections, approvals, low stock, overdue invoices or failed ads.'));
-    }
-    // "Needs you" first, under the page heading, then the platform's own alerts
-    var i = out.indexOf('<div class="panel');
-    return i === -1 ? out + p : out.slice(0, i) + p + out.slice(i);
-  };
 
   /* ---- AI Workforce: each task and whether it finished ---- */
   var TASK_STATE = { queued: ['Waiting', 'info'], waiting: ['Waiting', 'info'], running: ['Running', 'info live'],
@@ -8975,7 +8945,6 @@ function siWire(){
   };
   window.addEventListener('hashchange', function(){
     var v = currentView();
-    if (v === 'alerts') S.p1_checks = undefined;
     if (v === 'ai') S.p1_tasks = undefined;
     if (v !== 'captions') CAP.msg = null;
   });
@@ -9252,6 +9221,71 @@ window.TD_ROLE = undefined;
   var _p5Render = renderShell;
   renderShell = function(){ _p5Render(); wire(); };
   window.addEventListener('hashchange', function(){ if (currentView() === 'tools') { S.p5_agents = undefined; AG.msg = null; } });
+})();
+
+/* =====================================================================
+   Jarvis conversations (24 Oct 2026): every turn is kept on the server
+   (app/jarvis_memory.py, db/75), per business and per person. After a
+   refresh the last conversation comes back; earlier ones can be reopened.
+   ===================================================================== */
+var JVC = { list: undefined, loading: false, restored: false, err: null };
+function jvNote(said, reply){
+  if (!JV.convId) return;
+  api('/console/conversations/' + encodeURIComponent(JV.convId) + '/notes', { method: 'POST', body: { said: said, reply: reply } });
+}
+function jvOpenConv(id){
+  JVC.err = null;
+  return api('/console/conversations/' + encodeURIComponent(id)).then(function(r){
+    if (!r.ok) { JVC.err = (r.data && r.data.detail) || 'That conversation could not be opened.'; renderShell(); return; }
+    JV.convId = id; JV.pending = null; JV.extra = '';
+    JV.hist = (r.data.messages || []).slice(-20).map(function(m){ return { role: m.role === 'user' ? 'user' : 'jarvis', text: String(m.text || '').slice(0, 400) }; });
+    jvShowOut(); renderShell();
+  });
+}
+function jvLoadConvs(){
+  if (JVC.loading || JVC.list !== undefined || !S.me) return;
+  JVC.loading = true;
+  api('/console/conversations?limit=20').then(function(r){
+    JVC.loading = false;
+    JVC.list = r.ok ? (r.data.conversations || []) : null;
+    // after a refresh: pick up the latest conversation where it was left
+    if (!JVC.restored && JVC.list && JVC.list.length && !JV.convId && !(JV.hist || []).length) {
+      JVC.restored = true; jvOpenConv(JVC.list[0].id); return;
+    }
+    JVC.restored = true;
+    renderShell();
+  });
+}
+function jvConvPanel(){
+  var l = JVC.list, rows;
+  if (l === undefined) rows = '<div class="card-note p3-pad">Loading your conversations…</div>';
+  else if (l === null) rows = '<div class="card-note p3-pad">Your earlier conversations could not be loaded.</div>';
+  else if (!l.length) rows = '<div class="card-note p3-pad">No saved conversations yet. What you say to Jarvis is kept here.</div>';
+  else rows = '<ul class="jvc-list">' + l.map(function(c){
+    return '<li><button type="button" class="jvc-item' + (c.id === JV.convId ? ' on' : '') + '" data-jvc="' + esc(c.id) + '"' + (c.id === JV.convId ? ' aria-current="true"' : '') + '>' +
+      '<span class="jvc-t">' + esc(c.title || 'Conversation') + '</span><span class="card-note">' + esc(when(c.updated_at)) + ' · ' + esc(c.messages) + ' messages</span></button></li>';
+  }).join('') + '</ul>';
+  return panel('Conversations', (JVC.err ? '<p class="card-note p1-msg bad p3-pad">' + esc(JVC.err) + '</p>' : '') + rows,
+    '<button type="button" class="btn" id="jvc-new">New conversation</button>');
+}
+(function(){
+  var baseConsole = VIEWS.console;
+  VIEWS.console = function(){
+    jvLoadConvs();
+    var out = baseConsole.apply(this, arguments), i = out.indexOf('</p>');
+    return i === -1 ? jvConvPanel() + out : out.slice(0, i + 4) + jvConvPanel() + out.slice(i + 4);
+  };
+  function wire(){
+    document.querySelectorAll('[data-jvc]').forEach(function(b){ b.onclick = function(){ jvOpenConv(b.getAttribute('data-jvc')); }; });
+    var n = document.getElementById('jvc-new');
+    if (n) n.onclick = function(){ JV.convId = null; JV.hist = []; JV.pending = null; JV.extra = ''; jvShowOut(); renderShell(); var b = document.getElementById('con-in'); if (b) b.focus(); };
+  }
+  var _jvcRender = renderShell;
+  renderShell = function(){
+    _jvcRender();
+    if (S.me && !JVC.restored) jvLoadConvs();     // the dock on any page continues the last conversation too
+    if (currentView() === 'console') wire();
+  };
 })();
 
 boot();

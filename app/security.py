@@ -7,8 +7,7 @@ the limits hold across restarts and API processes:
   * 20 wrong passwords from one address within 15 minutes block that address.
 The message is the same whether or not the account exists. A wrong password for an
 email that has no account takes as long as one that has (a dummy hash is checked),
-so timing cannot tell who is a client either. The owner's Alerts show wrong
-passwords on their business's logins.
+so timing cannot tell who is a client either.
 
 Email verification. A person proves an email is theirs with a signed link (24 h)
 sent to it. Sent at sign-up, and again on request from the dashboard. Nobody is
@@ -207,11 +206,3 @@ def make_security_router():
         return RedirectResponse("/dashboard?verified=%s" % ("1" if u else "expired"), status_code=302)
 
     return router
-
-
-def failed_signins(cur, tenant_id, hours=24):
-    """Wrong passwords on this business's logins lately: [(name, count, last)] (admin cursor)."""
-    cur.execute("""SELECT u.name, count(*) AS n, max(a.at) AS last FROM login_attempts a JOIN users u ON u.id = a.user_id
-                    WHERE a.tenant_id = %s AND NOT a.ok AND a.at > now() - make_interval(hours => %s)
-                    GROUP BY u.name ORDER BY 2 DESC""", (str(tenant_id), hours))
-    return [dict(r) for r in cur.fetchall()]

@@ -530,6 +530,7 @@ def _facts_fresh(tid, role):
                 f["money_pkr"]["expenses_this_month"] = cur.fetchone()["spent"]
     except Exception as e:  # a facts failure must never block the console
         f["facts_error"] = type(e).__name__
+    f.update(_more_facts(tid, role))
     if not f.get("services"):
         try:
             from .persistence import Persistence
@@ -542,6 +543,85 @@ def _facts_fresh(tid, role):
         except Exception:
             pass
     return f
+
+
+# Every module Jarvis may answer from. Each part is read in its own session, so
+# one missing table cannot blank the rest; money stays owner-only as above.
+_MORE = (
+    ("products", """SELECT p.name, p.price, p.active, p.track_stock, p.low_stock_threshold,
+                           CASE WHEN p.track_stock THEN (SELECT COALESCE(sum(quantity_delta), 0) FROM stock_movements m
+                                                          WHERE m.product_id = p.id) END AS in_stock
+                      FROM products p ORDER BY p.active DESC, p.name LIMIT 60""", "rows"),
+    ("packages", "SELECT name, price, active FROM packages ORDER BY active DESC, name LIMIT 20", "rows"),
+    ("offers", """SELECT title, discount_type, discount_value, starts_on, ends_on, active FROM offers
+                   WHERE active ORDER BY created_at DESC LIMIT 15""", "rows"),
+    ("recent_leads", """SELECT name, phone, service, status, source, created_at::date AS added FROM leads
+                         ORDER BY created_at DESC LIMIT 15""", "rows"),
+    ("recent_customers", """SELECT name, phone, status, created_at::date AS added FROM customers
+                             ORDER BY created_at DESC LIMIT 15""", "rows"),
+    ("invoices", """SELECT count(*) FILTER (WHERE status IN ('issued','partial')) AS unpaid,
+                           count(*) FILTER (WHERE status IN ('issued','partial') AND due_on < CURRENT_DATE) AS overdue,
+                           count(*) FILTER (WHERE issued_on >= date_trunc('month', CURRENT_DATE)) AS issued_this_month
+                      FROM invoices""", "one"),
+    ("expenses", """SELECT category, description, amount, spent_on FROM expenses
+                     ORDER BY spent_on DESC, created_at DESC LIMIT 15""", "rows"),
+    ("social_posts", """SELECT left(caption, 120) AS caption, platforms, status, results, scheduled_at, published_at
+                         FROM social_posts WHERE status <> 'discarded' ORDER BY updated_at DESC LIMIT 10""", "rows"),
+    ("ad_campaigns", """SELECT provider, service, daily_budget, status, destination, created_at::date AS made,
+                               launched_at::date AS launched, test->>'status' AS ab_test, error
+                          FROM ad_drafts WHERE status <> 'discarded' ORDER BY created_at DESC LIMIT 10""", "rows"),
+    ("social_inbox", """SELECT count(*) AS conversations, count(*) FILTER (WHERE hot) AS serious_clients,
+                               count(*) FILTER (WHERE needs_owner IS NOT NULL AND needs_owner <> '') AS waiting_for_owner
+                          FROM social_threads""", "one"),
+    ("team_today", """SELECT s.name, a.status, a.check_in::text, a.check_out::text FROM staff_attendance a
+                        JOIN staff s ON s.id = a.staff_id
+                       WHERE a.day = (now() AT TIME ZONE 'Asia/Karachi')::date ORDER BY s.name LIMIT 40""", "rows"),
+    ("ai_tasks", """SELECT agent, type, status::text, updated_at FROM tasks ORDER BY updated_at DESC LIMIT 10""", "rows"),
+)
+# which dashboard section (app/roles.py) each fact belongs to; a login with a
+# role is only given the facts of the sections it may see
+FACT_SECTION = {
+    "upcoming_appointments": "crm", "appointments": "crm", "leads": "crm", "customers": "crm",
+    "recent_leads": "crm", "recent_customers": "crm",
+    "services": "business", "business_hours": "business", "products": "business", "packages": "business",
+    "orders": "operations",
+    "phone_calls": "chats", "social_inbox": "chats",
+    "money_pkr": "finance", "invoices": "finance", "expenses": "finance",
+    "social_posts": "marketing", "ad_campaigns": "marketing", "offers": "marketing",
+    "team_today": "team", "ai_tasks": "jarvis",
+}
+
+
+def _more_facts(tid, role):
+    out = {}
+    for key, sql, shape in _MORE:
+        try:
+            with tenant_session(tid, role) as cur:
+                cur.execute(sql)
+                out[key] = [dict(r) for r in cur.fetchall()] if shape == "rows" else dict(cur.fetchone() or {})
+        except Exception as e:  # noqa: BLE001 -- one module failing must not blank the others
+            out[key + "_unavailable"] = type(e).__name__
+    return out
+
+
+def _facts_for(tid, role, uid):
+    """The snapshot this person may see: everything for the owner; for a login
+    with a team role, only the sections that role can view (app/roles.py)."""
+    f = _facts(tid, role)
+    try:
+        from .roles import SECTIONS, permissions_for
+        p = permissions_for(uid) if uid else None
+    except Exception:  # noqa: BLE001
+        p = None
+    if not p:
+        return f
+    may = {sec for sec, acts in (p.get("permissions") or {}).items() if "view" in acts}
+    out = {k: v for k, v in f.items() if FACT_SECTION.get(k.replace("_unavailable", ""), "") in may or k.replace("_unavailable", "") not in FACT_SECTION}
+    hidden = sorted({SECTIONS[s] for k, s in FACT_SECTION.items() if s not in may and s in SECTIONS})
+    if hidden:
+        out["not_in_your_role"] = ("This person's role (%s) does not include: %s. If asked about these, say their role "
+                                   "does not include it and the owner can change that." % (p.get("name"), ", ".join(hidden)))
+    return out
 
 
 def _history(raw):
@@ -559,8 +639,18 @@ def _history(raw):
     return "\n".join(lines)
 
 
-def _with_facts(tid, role, message, history=""):
-    return ("BUSINESS FACTS:\n" + json.dumps(_facts(tid, role), default=str)[:9000] +
+def _role_may(uid, section, action):
+    """A login with no team role keeps its base access; one with a role needs that section and action."""
+    try:
+        from .roles import permissions_for
+        p = permissions_for(uid) if uid else None
+    except Exception:  # noqa: BLE001
+        return True
+    return p is None or action in (p.get("permissions", {}).get(section) or [])
+
+
+def _with_facts(tid, role, message, history="", uid=None):
+    return ("BUSINESS FACTS:\n" + json.dumps(_facts_for(tid, role, uid), default=str)[:16000] +
             ("\n\nRECENT CONVERSATION:\n" + history if history else "") +
             "\n\nOWNER SAYS:\n" + message)
 
@@ -691,6 +781,21 @@ def _done_text(action, args):
     return "Done."
 
 
+def _published_text(status, results):
+    """The reply after a publish, from what each platform answered."""
+    name = {"facebook": "Facebook", "instagram": "Instagram"}
+    went = [name.get(k, k) for k, v in results.items() if v.get("ok") and v.get("id")]
+    bad = ["%s (%s)" % (name.get(k, k), str(v.get("error") or "refused")[:120]) for k, v in results.items() if not v.get("ok")]
+    if status == "queued":
+        return ("It's queued: Facebook is processing the video and it goes out within a minute or two. "
+                "Its status shows on the Posts page.")
+    if status == "published" and went:
+        return "Posted on %s; confirmed by the platform." % " and ".join(went)
+    if status == "partial" and went:
+        return "Posted on %s, but it did not go out on %s." % (" and ".join(went), "; ".join(bad))
+    return "It did not go out%s. It is still in your drafts." % ((": " + "; ".join(bad)) if bad else "")
+
+
 def _do_action(tid, role, uid, action, args, founder, reply):
     try:
         result, note = ja.run(tid, role, uid, action, args, founder=founder)
@@ -705,6 +810,10 @@ def _do_action(tid, role, uid, action, args, founder, reply):
     # questioning (or missing) reply is replaced by what actually happened.
     if not reply or reply.rstrip().endswith(("?", "\u061f")):
         reply = _done_text(action, args)
+    if action == "publish_post":
+        # only what Facebook / Instagram confirmed: a post id back means it is out
+        reply = _published_text(result.get("post_status"), result.get("post_results") or {})
+        return dict(result, kind="action", action=action, ok=True, reply=reply)
     if note and action == "write_campaign":
         # the model's own words could say "launched"; only what happened is said
         reply = note + "."
@@ -722,6 +831,32 @@ def make_console_router():
             x_role: str | None = Header(None),
             authorization: str | None = Header(None),
             td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """One turn with Jarvis, kept in the person's conversation (app/jarvis_memory.py).
+        What they said is saved first; the history the model reads comes from the
+        database; Jarvis's answer (or the error) is saved after."""
+        from . import jarvis_memory as jm
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session,
+                                   target=body.get("tenant_id"))
+        if not jm.is_person(uid):       # a service token or dev header: answer, keep nothing
+            return _ask(response, body, x_tenant_id, x_role, authorization, td_session)
+        said = (str(body.get("said") or "").strip() or "Yes") if body.get("confirm") else (body.get("message") or "").strip()
+        conv = jm.open_conversation(tid, role, uid, body.get("conversation_id"), said)
+        response.headers["X-Jarvis-Conversation"] = conv
+        body = dict(body, history=jm.history(tid, role, conv))
+        if said:
+            jm.add_message(tid, role, conv, "user", said[:2000], "confirm" if body.get("confirm") else "message")
+        try:
+            out = _ask(response, body, x_tenant_id, x_role, authorization, td_session)
+        except HTTPException as e:
+            jm.add_message(tid, role, conv, "jarvis", str(e.detail)[:1000], "error", {"status": e.status_code})
+            raise HTTPException(e.status_code, e.detail, headers={"X-Jarvis-Conversation": conv})
+        meta = {k: out[k] for k in ("action", "ok", "navigate", "post_status", "post_results") if k in out}
+        if out.get("post") and isinstance(out["post"], dict):
+            meta["post"] = {"id": str(out["post"].get("id")), "status": out["post"].get("status")}
+        jm.add_message(tid, role, conv, "jarvis", out.get("reply") or "", out.get("kind"), meta)
+        return dict(out, conversation_id=conv)
+
+    def _ask(response, body, x_tenant_id, x_role, authorization, td_session):
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session,
                                    target=body.get("tenant_id"))
         try:
@@ -768,7 +903,7 @@ def make_console_router():
             # box: a second full pass through the model chain turns a slow
             # answer into a minute of silence, and silence reads as broken.
             with ai_fast():
-                out = generate_json(system, _with_facts(tid, role, message, _history(body.get("history"))),
+                out = generate_json(system, _with_facts(tid, role, message, _history(body.get("history")), uid),
                                     required_keys=("kind",), _retry=False)
             response.headers["Server-Timing"] = "think;dur=%d" % int((time.time() - t0) * 1000)
             response.headers["X-Jarvis-Model"] = ai_last_model() or ""
@@ -817,6 +952,14 @@ def make_console_router():
                         "confirm": ja.seal(tid, uid, role, action, args)}
             return _do_action(tid, role, uid, action, args, founder, reply)
         if kind in ("teach", "dashboard", "post", "business"):
+            # these change things here, not through another API, so the team
+            # role (app/roles.py) is checked here as the middleware would
+            need = {"post": ("marketing", "create"), "business": ("business", "edit"),
+                    "teach": ("business", "edit"), "dashboard": ("admin", "manage")}[kind]
+            if not _role_may(uid, *need):
+                from .roles import SECTIONS
+                return {"kind": "question", "reply": "Your role cannot change %s, so I have left it as it is. "
+                                                     "The owner can do it or give your role that permission." % SECTIONS[need[0]]}
             _forget_facts(tid)
 
         if kind == "teach":

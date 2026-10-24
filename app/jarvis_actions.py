@@ -364,7 +364,10 @@ def run(tid, role, uid, action, args, founder=False):
             note = "the video is being processed and goes out within a minute or two"
         elif bad:
             note = "but it did not go out on %s" % "; ".join(bad)
-        return {"refresh": ["posts"], "post": out.get("post")}, note
+        # what the platforms confirmed, so the reply never says more than happened
+        return {"refresh": ["posts"], "post": out.get("post"), "post_status": out.get("status"),
+                "post_results": {k: {"ok": bool((v or {}).get("ok")), "id": (v or {}).get("id"),
+                                     "error": (v or {}).get("error")} for k, v in res.items()}}, note
     if action == "write_campaign":
         # Writes a DRAFT through the planner (same owner + Pro checks as the
         # Campaigns page) and puts the attached picture on it. It never

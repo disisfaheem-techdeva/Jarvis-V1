@@ -79,9 +79,9 @@ PRESETS = {
 
 # The address a request goes to -> the section it belongs to. Longest match wins.
 SECTION_BY_PATH = [
-    # dashboard: overview, reports, alerts
-    ("/portal/summary", "dashboard"), ("/portal/report", "dashboard"), ("/report", "dashboard"), ("/incidents", "dashboard"),
-    ("/alerts", "dashboard"), ("/attribution", "marketing"), ("/summary", "dashboard"),
+    # dashboard: overview (Reports sit under Business, 24 Oct 2026)
+    ("/portal/summary", "dashboard"), ("/portal/report", "business"), ("/report", "business"), ("/incidents", "dashboard"),
+    ("/attribution", "marketing"), ("/summary", "dashboard"),
     # Jarvis and the AI team
     ("/console", "jarvis"), ("/client/request", "jarvis"), ("/speak", "jarvis"), ("/tasks", "jarvis"), ("/portal/deliverables", "jarvis"),
     ("/policies", "admin"), ("/brain", "jarvis"), ("/orchestrator", "jarvis"), ("/ai", "jarvis"), ("/work", "jarvis"),
@@ -119,8 +119,12 @@ SECTION_BY_PATH.sort(key=lambda x: -len(x[0]))
 # open to every signed-in login whatever its role: who am I, signing in and out,
 # the business's name and look, and what the dashboard needs to draw itself
 ALWAYS_EXACT = {"/me", "/console/prefs", "/business-profile", "/categories", "/brand", "/brand/logo", "/portal/config",
-                "/health", "/team/roles/mine", "/alerts/checks"}
-ALWAYS_PREFIX = ("/auth/", "/public/", "/media/", "/assets/")
+                "/health", "/team/roles/mine",
+                # talking to Jarvis: open to every login; what Jarvis shows and does is
+                # limited to the person's role inside it (console._facts_for, _role_may,
+                # and its actions go through this same check)
+                "/console", "/console/speak"}
+ALWAYS_PREFIX = ("/auth/", "/public/", "/media/", "/assets/", "/console/conversations")
 PAGES = ("/", "/dashboard", "/login", "/pin", "/reset", "/portal", "/onboarding", "/techdeva", "/signup",
          "/orders-view", "/storefront-view", "/plans")
 APPROVE_WORDS = ("approve", "reject", "publish", "launch", "resume", "pause", "approve-week", "void", "dismiss", "apply")
