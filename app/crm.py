@@ -339,6 +339,107 @@ def make_crm_router(identity):
             cur.execute("SELECT id, name FROM users ORDER BY name")
             return {"people": [{"id": str(r["id"]), "name": r["name"], "me": str(r["id"]) == str(uid)} for r in cur.fetchall()]}
 
+    # ------------------------------------------------------------------ figures
+    @router.get("/overview")
+    def overview(days: int = Query(30, ge=7, le=365), owner: str = "",
+                 x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                 authorization: str | None = Header(None), td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """CRM figures, each with its definition (docs/CRM-UPGRADE.md, Phase D). Values on a
+        lead are estimates written on the lead, not money received: that is in Finance."""
+        tid, role, uid = who(x_tenant_id, x_role, authorization, td_session)
+        scope, sargs = "", []
+        if owner == "me":
+            if not _is_person(uid):
+                raise HTTPException(400, "Sign in as a person to see your own figures.")
+            scope, sargs = " AND l.assigned_operator = %s", [str(uid)]
+        elif owner:
+            scope, sargs = " AND l.assigned_operator = %s", [_uuid(owner, "person")]
+        with tenant_session(tid, role) as cur:
+            tz = _tz(cur)
+            cur.execute("SELECT (now() AT TIME ZONE %s)::date - %s + 1 AS since", (tz, days))
+            since = cur.fetchone()["since"]
+            per = "(l.created_at AT TIME ZONE %s)::date >= %s"
+            cur.execute("""SELECT count(*) AS total,
+                                  count(*) FILTER (WHERE """ + per + """) AS new,
+                                  count(*) FILTER (WHERE l.status::text IN ('qualified','booked','showed')) AS qualified,
+                                  count(*) FILTER (WHERE l.status::text <> ALL(%s)) AS open,
+                                  COALESCE(sum(l.est_revenue) FILTER (WHERE l.status::text <> ALL(%s)), 0) AS open_value,
+                                  count(*) FILTER (WHERE l.status = 'sold' AND (coalesce(l.status_changed_at, l.updated_at) AT TIME ZONE %s)::date >= %s) AS won,
+                                  COALESCE(sum(l.est_revenue) FILTER (WHERE l.status = 'sold'
+                                           AND (coalesce(l.status_changed_at, l.updated_at) AT TIME ZONE %s)::date >= %s), 0) AS won_value,
+                                  count(*) FILTER (WHERE l.status = 'lost' AND (coalesce(l.status_changed_at, l.updated_at) AT TIME ZONE %s)::date >= %s) AS lost,
+                                  count(*) FILTER (WHERE """ + per + """ AND (l.status = 'sold' OR l.converted_customer_id IS NOT NULL)) AS cohort_won,
+                                  count(*) FILTER (WHERE l.status::text <> ALL(%s) AND NOT EXISTS (
+                                        SELECT 1 FROM crm_activities a WHERE a.lead_id = l.id AND a.done_at IS NULL)) AS no_followup
+                             FROM leads l WHERE true""" + scope,
+                        [tz, since, list(CLOSED), list(CLOSED), tz, since, tz, since, tz, since, tz, since, list(CLOSED)] + sargs)
+            k = {key: (float(v) if key.endswith("value") else int(v)) for key, v in cur.fetchone().items()}
+            ascope = scope.replace("l.assigned_operator", "a.assigned_to")
+            cur.execute("""SELECT count(*) FILTER (WHERE a.due_at < now()) AS overdue,
+                                  count(*) FILTER (WHERE (a.due_at AT TIME ZONE %s)::date = (now() AT TIME ZONE %s)::date) AS today,
+                                  count(*) AS open FROM crm_activities a WHERE a.done_at IS NULL AND a.kind <> 'note'""" + ascope,
+                        [tz, tz] + sargs)
+            fu = {key: int(v) for key, v in cur.fetchone().items()}
+            cur.execute("""SELECT count(*) AS n FROM crm_activities a WHERE a.done_at IS NOT NULL AND a.kind <> 'note'
+                             AND (a.done_at AT TIME ZONE %s)::date >= %s""" + ascope, [tz, since] + sargs)
+            fu["done"] = int(cur.fetchone()["n"])
+            cur.execute("""SELECT l.status::text AS status, count(*) AS n, COALESCE(sum(l.est_revenue), 0) AS value
+                             FROM leads l WHERE true""" + scope + " GROUP BY 1", sargs)
+            stages = {r["status"]: {"count": int(r["n"]), "value": float(r["value"])} for r in cur.fetchall()}
+            cur.execute("""SELECT l.source::text AS source, count(*) AS leads,
+                                  count(*) FILTER (WHERE l.status = 'sold' OR l.converted_customer_id IS NOT NULL) AS converted
+                             FROM leads l WHERE """ + per + scope + " GROUP BY 1 ORDER BY 2 DESC", [tz, since] + sargs)
+            sources = [{"source": r["source"], "leads": int(r["leads"]), "converted": int(r["converted"]),
+                        "rate": round(100.0 * int(r["converted"]) / int(r["leads"]), 1) if int(r["leads"]) >= 5 else None}
+                       for r in cur.fetchall()]
+            cur.execute("""SELECT extract(epoch FROM avg(l.status_changed_at - l.created_at)) / 86400 AS days, count(*) AS n
+                             FROM leads l WHERE l.status = 'sold' AND l.status_changed_at IS NOT NULL
+                              AND (l.status_changed_at AT TIME ZONE %s)::date >= %s""" + scope, [tz, since] + sargs)
+            cyc = cur.fetchone()
+            team = None
+            if role in ("owner", "techdeva_admin"):
+                cur.execute("""SELECT u.id, u.name,
+                                      (SELECT count(*) FROM leads l WHERE l.assigned_operator = u.id AND l.status::text <> ALL(%s)) AS open_leads,
+                                      (SELECT count(*) FROM crm_activities a WHERE a.assigned_to = u.id AND a.done_at IS NULL
+                                          AND a.kind <> 'note' AND a.due_at < now()) AS overdue,
+                                      (SELECT count(*) FROM crm_activities a WHERE a.assigned_to = u.id AND a.done_at IS NOT NULL
+                                          AND a.kind <> 'note' AND (a.done_at AT TIME ZONE %s)::date >= %s) AS done,
+                                      (SELECT count(*) FROM leads l WHERE l.assigned_operator = u.id AND l.status = 'sold'
+                                          AND (coalesce(l.status_changed_at, l.updated_at) AT TIME ZONE %s)::date >= %s) AS won
+                                 FROM users u ORDER BY u.name""", (list(CLOSED), tz, since, tz, since))
+                team = [dict(_iso(r)) for r in cur.fetchall()]
+                cur.execute("SELECT count(*) AS n FROM leads WHERE assigned_operator IS NULL AND status::text <> ALL(%s)", (list(CLOSED),))
+                unassigned = int(cur.fetchone()["n"])
+            cur.execute("""SELECT a.kind, a.title, a.done_at, a.outcome, l.name AS lead_name, a.lead_id, c.name AS customer_name, a.customer_id
+                             FROM crm_activities a LEFT JOIN leads l ON l.id = a.lead_id LEFT JOIN customers c ON c.id = a.customer_id
+                            WHERE a.done_at IS NOT NULL""" + ascope + " ORDER BY a.done_at DESC LIMIT 8", sargs)
+            recent = [_iso(r) for r in cur.fetchall()]
+        cohort = k["new"]
+        return {
+            "days": days, "since": str(since), "timezone": tz,
+            "leads": {"total": k["total"], "new": k["new"], "qualified": k["qualified"], "open": k["open"],
+                      "no_followup": k["no_followup"]},
+            "pipeline": {"open_count": k["open"], "open_value": k["open_value"], "by_stage": stages},
+            "won": {"count": k["won"], "value": k["won_value"], "lost": k["lost"]},
+            "conversion": {"converted": k["cohort_won"], "of": cohort,
+                           "rate": round(100.0 * k["cohort_won"] / cohort, 1) if cohort >= 5 else None,
+                           "note": None if cohort >= 5 else "Fewer than 5 new leads in this period, so no rate is shown."},
+            "followups": fu, "sources": sources,
+            "cycle_days": {"value": round(float(cyc["days"]), 1) if cyc["days"] is not None and int(cyc["n"]) >= 3 else None,
+                           "from": int(cyc["n"]), "note": "Counted only for leads moved to sold since the CRM upgrade, and shown from 3 of them."},
+            "team": team, "unassigned": unassigned if team is not None else None, "recent": recent,
+            "definitions": {
+                "new": "Leads created in the period.",
+                "qualified": "Leads now at the qualified, booked or showed stage.",
+                "open": "Leads not sold, lost or spam, whenever they arrived.",
+                "open_value": "The likely value written on open leads: an estimate, not money.",
+                "won": "Leads moved to sold in the period, with the value written on them. Money received is in Finance.",
+                "conversion": "Of the leads created in the period, how many were sold or became customers.",
+                "followups": "Your team's planned follow-ups. Overdue ones stay until done or moved.",
+                "no_followup": "Open leads with nothing planned.",
+            },
+        }
+
     # ------------------------------------------------------------------ activities
     def _check_links(cur, lead_id, customer_id, assigned_to):
         if lead_id:

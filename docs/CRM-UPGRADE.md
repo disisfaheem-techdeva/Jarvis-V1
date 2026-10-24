@@ -73,3 +73,22 @@ Customers, Pipeline, Appointments, Calendar); new screens are added after them.
 - **Customers**: each customer's page also shows planned follow-ups and the history of calls, visits and notes.
 - **Pipeline, Appointments, Calendar, Patients/Customers lists**: unchanged.
 - Checked in a browser at 1440px dark and light and 390px: the whole journey (add, plan, log, move, edit, search, saved view, done, convert, customer page), no sideways scroll, axe WCAG 2.2 AA clean, 44px targets, no script errors. Test data removed; leads proven unchanged.
+
+## Phase D: figures and reports (done)
+
+`GET /crm/overview?days=30|90|365&owner=me|<person>`, every figure with its definition in the response:
+
+| Figure | Counts |
+|---|---|
+| New leads | Leads created in the period |
+| Qualified | Leads now at qualified, booked or showed |
+| Open / open value | Leads not sold, lost or spam; the value written on them (an estimate, not money) |
+| Won / lost | Leads moved to sold / lost in the period, with the value written on them. Money received stays in Finance |
+| Conversion | Of the leads created in the period, how many were sold or became customers. Shown from 5 new leads; otherwise "—" with the reason |
+| Follow-ups | Overdue, due today, open, done in the period |
+| Nothing planned | Open leads with no planned follow-up |
+| Sources | New leads, converted and rate per source (rate from 5 leads) |
+| Days to win | Average from leads moved to sold since the upgrade, shown from 3 |
+| Team (owner only) | Per person: open leads, overdue, follow-ups done, won; open leads with nobody |
+
+Screens: four figure cards on Leads (each opens the matching list), a **CRM Reports** tab after Follow-ups (summary, pipeline by stage, sources, team, recently done, possible duplicates for review, definitions), and the Pipeline shows each stage's value and opens a lead from its card (drag and the stage menu unchanged). Nothing added to the main Dashboard. Tests: tests/test_crm_reports.py (2) check every figure against rows; browser checks pass at 1440 dark and light and 390, axe clean.

@@ -192,7 +192,8 @@
   & .jvc-t { @apply text-sm font-medium; }
 
   /* Dashboard 2.0: the Overview's main area */
-  & .dv { @apply grid gap-6; }
+  & .dv { @apply grid grid-cols-[minmax(0,1fr)] gap-6; }
+  & .dv > * { @apply min-w-0; }
   & .dv h1 { @apply mb-1; }
   & .dv .sub { @apply mb-0; }
   & .dv-head { @apply flex flex-wrap items-end justify-between gap-4; }
@@ -371,6 +372,7 @@
   & .crm-table input[type="checkbox"] { @apply h-5 w-5 accent-[var(--accent)]; }
   & .crm-name a { @apply inline-flex min-h-6 items-center font-medium; }
   & .crm-sub { @apply block text-xs text-fg-subtle; }
+  & .crm-sub a, & .crm-tl a, & .crm-dup a { @apply underline underline-offset-2; }
   & .crm-muted { @apply text-sm text-fg-subtle; }
   & .crm-late { @apply font-medium text-danger; }
   & .crm-num { @apply tabular-nums; }
@@ -407,4 +409,10 @@
   & .crm-tl-k { @apply text-xs font-medium tracking-[0.04em] text-fg-subtle uppercase; }
   & .crm-tl a { @apply inline-flex min-h-6 items-center; }
   & .crm-custfu { @apply mt-4; }
+  & .crm-kpis { @apply mb-1; }
+  & button.crm-kpi { @apply cursor-pointer text-left font-[inherit] hover:border-accent-line hover:bg-accent-tint focus-visible:[box-shadow:var(--focus-ring)] focus-visible:outline-none; }
+  & .crm-colval { @apply block w-full text-xs font-normal text-fg-subtle tabular-nums; }
+  & .tdm-card[data-lead] { @apply cursor-pointer focus-visible:[box-shadow:var(--focus-ring)] focus-visible:outline-none; }
+  & .crm-defs { @apply mt-3; }
+  & .crm-defs dt { @apply capitalize; }
 }

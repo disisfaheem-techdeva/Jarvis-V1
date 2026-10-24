@@ -113,7 +113,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=be50922b1a">
+<link rel="stylesheet" href="/assets/td.css?v=a7fd89f3f7">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -7994,7 +7994,7 @@ function typeHidden(id){
     { num:'02', name:'Jarvis & AI',    icon:'spark', ids:['console','ai','hermes','bizagent','needshuman','history','tools'], sep:true },
     { num:'03', name:'Chats',          icon:'chat',  ids:['inbox','socialinbox','calls'] },
     // Management (23 Oct 2026): the day-to-day pages sit together, Operations next to CRM and Team
-    { num:'04', name:'CRM',            icon:'users', ids:['leads','sales','clientwork','customers','pipeline','appointments','calendar','followups'], group:'Management' },
+    { num:'04', name:'CRM',            icon:'users', ids:['leads','sales','clientwork','customers','pipeline','appointments','calendar','followups','crmreports'], group:'Management' },
     { num:'05', name:'Operations',     icon:'box',   ids:['orders','inventory','dailyentry'] },
     { num:'06', name:'Team & HR',      icon:'badge', ids:['team','attendance','hr','roles'] },
     { num:'07', name:'Marketing',      icon:'mega',  ids:['marketing','posts','captions','autopilot','advisor','analytics'], sep:true },
@@ -8004,7 +8004,7 @@ function typeHidden(id){
   ];
   // the pages added in this block (they are not in NAV)
   var NEW = { history:'Execution History', tools:'Agents', pipeline:'Pipeline',
-              analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer', usage:'AI usage', roles:'Roles', bizprofile:'Business Profile', followups:'Follow-ups' };
+              analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer', usage:'AI usage', roles:'Roles', bizprofile:'Business Profile', followups:'Follow-ups', crmreports:'CRM Reports' };
   // tab names that follow the approved structure; everything else keeps its own name
   var LABEL = { overview:'Overview', console:'Jarvis Assistant', ai:'AI Agents', needshuman:'Approval Queue',
                 marketing:'Campaigns', posts:'Social Media Publisher', autopilot:'Content Calendar',
@@ -10031,7 +10031,7 @@ function crmListHTML(){
   var body;
   if (!L.length) body = empty(d.total === 0 && !f.q && !f.status && !f.owner && !f.follow && !f.source ? 'No leads yet' : 'No lead matches',
     d.total === 0 && !f.q ? 'Leads from WhatsApp, your website and ads arrive here by themselves. You can also add one.' : 'Change the search or filters.');
-  else body = '<div class="tbl-wrap"><table class="crm-table"><thead><tr><th scope="col"><input type="checkbox" id="crm-all" aria-label="Select all on this page"></th>' +
+  else body = '<div class="tbl-wrap" tabindex="0" role="region" aria-label="Leads table"><table class="crm-table"><thead><tr><th scope="col"><input type="checkbox" id="crm-all" aria-label="Select all on this page"></th>' +
     '<th scope="col">Lead</th><th scope="col">Stage</th><th scope="col">Owner</th><th scope="col">Next follow-up</th><th scope="col">Value</th><th scope="col">Source</th><th scope="col">Added</th></tr></thead><tbody>' +
     L.map(function(l){
       return '<tr><td><input type="checkbox" data-crmsel="' + esc(l.id) + '"' + (CRM.sel[l.id] ? ' checked' : '') + ' aria-label="Select ' + esc(l.name || 'lead') + '"></td>' +
@@ -10373,6 +10373,157 @@ window.addEventListener('hashchange', function(){
   if (v !== 'customers') CRM.custId = null;
   CRM.msg = null;
 });
+
+/* ---- CRM figures (Phase D): Leads page cards, the CRM Reports tab, Pipeline values ---- */
+var CRMR = { d: undefined, days: 30, owner: '', key: '', pending: null, dups: undefined, kpi: undefined, kpiAt: 0 };
+function crmrLoad(){
+  var k = CRMR.days + '|' + CRMR.owner;
+  if ((CRMR.key === k && CRMR.d !== undefined) || CRMR.pending === k) return;
+  CRMR.key = k; CRMR.d = undefined; CRMR.pending = k;
+  api('/crm/overview?days=' + CRMR.days + (CRMR.owner ? '&owner=' + encodeURIComponent(CRMR.owner) : '')).then(function(r){
+    if (CRMR.key !== k) return;
+    CRMR.pending = null;
+    CRMR.d = r.ok ? r.data : { error: (r.data && r.data.detail) || 'The figures could not be loaded.' };
+    if (currentView() === 'crmreports') renderShell();
+  });
+}
+function crmKpiLoad(force){
+  if (!force && (CRMR.kpi === null || (CRMR.kpi && Date.now() - CRMR.kpiAt < 30000))) return;
+  CRMR.kpi = null; CRMR.kpiAt = Date.now();
+  api('/crm/overview?days=30').then(function(r){ CRMR.kpi = r.ok ? r.data : { error: true }; if (currentView() === 'leads' && !hq('id')) renderShell(); });
+}
+function crmKpiHTML(){
+  var d = CRMR.kpi;
+  if (!d || d.error) return '';
+  var card = function(label, value, note, act, attn){
+    return '<button type="button" class="dv-card crm-kpi' + (attn && value > 0 ? ' attn' : '') + '" data-crmkpi="' + act + '"><span class="dv-card-label">' + esc(label) + '</span>' +
+      '<span class="dv-card-value">' + esc(Number(value).toLocaleString()) + '</span><span class="dv-card-note">' + note + '</span></button>';
+  };
+  return '<div class="dv-grid crm-kpis">' +
+    card('Open leads', d.leads.open, d.pipeline.open_value ? money(d.pipeline.open_value) + ' likely value' : 'not sold, lost or spam', 'open') +
+    card('New in 30 days', d.leads.new, 'created in the last 30 days', 'new30') +
+    card('Overdue follow-ups', d.followups.overdue, 'planned and not done in time', 'overdue', true) +
+    card('Nothing planned', d.leads.no_followup, 'open leads with no next step', 'none', true) + '</div>';
+}
+(function(){
+  var base = VIEWS.leads;
+  VIEWS.leads = function(){
+    var out = base.apply(this, arguments);
+    if (hq('id') || out.indexOf('crm-views') === -1) return out;
+    crmKpiLoad(false);
+    var at = out.indexOf('<div class="crm-views"');
+    return out.slice(0, at) + crmKpiHTML() + out.slice(at);
+  };
+})();
+function crmrTable(head, rows){
+  return '<div class="tbl-wrap" tabindex="0" role="region" aria-label="' + esc(head[0]) + ' table"><table><thead><tr>' + head.map(function(h, i){ return '<th scope="col"' + (i ? ' class="crm-num"' : '') + '>' + esc(h) + '</th>'; }).join('') +
+    '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>';
+}
+VIEWS.crmreports = function(){
+  crmTeam(); crmrLoad();
+  var own = isOwner(), d = CRMR.d;
+  var out = '<h1>CRM reports</h1><p class="sub">How leads arrive, move and turn into customers. Every figure says what it counts; values on leads are estimates, money received is in Finance.</p>';
+  out += '<div class="crm-tools"><label class="crm-lbl">Period<select class="fld" id="crmr-days">' + crmOpts([[30, 'Last 30 days'], [90, 'Last 90 days'], [365, 'Last 12 months']], CRMR.days) + '</select></label>' +
+    '<label class="crm-lbl">Whose<select class="fld" id="crmr-own">' + crmOpts([['', own ? 'Whole team' : 'Everyone'], ['me', 'Mine']].concat((own ? (CRM.team || []) : []).map(function(p){ return [p.id, p.name]; })), CRMR.owner) + '</select></label></div>';
+  if (d === undefined) return out + panel('Figures', loading('Counting…'));
+  if (d.error) return out + panel('Figures', errState(d.error));
+  var c = function(label, value, note, isMoney){
+    var has = value !== null && value !== undefined;
+    return '<div class="dv-card"><span class="dv-card-label">' + esc(label) + '</span><span class="dv-card-value' + (has ? '' : ' none') + '">' +
+      (has ? (isMoney ? money(value) : esc(typeof value === 'number' ? value.toLocaleString() : value)) : '—') + '</span><span class="dv-card-note">' + esc(note) + '</span></div>';
+  };
+  var conv = d.conversion, cyc = d.cycle_days;
+  out += '<section class="dv-sec" aria-labelledby="crmr-h1"><div class="dv-sec-head"><h2 id="crmr-h1">Summary</h2><span class="dv-asof">Since ' + esc(d.since) + '</span></div><div class="dv-grid">' +
+    c('New leads', d.leads.new, 'created in the period') +
+    c('Conversion', conv.rate === null ? null : conv.rate + '%', conv.rate === null ? conv.note : conv.converted + ' of ' + conv.of + ' new leads sold or became customers') +
+    c('Won', d.won.count, d.won.value ? 'PKR ' + Number(d.won.value).toLocaleString() + ' written on them' : 'moved to sold in the period') +
+    c('Lost', d.won.lost, 'moved to lost in the period') +
+    c('Open pipeline', d.pipeline.open_value, d.pipeline.open_count + ' open leads; an estimate, not money', true) +
+    c('Overdue follow-ups', d.followups.overdue, d.followups.open + ' planned in all') +
+    c('Days to win', cyc.value, cyc.value === null ? 'Needs 3 leads won since the upgrade (' + cyc.from + ' so far)' : 'average from ' + cyc.from + ' leads') + '</div></section>';
+  var st = d.pipeline.by_stage, order = ['new', 'qualified', 'booked', 'showed', 'sold', 'lost', 'fake'];
+  out += '<section class="dv-sec" aria-labelledby="crmr-h2"><div class="dv-sec-head"><h2 id="crmr-h2">Pipeline by stage</h2><a class="btn" href="#/pipeline">Open pipeline</a></div>' +
+    crmrTable(['Stage', 'Leads', 'Likely value'], order.filter(function(s){ return st[s]; }).map(function(s){
+      return '<tr><td><a href="#/leads" data-crmstage="' + s + '">' + esc(stageName(s)) + '</a></td><td class="crm-num">' + esc(st[s].count) + '</td><td class="crm-num">' + (st[s].value ? money(st[s].value) : '—') + '</td></tr>';
+    })) + '<p class="dv-foot">All leads, whenever they arrived. The value is what was written on each lead.</p></section>';
+  out += '<section class="dv-sec" aria-labelledby="crmr-h3"><div class="dv-sec-head"><h2 id="crmr-h3">Where leads come from</h2></div>' +
+    (d.sources.length ? crmrTable(['Source', 'New leads', 'Converted', 'Rate'], d.sources.map(function(s){
+      return '<tr><td>' + esc(CRM_SRC[s.source] || s.source) + '</td><td class="crm-num">' + esc(s.leads) + '</td><td class="crm-num">' + esc(s.converted) + '</td><td class="crm-num">' +
+        (s.rate === null ? '<span class="crm-muted">too few</span>' : esc(s.rate) + '%') + '</td></tr>'; })) +
+      '<p class="dv-foot">A rate is shown from 5 leads, so a single sale does not look like 100%.</p>' : '<p class="crm-muted">No new leads in this period.</p>') + '</section>';
+  if (d.team) out += '<section class="dv-sec" aria-labelledby="crmr-h4"><div class="dv-sec-head"><h2 id="crmr-h4">Team</h2>' +
+    (d.unassigned ? '<a class="btn" href="#/leads" data-crmunassigned="1">' + esc(d.unassigned) + ' open lead' + (d.unassigned === 1 ? '' : 's') + ' with nobody</a>' : '') + '</div>' +
+    crmrTable(['Person', 'Open leads', 'Overdue', 'Follow-ups done', 'Won'], d.team.map(function(t){
+      return '<tr><td>' + esc(t.name) + '</td><td class="crm-num">' + esc(t.open_leads) + '</td><td class="crm-num">' + (t.overdue ? '<span class="crm-late">' + esc(t.overdue) + '</span>' : '0') +
+        '</td><td class="crm-num">' + esc(t.done) + '</td><td class="crm-num">' + esc(t.won) + '</td></tr>'; })) + '</section>';
+  out += '<section class="dv-sec" aria-labelledby="crmr-h5"><div class="dv-sec-head"><h2 id="crmr-h5">Recently done</h2><a class="btn" href="#/followups">Follow-ups</a></div>' +
+    (d.recent.length ? crmTimeline(d.recent.map(function(a){ return { k: CRM_KIND[a.kind] || a.kind, t: a.title,
+      s: (a.outcome ? esc(a.outcome) + ' · ' : '') + (a.lead_name || a.customer_name ? '<a href="' + (a.lead_id ? '#/leads?id=' + esc(a.lead_id) : '#/customers?c=' + esc(a.customer_id)) + '">' + esc(a.lead_name || a.customer_name) + '</a>' : ''), at: a.done_at }; }))
+      : '<p class="crm-muted">Nothing logged yet.</p>') + '</section>';
+  if (CRMR.dups === undefined) out += '<section class="dv-sec"><div class="dv-sec-head"><h2>Possible duplicates</h2><button class="btn" type="button" id="crmr-dups">Check now</button></div><p class="crm-muted">Finds leads and customers with the same phone number or email. Nothing is merged for you.</p></section>';
+  else if (CRMR.dups) out += '<section class="dv-sec" aria-labelledby="crmr-h6"><div class="dv-sec-head"><h2 id="crmr-h6">Possible duplicates</h2></div>' +
+    (CRMR.dups.length ? '<ul class="crm-fu">' + CRMR.dups.map(function(g){ return '<li><div><b>' + esc(g.reason) + '</b><span class="crm-sub">' + g.records.map(function(x){
+      return '<a href="' + (x.type === 'lead' ? '#/leads?id=' + esc(x.id) : '#/customers?c=' + esc(x.id)) + '">' + esc(x.name) + '</a> (' + esc(x.type) + ')'; }).join(' · ') + '</span></div></li>'; }).join('') + '</ul>'
+      : '<p class="crm-muted">None found.</p>') + '<p class="dv-foot">Two people can share a number, so each one is for you to check.</p></section>';
+  out += '<details class="dv-sec"><summary>What each figure counts</summary><dl class="crm-dl crm-defs">' + Object.keys(d.definitions).map(function(k){
+    return '<dt>' + esc(k.replace(/_/g, ' ')) + '</dt><dd>' + esc(d.definitions[k]) + '</dd>'; }).join('') + '</dl></details>';
+  return '<div class="dv">' + out + '</div>';
+};
+function crmrWire(){
+  var g = function(id){ return document.getElementById(id); };
+  if (g('crmr-days')) g('crmr-days').onchange = function(){ CRMR.days = Number(g('crmr-days').value); crmrLoad(); renderShell(); };
+  if (g('crmr-own')) g('crmr-own').onchange = function(){ CRMR.owner = g('crmr-own').value; crmrLoad(); renderShell(); };
+  if (g('crmr-dups')) g('crmr-dups').onclick = function(){
+    g('crmr-dups').disabled = true;
+    api('/crm/duplicates').then(function(r){ CRMR.dups = r.ok ? r.data.groups : null; renderShell(); });
+  };
+  document.querySelectorAll('[data-crmstage]').forEach(function(a){ a.onclick = function(){ CRM.f = { q: '', status: a.getAttribute('data-crmstage'), source: '', owner: '', follow: '', sort: 'newest', page: 1 }; CRM.list = undefined; CRM.key = ''; }; });
+  document.querySelectorAll('[data-crmunassigned]').forEach(function(a){ a.onclick = function(){ CRM.f = { q: '', status: '', source: '', owner: 'none', follow: '', sort: 'newest', page: 1 }; CRM.list = undefined; CRM.key = ''; }; });
+  document.querySelectorAll('[data-crmkpi]').forEach(function(b){ b.onclick = function(){
+    var k = b.getAttribute('data-crmkpi'), f = { q: '', status: '', source: '', owner: '', follow: '', sort: 'newest', page: 1 };
+    if (k === 'overdue' || k === 'none') f.follow = k;
+    if (k === 'open') f.status = 'new,qualified,booked,showed';
+    CRM.f = f; CRM.sel = {}; crmLoad(true); renderShell();
+  }; });
+}
+/* Pipeline: each stage's likely value (all leads, from the server), and a card opens the lead */
+(function(){
+  var base = VIEWS.pipeline;
+  if (!base) return;
+  VIEWS.pipeline = function(){
+    var out = base.apply(this, arguments);
+    crmKpiLoad(false);
+    var st = CRMR.kpi && CRMR.kpi.pipeline && CRMR.kpi.pipeline.by_stage;
+    if (st) out = out.replace(/(<div class="tdm-col" data-stage="([a-z]+)"><div class="tdm-col-head"><span>[^<]*<\/span><span class="mono">[^<]*<\/span>)/g, function(m, all, s){
+      var v = st[s];
+      return m + (v && v.value ? '<span class="crm-colval">' + money(v.value) + '</span>' : '');
+    });
+    return out;
+  };
+})();
+(function(){
+  var _r = renderShell;
+  renderShell = function(){
+    var r = _r.apply(this, arguments);
+    var v = currentView();
+    if (v === 'crmreports' || v === 'leads') setTimeout(crmrWire, 0);
+    if (v === 'pipeline') setTimeout(function(){
+      // a card opens the lead; dragging and the stage menu work as before
+      document.querySelectorAll('.tdm-card[data-lead]:not([data-crmopen])').forEach(function(c){
+        c.setAttribute('data-crmopen', '1');
+        if (!c.hasAttribute('tabindex')) c.setAttribute('tabindex', '0');
+        c.addEventListener('click', function(e){ if (e.target.closest('select')) return; location.hash = '#/leads?id=' + c.getAttribute('data-lead'); });
+        c.addEventListener('keydown', function(e){ if (e.key === 'Enter' && !e.target.closest('select')) location.hash = '#/leads?id=' + c.getAttribute('data-lead'); });
+      });
+    }, 0);
+    return r;
+  };
+})();
+
+(function(){                       // a change to a lead or follow-up refreshes the figures too
+  var base = crmAfter;
+  crmAfter = function(){ CRMR.kpi = undefined; CRMR.d = undefined; CRMR.key = ''; return base.apply(this, arguments); };
+})();
 
 boot();
 </script>
