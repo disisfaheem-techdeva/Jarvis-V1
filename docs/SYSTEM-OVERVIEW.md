@@ -190,6 +190,12 @@ TechDeva runs everything from a **founder console**: clients, money, sales team,
   - layouts: Offer, New service, Before/After.
 - **AI pictures**, described in words: 20 a day on a plan, 5 in the trial.
 - **Videos:** MP4/MOV up to 100 MB, trimmed and posted as a Facebook video and an **Instagram Reel**.
+- **Autopilot Gallery** (Marketing › Autopilot Gallery, 24 Oct 2026; docs/AUTOPILOT-GALLERY.md):
+  - upload many photos and videos;
+  - choose days and times;
+  - Jarvis looks at each picture and writes captions from the business's own services and prices;
+  - staff edit, the owner approves;
+  - each post goes out at its time on Facebook and Instagram.
 
 **Campaigns (ads)**
 - Live Meta and Google ad results.
@@ -248,6 +254,7 @@ TechDeva runs everything from a **founder console**: clients, money, sales team,
   - the bridge passes the QR code to the dashboard;
   - eight checks (T1 to T8) must pass before an agent is ready.
 - Scheduled posts go out on time; videos and Reels are posted in the background.
+- Approved Autopilot Gallery posts are published by the worker at their time, exactly once. A lost Facebook login pauses the campaign and asks the owner to reconnect.
 - Old video files are cleaned up: after 2 days if unused, 30 days after posting.
 - Trial data is deleted 15 days after an unpaid trial, with a warning 3 days before.
 - The founder is alerted to buy a new server at 8 paying clients.
