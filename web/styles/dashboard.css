@@ -293,4 +293,59 @@
   & .dvj-input { @apply grid flex-none gap-2 border-t border-line p-4; }
   & .dvj-input .jv-mic { @apply h-11 w-full; }
   & .dvj-input .btn.primary { @apply h-11; }
+
+  /* Business profile (website agent) */
+  & .bi { @apply grid grid-cols-[minmax(0,1fr)] gap-4; }
+  & .bi > *, & .bi-row > * { @apply min-w-0; }
+  & .bi-sec { @apply rounded-[var(--card-radius)] border border-line bg-surface p-4 sm:p-5; }
+  & .bi-sec > summary { @apply min-h-11 content-center; }
+  & .bi-sec-head { @apply mb-3 flex flex-wrap items-center justify-between gap-2; }
+  & .bi-sec-head h3, & .bi-changes h3 { @apply m-0 font-display text-base font-semibold text-fg; }
+  & .bi-sec .btn, & .bi-acts .btn, & .bi-status .btn { @apply h-11; }
+  & .bi-row { @apply grid gap-1 border-t border-line py-2.5 first:border-t-0 sm:grid-cols-[180px_1fr_auto] sm:items-start sm:gap-3; }
+  & .bi-k { @apply text-[13px] font-medium text-fg-muted; }
+  & .bi-v { @apply text-sm text-fg; }
+  & .bi-none { @apply text-sm text-fg-subtle; }
+  & .bi-meta { @apply flex flex-wrap items-center gap-1.5; }
+  & .bi-ul { @apply m-0 grid list-none gap-1.5 p-0; }
+  & .bi-ul li { @apply flex flex-wrap items-center gap-2; }
+  & .bi-plain { @apply m-0 grid gap-1.5 pl-5 text-sm text-fg; }
+  & .bi-badge { @apply inline-flex h-6 items-center rounded-full px-2 text-xs font-medium whitespace-nowrap; }
+  & .bi-badge.ok { @apply bg-success-tint text-success; }
+  & .bi-badge.info { @apply bg-info-tint text-info; }
+  & .bi-badge.warn { @apply border border-[color-mix(in_oklab,var(--warning-ink)_55%,transparent)] bg-warning-tint text-fg; }
+  & .bi-badge.own { @apply bg-accent-tint text-accent-ink; }
+  & .bi-src { @apply inline-flex flex-wrap gap-1.5 text-xs; }
+  & .bi-src a { @apply inline-flex min-h-6 min-w-6 items-center font-mono break-all max-sm:min-h-11; }
+  & .bi-plain a, & .bi-v a { @apply inline-flex min-h-6 items-center break-all max-sm:min-h-11; }
+  & .bi-form { @apply grid gap-3; }
+  & .bi-lbl { @apply grid gap-1.5 text-[13px] font-medium text-fg-muted; }
+  & .bi-lbl .fld { @apply w-full; }
+  & .bi-check { @apply flex min-h-11 cursor-pointer items-center gap-2.5 text-sm text-fg; }
+  & .bi-check input { @apply h-6 w-6 flex-none accent-[var(--accent)]; }
+  & .bi-acts { @apply flex flex-wrap gap-2; }
+  & .bi-note { @apply m-0 text-xs text-fg-subtle; }
+  & .bi-msg { @apply m-0 mt-2 rounded-[var(--p-radius-sm)] px-3 py-2 text-sm; }
+  & .bi-msg.ok { @apply bg-success-tint text-success; }
+  & .bi-msg.bad { @apply bg-danger-tint text-danger; }
+  & .bi-msg.warn { @apply bg-warning-tint text-warning; }
+  & .bi-run { @apply mt-4 grid gap-2.5 rounded-[var(--p-radius-lg)] border border-line bg-surface-2 p-4; }
+  & .bi-run-top { @apply flex flex-wrap items-baseline justify-between gap-2; }
+  & .bi-run-top .card-note { @apply break-all; }
+  & .bi-counts { @apply flex flex-wrap gap-x-5 gap-y-1 text-sm text-fg-muted; }
+  & .bi-counts b { @apply text-fg tabular-nums; }
+  & .bi-pages summary { @apply min-h-11 content-center; }
+  & .bi-status { @apply flex flex-wrap items-center justify-between gap-3 rounded-[var(--card-radius)] border px-4 py-3 text-sm; }
+  & .bi-status.ok { @apply border-[color-mix(in_oklab,var(--success-ink)_40%,transparent)] bg-success-tint text-success; }
+  & .bi-status.warn { @apply border-[color-mix(in_oklab,var(--warning-ink)_40%,transparent)] bg-warning-tint text-fg; }
+  & .bi-changes { @apply border-[color-mix(in_oklab,var(--warning-ink)_45%,transparent)]; }
+  & .bi-change { @apply mt-3 grid gap-1 border-t border-line pt-3 text-sm text-fg first:border-t-0; }
+  & .bi-faqs { @apply mt-2 grid gap-1; }
+  & .bi-faqs summary { @apply min-h-11 content-center text-sm; }
+  & .bi-faqs p { @apply m-0 pb-2 text-sm text-fg-muted; }
+  & .bi-logo { @apply max-h-14 max-w-40 rounded-md border border-line bg-surface-2 object-contain p-1; }
+  & .bi-sw { @apply flex flex-wrap gap-2; }
+  & .bi-swatch { @apply inline-flex items-center gap-1.5 font-mono text-xs text-fg-muted; }
+  & .bi-swatch i { @apply inline-block h-5 w-5 rounded border border-line-strong; }
+  & .bi-more { @apply h-11 justify-self-start; }
 }

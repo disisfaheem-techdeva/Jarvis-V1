@@ -31,7 +31,8 @@ WHAT IT DELIBERATELY DOES NOT DO
 It does not pin the resolved address into the connection, so a DNS-rebinding
 race remains: the attacker must flip DNS between our resolution and the socket
 connect. Closing that properly needs a custom connection adapter. Stated plainly
-rather than left implied.
+rather than left implied. get_pinned() below is that: it connects to the very
+address it checked (the business website agent uses it).
 
 ALLOW_PRIVATE_FETCH=true disables every address check. It exists so a developer
 can analyse a site on their own machine. It must never be set on the VPS.
@@ -142,6 +143,88 @@ def get(url: str, *, headers: dict | None = None, timeout: float | None = None,
         resp._content_consumed = True
         resp.url = current
         return resp
+    raise BlockedURL("too many redirects")
+
+
+class PinnedResponse:
+    """What get_pinned returns: enough of requests.Response for a crawler."""
+
+    def __init__(self, url, status_code, headers, content, truncated):
+        self.url, self.status_code, self.headers = url, status_code, headers
+        self.content, self.truncated = content, truncated
+
+    @property
+    def text(self):
+        ct = self.headers.get("content-type", "")
+        enc = "utf-8"
+        if "charset=" in ct:
+            enc = ct.split("charset=", 1)[1].split(";")[0].strip().strip('"') or "utf-8"
+        try:
+            return self.content.decode(enc, errors="replace")
+        except LookupError:
+            return self.content.decode("utf-8", errors="replace")
+
+
+def _pin(url: str):
+    """Check the URL and return (address to connect to, parts, port). The same
+    address is then used for the connection, so DNS cannot change in between."""
+    assert_fetchable(url)
+    parts = urlparse(url.strip())
+    port = parts.port or (443 if parts.scheme.lower() == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(parts.hostname, port, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        raise BlockedURL("that hostname does not resolve")
+    for info in infos:
+        if not _dev_bypass() and not _address_is_public(info[4][0]):
+            raise BlockedURL("that address is not on the public internet")
+    return infos[0][4][0], parts, port
+
+
+def get_pinned(url: str, *, headers: dict | None = None, timeout: float | None = None,
+               max_bytes: int = MAX_BYTES) -> PinnedResponse:
+    """get(), but the connection goes to the address that was checked (closes the
+    DNS-rebinding race described above). TLS is still verified against the
+    hostname. Compressed bodies are capped after decompression, so a small
+    gzip bomb cannot become a huge page. Used by the business website agent."""
+    import certifi
+    import urllib3
+    timeout = timeout or DEFAULT_TIMEOUT
+    current = url.strip()
+    for _hop in range(MAX_REDIRECTS + 1):
+        ip, parts, port = _pin(current)
+        host = parts.hostname
+        path = urlunparse(("", "", parts.path or "/", parts.params, parts.query, ""))
+        hdrs = {"Host": host if port in (80, 443) else "%s:%d" % (host, port), "Accept-Encoding": "gzip, deflate"}
+        hdrs.update(headers or {})
+        to = urllib3.Timeout(connect=timeout, read=timeout)
+        if parts.scheme.lower() == "https":
+            pool = urllib3.HTTPSConnectionPool(ip, port=port, server_hostname=host, assert_hostname=host,
+                                               cert_reqs="CERT_REQUIRED", ca_certs=certifi.where(), timeout=to, retries=False)
+        else:
+            pool = urllib3.HTTPConnectionPool(ip, port=port, timeout=to, retries=False)
+        try:
+            r = pool.urlopen("GET", path, headers=hdrs, redirect=False, preload_content=False, decode_content=True)
+        except urllib3.exceptions.HTTPError as e:
+            raise requests.ConnectionError(type(e).__name__)
+        try:
+            if r.status in (301, 302, 303, 307, 308):
+                location = r.headers.get("location", "")
+                if not location:
+                    raise BlockedURL("redirect with no destination")
+                current = requests.compat.urljoin(current, location)
+                continue
+            body, truncated = bytearray(), False
+            for chunk in r.stream(8192, decode_content=True):
+                body += chunk
+                if len(body) > max_bytes:
+                    truncated = True
+                    break
+            return PinnedResponse(current, r.status, {k.lower(): v for k, v in r.headers.items()},
+                                  bytes(body[:max_bytes]), truncated)
+        finally:
+            r.release_conn()
+            pool.close()
     raise BlockedURL("too many redirects")
 
 

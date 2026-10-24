@@ -101,6 +101,14 @@ class Scheduler:
         except Exception as e:
             print(f"[scheduler] page reader skipped: {e}", flush=True)
 
+        # Business website scans a restart interrupted are finished here
+        # (app/website_agent.py); new scans run straight away in the API.
+        try:
+            from .website_agent import run_due as website_scans_due
+            emitted += website_scans_due()
+        except Exception as e:
+            print(f"[scheduler] website scans skipped: {e}", flush=True)
+
         # Trial data retention: warn 3 days before, delete unpaid trials 15 days
         # after the trial ended (hourly inside).
         try:

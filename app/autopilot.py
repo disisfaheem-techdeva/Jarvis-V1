@@ -146,6 +146,16 @@ def _grounding(tid):
     brief = (records[:6000] + "\n\nVERIFIED CONFIG AND ANALYSIS (JSON):\n" +
              json.dumps(agent_facts, default=str)[:5000])
     allowed = {"config": cfg, "records": f}
+    # the owner-approved profile from the business's own website (db/76): its
+    # voice, audience and offerings, and the prices it shows may be used
+    try:
+        from .website_agent import allowed_facts, context_text
+        prof = context_text(tid, limit=4000)
+        if prof:
+            brief += "\n\n" + prof
+            allowed["website_profile"] = allowed_facts(tid)
+    except Exception:  # noqa: BLE001 -- before db/76, or no profile: captions work as before
+        pass
     return brief, allowed
 
 

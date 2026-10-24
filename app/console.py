@@ -531,6 +531,14 @@ def _facts_fresh(tid, role):
     except Exception as e:  # a facts failure must never block the console
         f["facts_error"] = type(e).__name__
     f.update(_more_facts(tid, role))
+    # the owner-approved profile from the business's website (app/website_agent.py, db/76)
+    try:
+        from .website_agent import context_text
+        bp = context_text(tid)
+        if bp:
+            f["business_profile_from_website"] = bp
+    except Exception as e:  # noqa: BLE001
+        f["business_profile_from_website_unavailable"] = type(e).__name__
     if not f.get("services"):
         try:
             from .persistence import Persistence
@@ -581,6 +589,7 @@ _MORE = (
 # which dashboard section (app/roles.py) each fact belongs to; a login with a
 # role is only given the facts of the sections it may see
 FACT_SECTION = {
+    "business_profile_from_website": "business",
     "upcoming_appointments": "crm", "appointments": "crm", "leads": "crm", "customers": "crm",
     "recent_leads": "crm", "recent_customers": "crm",
     "services": "business", "business_hours": "business", "products": "business", "packages": "business",

@@ -113,7 +113,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=bf31ce3f51">
+<link rel="stylesheet" href="/assets/td.css?v=d9515ca345">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -7998,13 +7998,13 @@ function typeHidden(id){
     { num:'05', name:'Operations',     icon:'box',   ids:['orders','inventory','dailyentry'] },
     { num:'06', name:'Team & HR',      icon:'badge', ids:['team','attendance','hr','roles'] },
     { num:'07', name:'Marketing',      icon:'mega',  ids:['marketing','posts','captions','autopilot','advisor','analytics'], sep:true },
-    { num:'08', name:'Business',       icon:'store', ids:['services','products','packages','deals','reports','settings'] },
+    { num:'08', name:'Business',       icon:'store', ids:['services','products','packages','deals','reports','bizprofile','settings'] },
     { num:'09', name:'Finance',        icon:'wallet',ids:['revenue','invoices','expenses','dayclose','pnl'] },
     { num:'10', name:'Administration', icon:'shield',ids:['integrations','whatsapp','billing','usage','permissions'], sep:true }
   ];
   // the pages added in this block (they are not in NAV)
   var NEW = { history:'Execution History', tools:'Agents', pipeline:'Pipeline',
-              analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer', usage:'AI usage', roles:'Roles' };
+              analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer', usage:'AI usage', roles:'Roles', bizprofile:'Business Profile' };
   // tab names that follow the approved structure; everything else keeps its own name
   var LABEL = { overview:'Overview', console:'Jarvis Assistant', ai:'AI Agents', needshuman:'Approval Queue',
                 marketing:'Campaigns', posts:'Social Media Publisher', autopilot:'Content Calendar',
@@ -9678,6 +9678,262 @@ function dvJarvisHTML(){
     } catch (e) {}
   }, 150); });
 })();
+
+/* =====================================================================
+   Business Profile (24 Oct 2026; app/website_agent.py, db/76). The owner
+   gives the website; the agent reads its public pages and writes a profile
+   in which every claim shows where it came from. The owner corrects and
+   approves it; only then do Jarvis and Create with AI use it.
+   ===================================================================== */
+var BI = { prof: undefined, scans: undefined, scan: null, pages: [], poll: null, msg: null, busy: false, edit: null,
+           url: '', confirm: false, versions: undefined };
+var BI_STAGE = { pending: 'Waiting to start', discovering: 'Finding your pages', extracting: 'Reading your pages',
+                 analyzing: 'Understanding your business', saving: 'Saving your profile', completed: 'Finished',
+                 completed_with_warnings: 'Finished, with notes', failed: 'Did not finish', cancelled: 'Stopped' };
+var BI_BASIS = { observed: ['On your website', 'ok'], derived: ['Worked out from your website', 'info'],
+                 inferred: ["AI's reading, check it", 'warn'], owner: ['Your words', 'own'] };
+function biLoad(){
+  api('/business-profile/knowledge').then(function(r){
+    BI.prof = r.ok ? (r.data.profile || null) : { error: r.status === 0 ? 'The server could not be reached.' : ((r.data && r.data.detail) || 'Your profile could not be loaded.') };
+    if (currentView() === 'bizprofile') renderShell();
+  });
+  api('/business-profile/website-scans').then(function(r){
+    BI.scans = r.ok ? r.data.scans : [];
+    var s = BI.scans[0];
+    if (s && !BI.url) BI.url = s.url;
+    if (s) biScan(s.id);
+    else if (currentView() === 'bizprofile') renderShell();
+  });
+}
+function biScan(id){
+  api('/business-profile/website-scans/' + encodeURIComponent(id)).then(function(r){
+    if (!r.ok) return;
+    var was = BI.scan && BI.scan.active;
+    BI.scan = r.data.scan; BI.pages = r.data.pages || [];
+    if (BI.scan.active) biPoll(id);
+    else { biStop(); if (was) { BI.prof = undefined; biLoad(); return; } }
+    if (currentView() === 'bizprofile') renderShell();
+  });
+}
+function biPoll(id){ if (!BI.poll) BI.poll = setInterval(function(){ if (currentView() !== 'bizprofile') return biStop(); biScan(id); }, 2000); }
+function biStop(){ if (BI.poll) { clearInterval(BI.poll); BI.poll = null; } }
+function biBadge(c){
+  var b = BI_BASIS[(c && c.basis) || 'inferred'] || BI_BASIS.inferred;
+  return '<span class="bi-badge ' + b[1] + '">' + esc(b[0]) + '</span>';
+}
+function biSrc(c){
+  var s = (c && c.sources) || [];
+  if (!s.length) return '';
+  return '<span class="bi-src">' + s.slice(0, 3).map(function(u){
+    var p = u.replace(/^https?:\/\/[^/]+/, '').replace(/\/$/, '') || 'Home page';
+    return '<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer" title="Open the page this came from">' + esc(p.length > 32 ? p.slice(0, 31) + '…' : p) + '</a>';
+  }).join(' ') + '</span>';
+}
+function biClaim(label, c){
+  if (!c || !c.value) return '<div class="bi-row"><span class="bi-k">' + esc(label) + '</span><span class="bi-none">Not on your website</span></div>';
+  return '<div class="bi-row"><span class="bi-k">' + esc(label) + '</span><span class="bi-v">' + esc(c.value) + '</span>' +
+    '<span class="bi-meta">' + biBadge(c) + biSrc(c) + '</span></div>';
+}
+function biList(label, xs){
+  if (!xs || !xs.length) return '<div class="bi-row"><span class="bi-k">' + esc(label) + '</span><span class="bi-none">Nothing found</span></div>';
+  return '<div class="bi-row"><span class="bi-k">' + esc(label) + '</span><ul class="bi-ul">' + xs.map(function(c){
+    return '<li><span class="bi-v">' + esc(c.value) + '</span><span class="bi-meta">' + biBadge(c) + biSrc(c) + '</span></li>'; }).join('') + '</ul></div>';
+}
+function biSection(key, title, inner, editable){
+  var own = isOwner(), e = BI.edit === key;
+  return '<section class="bi-sec" aria-labelledby="bi-h-' + key + '"><div class="bi-sec-head"><h3 id="bi-h-' + key + '">' + esc(title) + '</h3>' +
+    (editable && own && !e ? '<button class="btn" type="button" data-biedit="' + key + '">Correct</button>' : '') + '</div>' +
+    (e ? biEditor(key) : inner) + '</section>';
+}
+/* the owner's corrections: plain text boxes, one item per line */
+function biEditor(key){
+  var d = BI.prof.draft, lines = function(xs){ return (xs || []).map(function(c){ return c.value; }).join('\n'); };
+  var f = function(id, label, v, area){
+    return '<label class="bi-lbl">' + esc(label) + (area ? '<textarea class="fld" rows="4" id="' + id + '">' + esc(v || '') + '</textarea>'
+      : '<input class="fld" id="' + id + '" value="' + esc(v || '') + '">') + '</label>';
+  };
+  var h = '<div class="bi-form">';
+  if (key === 'identity') {
+    var i = d.identity || {};
+    h += f('bie-name', 'Business name', (i.name || {}).value) + f('bie-tag', 'Tagline', (i.tagline || {}).value) +
+      f('bie-desc', 'What the business does', (i.description || {}).value, true) + f('bie-ind', 'Industry', (i.industry || {}).value);
+  } else if (key === 'offerings') {
+    h += f('bie-off', 'One per line: name | price (leave the price out if it is not fixed)',
+      (d.offerings || []).map(function(o){ return o.name + (o.price !== null && o.price !== undefined ? ' | ' + o.price : ''); }).join('\n'), true);
+  } else if (key === 'positioning') {
+    h += f('bie-aud', 'Who it is for (one per line)', lines(d.audience), true) + f('bie-vp', 'Why customers choose it (one per line)', lines(d.value_proposition), true) +
+      f('bie-voice', 'How it talks to customers', (d.brand_voice || {}).value);
+  } else if (key === 'contact') {
+    var c = d.contact || {};
+    h += f('bie-ph', 'Phone numbers (one per line)', lines(c.phones), true) + f('bie-em', 'Emails (one per line)', lines(c.emails), true) +
+      f('bie-addr', 'Address', (c.address || {}).value) + f('bie-hrs', 'Opening hours', (c.hours || {}).value);
+  }
+  return h + '<div class="bi-acts"><button class="btn primary" type="button" id="bie-save">Save correction</button>' +
+    '<button class="btn" type="button" id="bie-x">Cancel</button></div><p class="bi-note">What you save here is marked as your words. A new scan never replaces it; if your website says something else, you choose.</p></div>';
+}
+function biProfileHTML(){
+  var p = BI.prof, d = p.draft, own = isOwner();
+  var st = p.status === 'approved' ? ['Approved, version ' + p.version + '. Jarvis and Create with AI use it.', 'ok']
+    : p.status === 'changes_waiting' ? ['Changes waiting. Jarvis still uses version ' + p.version + ' until you approve.', 'warn']
+    : ['Draft. Nothing uses it until you approve it.', 'warn'];
+  var h = '<div class="bi-status ' + st[1] + '" role="status"><span>' + esc(st[0]) + '</span>' +
+    (own && p.status !== 'approved' ? '<button class="btn primary" type="button" id="bi-approve"' + (BI.busy ? ' disabled' : '') + '>Approve profile</button>' : '') + '</div>';
+  var ch = d.changes_to_review || [];
+  if (ch.length) h += '<section class="bi-sec bi-changes"><h3>Your website now says something different</h3>' + ch.map(function(c){
+    var show = function(v){ return esc(typeof v === 'object' ? (v && v.value !== undefined ? v.value : JSON.stringify(v).slice(0, 200)) : v); };
+    return '<div class="bi-change"><b>' + esc(c.field.replace(/_/g, ' ')) + '</b><div>Yours: ' + show(c.yours) + '</div><div>Website: ' + show(c.website) + '</div>' +
+      (own ? '<div class="bi-acts"><button class="btn" type="button" data-bires="' + esc(c.field) + '" data-keep="yours">Keep mine</button>' +
+        '<button class="btn" type="button" data-bires="' + esc(c.field) + '" data-keep="website">Use the website\'s</button></div>' : '') + '</div>';
+  }).join('') + '</section>';
+  var i = d.identity || {};
+  h += biSection('identity', 'Business overview', biClaim('Name', i.name) + biClaim('Tagline', i.tagline) + biClaim('What it does', i.description) +
+    biClaim('Industry', i.industry) + biClaim('Business type', i.business_type) + (i.categories && i.categories.length ? biList('Also', i.categories) : ''), true);
+  var off = d.offerings || [];
+  h += biSection('offerings', 'Products and services', !off.length ? '<p class="bi-none">No products or services were found on your website.</p>'
+    : '<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Price</th><th>Where</th></tr></thead><tbody>' + off.map(function(o){
+        return '<tr><td>' + esc(o.name) + (o.description ? '<div class="card-note">' + esc(o.description) + '</div>' : '') + '</td>' +
+          '<td>' + (o.price !== null && o.price !== undefined ? esc((o.currency || '') + ' ' + Number(o.price).toLocaleString()) : '<span class="bi-none">No price on the website</span>') + '</td>' +
+          '<td>' + biBadge(o) + biSrc(o) + '</td></tr>';
+      }).join('') + '</tbody></table></div>', true);
+  h += biSection('positioning', 'Audience and positioning', biList('Who it is for', d.audience) + biList('Why customers choose it', d.value_proposition) +
+    biList('What makes it different', d.differentiators) + biClaim('How it talks', d.brand_voice) + biList('Public offers', d.offers) + biList('Calls to action', d.calls_to_action), true);
+  var c = d.contact || {};
+  h += biSection('contact', 'Contact and location', biList('Phone', c.phones) + biList('Email', c.emails) + biClaim('Address', c.address) +
+    biClaim('Opening hours', c.hours) + biList('Areas served', c.service_areas) +
+    '<div class="bi-row"><span class="bi-k">Social pages</span>' + ((d.social_profiles || []).length ? '<span class="bi-v">' + d.social_profiles.map(function(s){
+      return '<a href="' + esc(s.url) + '" target="_blank" rel="noopener noreferrer">' + esc(s.platform) + '</a>'; }).join(' · ') + '</span>' : '<span class="bi-none">None linked from your website</span>') + '</div>', true);
+  var pol = d.policies || {}, faqs = d.faqs || [];
+  h += biSection('policies', 'Policies and questions', biClaim('Booking', pol.booking) + biClaim('Cancellation', pol.cancellation) + biClaim('Payment', pol.payment) +
+    biClaim('Delivery', pol.shipping) + biClaim('Returns', pol.returns) +
+    (faqs.length ? '<div class="bi-faqs">' + faqs.map(function(f){ return '<details><summary>' + esc(f.question) + '</summary><p>' + esc(f.answer) + ' ' + biSrc(f) + '</p></details>'; }).join('') + '</div>' : ''), false);
+  var b = d.brand || {};
+  h += biSection('brand', 'Brand', (b.logo && b.logo.value ? '<div class="bi-row"><span class="bi-k">Logo</span><img class="bi-logo" src="' + esc(b.logo.value) + '" alt="Logo found on your website"><span class="bi-meta">' + biBadge(b.logo) + '</span></div>' : biClaim('Logo', null)) +
+    '<div class="bi-row"><span class="bi-k">Colours</span>' + ((b.colors || []).length ? '<span class="bi-sw">' + b.colors.map(function(x){
+      return '<span class="bi-swatch"><i style="background:' + esc(/^#[0-9a-f]{6}$/i.test(x.value) ? x.value : 'transparent') + '"></i>' + esc(x.value) + '</span>'; }).join('') + '</span><span class="bi-note">' + esc(b.colors[0].note || '') + '</span>' : '<span class="bi-none">None found</span>') + '</div>' +
+    biList('Fonts', b.fonts) + biClaim('Website built with', b.platform), false);
+  var miss = d.missing || [], conf = d.conflicts || [], rec = d.recommendations || [];
+  if (miss.length) h += biSection('missing', 'Not on your website', '<ul class="bi-plain">' + miss.map(function(m){ return '<li>' + esc(m) + '</li>'; }).join('') +
+    '</ul><p class="bi-note">Jarvis says it does not know these. Add them to your website, or correct the profile above.</p>', false);
+  if (conf.length) h += biSection('conflicts', 'Your website disagrees with itself', '<ul class="bi-plain">' + conf.map(function(x){
+    return '<li><b>' + esc(x.field) + ':</b> ' + (x.values || []).map(function(v){ return esc(v.value) + ' ' + biSrc(v); }).join(' / ') + '</li>'; }).join('') + '</ul>', false);
+  if (rec.length) h += biSection('recs', 'Suggestions for your website', '<ul class="bi-plain">' + rec.map(function(m){ return '<li>' + esc(m) + '</li>'; }).join('') + '</ul>', false);
+  var srcs = d.sources || [];
+  if (srcs.length) h += '<details class="bi-sec"><summary>' + esc(srcs.length) + ' pages this profile was written from</summary><ul class="bi-plain">' + srcs.map(function(s){
+    return '<li><a href="' + esc(s.url) + '" target="_blank" rel="noopener noreferrer">' + esc(s.title || s.url) + '</a></li>'; }).join('') + '</ul></details>';
+  if (BI.versions && BI.versions.length) h += '<details class="bi-sec" open><summary>Earlier versions</summary><ul class="bi-plain">' + BI.versions.map(function(v){
+    return '<li>Version ' + esc(v.version) + ', ' + esc(when(v.created_at)) + (v.by_name ? ' by ' + esc(v.by_name) : '') + (v.note ? ': ' + esc(v.note) : '') +
+      (own && v.version !== p.version ? ' <button class="btn" type="button" data-birestore="' + esc(v.version) + '">Put back for review</button>' : '') + '</li>'; }).join('') + '</ul></details>';
+  else if (p.version > 0) h += '<button class="btn bi-more" type="button" id="bi-versions">Show earlier versions</button>';
+  return h;
+}
+function biScanHTML(){
+  var s = BI.scan, own = isOwner();
+  var h = '<div class="bi-form">';
+  if (own) h += '<label class="bi-lbl">Your website<input class="fld" id="bi-url" type="url" inputmode="url" autocomplete="url" placeholder="https://yourbusiness.com" value="' + esc(BI.url) + '"></label>' +
+    '<label class="bi-check"><input type="checkbox" id="bi-ok"' + (BI.confirm ? ' checked' : '') + '> This is my business\'s website, or I may have it analysed.</label>' +
+    '<div class="bi-acts"><button class="btn primary" type="button" id="bi-go"' + (s && s.active ? ' disabled' : '') + '>Analyze my business</button></div>' +
+    '<p class="bi-note">TechDeva reads only public pages (up to 40), follows your robots.txt, never logs in, and writes down only what your pages say. It uses your AI credits once per scan.</p>';
+  else h += '<p class="bi-note">The owner runs the analysis. You can read the profile below.</p>';
+  h += '</div>';
+  if (BI.msg) h += '<p class="bi-msg ' + (BI.msg.bad ? 'bad' : 'ok') + '" role="status">' + esc(BI.msg.text) + '</p>';
+  if (!s) return h;
+  var pct = s.active ? Math.min(95, Math.round(100 * (s.pages_processed + s.pages_skipped + s.pages_failed) / Math.max(1, s.max_pages))) : 100;
+  if (s.status === 'analyzing' || s.status === 'saving') pct = s.status === 'saving' ? 97 : 90;
+  h += '<div class="bi-run" aria-live="polite"><div class="bi-run-top"><b>' + esc(BI_STAGE[s.status] || s.status) + '</b><span class="card-note">' + esc(s.url) + '</span></div>';
+  if (s.active) h += '<div class="dv-bar" role="progressbar" aria-label="Scan progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"><i style="width:' + pct + '%"></i></div>' +
+    (s.stage_note ? '<p class="card-note">' + esc(s.stage_note) + '</p>' : '');
+  h += '<div class="bi-counts"><span><b>' + esc(s.pages_discovered || 0) + '</b> found</span><span><b>' + esc(s.pages_processed) + '</b> read</span>' +
+    '<span><b>' + esc(s.pages_skipped) + '</b> skipped</span><span><b>' + esc(s.pages_failed) + '</b> could not be read</span></div>';
+  if (s.error) h += '<p class="bi-msg bad">' + esc(s.error) + '</p>';
+  (s.warnings || []).forEach(function(w){ h += '<p class="bi-msg warn">' + esc(w) + '</p>'; });
+  if (own) h += '<div class="bi-acts">' + (s.active ? '<button class="btn" type="button" id="bi-cancel"' + (s.cancel_requested ? ' disabled' : '') + '>' + (s.cancel_requested ? 'Stopping…' : 'Stop') + '</button>' : '') +
+    (s.status === 'failed' || s.status === 'cancelled' ? '<button class="btn" type="button" id="bi-retry">Retry</button>' : '') + '</div>';
+  if (BI.pages.length) h += '<details class="bi-pages"><summary>Pages looked at (' + BI.pages.length + ')</summary><ul class="bi-plain">' + BI.pages.map(function(p){
+    return '<li><span class="bi-badge ' + (p.status === 'processed' ? 'ok' : p.status === 'skipped' ? 'info' : 'warn') + '">' + esc({ processed: 'Read', skipped: 'Skipped', failed: 'Not read' }[p.status]) + '</span> ' +
+      esc(p.title || p.url) + (p.note ? ' <span class="card-note">' + esc(p.note) + '</span>' : '') + '</li>'; }).join('') + '</ul></details>';
+  return h + '</div>';
+}
+VIEWS.bizprofile = function(){
+  if (BI.prof === undefined && BI.scans === undefined) { BI.scans = null; biLoad(); }
+  var out = '<h1>Business profile</h1><p class="sub">TechDeva reads your website and writes down what your business is, sells and says, with the page each fact came from. ' +
+    'You correct it and approve it; then Jarvis and Create with AI use it.</p>';
+  out += panel('Analyze your website', biScanHTML());
+  var p = BI.prof;
+  if (p === undefined) out += panel('Your profile', loading('Loading your profile…'));
+  else if (p && p.error) out += panel('Your profile', errState(p.error));
+  else if (!p || !p.draft) out += panel('Your profile', empty('No profile yet', 'Enter your website above and press Analyze my business. It usually takes one to three minutes.'));
+  else out += '<div class="bi">' + biProfileHTML() + '</div>';
+  setTimeout(biWire, 0);
+  return out;
+};
+function biAfter(r, ok){
+  BI.busy = false;
+  if (!r.ok) { BI.msg = { text: r.status === 0 ? 'The server could not be reached. Nothing was changed.' : ((r.data && r.data.detail) || 'That did not work. Nothing was changed.'), bad: true }; renderShell(); return false; }
+  if (ok) BI.msg = { text: ok };
+  if (r.data && r.data.profile !== undefined) BI.prof = r.data.profile;
+  renderShell(); return true;
+}
+function biWire(){
+  var g = function(id){ return document.getElementById(id); };
+  if (g('bi-url')) g('bi-url').oninput = function(){ BI.url = g('bi-url').value; };
+  if (g('bi-ok')) g('bi-ok').onchange = function(){ BI.confirm = g('bi-ok').checked; };
+  if (g('bi-go')) g('bi-go').onclick = function(){
+    BI.url = g('bi-url').value.trim();
+    if (!BI.url) { BI.msg = { text: 'Enter your website address first.', bad: true }; renderShell(); return; }
+    if (!BI.confirm) { BI.msg = { text: 'Tick the box to confirm it is your website.', bad: true }; renderShell(); return; }
+    BI.busy = true; BI.msg = null; renderShell();
+    api('/business-profile/website-scans', { method: 'POST', body: { url: BI.url, confirm_owner: true } }).then(function(r){
+      if (!biAfter(r, r.ok && r.data.already_running ? 'A scan is already running; here it is.' : 'Started. You can leave this page; the scan carries on.')) return;
+      BI.scan = r.data.scan; BI.pages = []; biScan(r.data.scan.id);
+    });
+  };
+  if (g('bi-cancel')) g('bi-cancel').onclick = function(){
+    api('/business-profile/website-scans/' + BI.scan.id + '/cancel', { method: 'POST' }).then(function(r){ if (biAfter(r, 'Stopping. Your profile is not changed.')) biScan(BI.scan.id); });
+  };
+  if (g('bi-retry')) g('bi-retry').onclick = function(){
+    api('/business-profile/website-scans/' + BI.scan.id + '/retry', { method: 'POST' }).then(function(r){ if (biAfter(r, 'Started again.')) biScan(BI.scan.id); });
+  };
+  if (g('bi-approve')) g('bi-approve').onclick = function(){
+    BI.busy = true; renderShell();
+    api('/business-profile/knowledge/approve', { method: 'POST', body: {} }).then(function(r){
+      if (biAfter(r, r.ok && r.data.setup_offered ? 'Approved. Jarvis and Create with AI now use it. The services and prices from your website are waiting on Jarvis & AI › Business & agent, to add to your lists.' : 'Approved. Jarvis and Create with AI now use it.')) {
+        BI.versions = undefined; if (typeof bpLoad === 'function') { BP.data = undefined; bpLoad(true); }
+      }
+    });
+  };
+  if (g('bi-versions')) g('bi-versions').onclick = function(){
+    api('/business-profile/knowledge/versions').then(function(r){ BI.versions = r.ok ? r.data.versions : []; renderShell(); });
+  };
+  document.querySelectorAll('[data-birestore]').forEach(function(b){ b.onclick = function(){
+    api('/business-profile/knowledge/versions/' + b.getAttribute('data-birestore') + '/restore', { method: 'POST' }).then(function(r){ biAfter(r, 'That version is back as your draft. Approve it to use it again.'); });
+  }; });
+  document.querySelectorAll('[data-bires]').forEach(function(b){ b.onclick = function(){
+    api('/business-profile/knowledge/resolve', { method: 'POST', body: { field: b.getAttribute('data-bires'), keep: b.getAttribute('data-keep') } }).then(function(r){ biAfter(r, 'Saved.'); });
+  }; });
+  document.querySelectorAll('[data-biedit]').forEach(function(b){ b.onclick = function(){ BI.edit = b.getAttribute('data-biedit'); renderShell(); }; });
+  if (g('bie-x')) g('bie-x').onclick = function(){ BI.edit = null; renderShell(); };
+  if (g('bie-save')) g('bie-save').onclick = function(){
+    var d = BI.prof.draft, key = BI.edit, v = function(id){ return (g(id) && g(id).value || '').trim(); };
+    var one = function(x){ return x ? { value: x } : null; };
+    var many = function(id){ return v(id).split('\n').map(function(x){ return x.trim(); }).filter(Boolean).map(function(x){ return { value: x }; }); };
+    var saves = [];
+    if (key === 'identity') saves.push(['identity', Object.assign({}, d.identity, { name: one(v('bie-name')), tagline: one(v('bie-tag')), description: one(v('bie-desc')), industry: one(v('bie-ind')) })]);
+    if (key === 'offerings') saves.push(['offerings', v('bie-off').split('\n').map(function(l){
+      var m = l.split('|'), name = m[0].trim(), pr = m[1] !== undefined ? Number(String(m[1]).replace(/[^\d.]/g, '')) : null;
+      var old = (d.offerings || []).filter(function(o){ return o.name.toLowerCase() === name.toLowerCase(); })[0] || {};
+      return name ? { name: name, kind: old.kind || 'service', description: old.description || null, price: pr || pr === 0 ? pr : null, currency: old.currency || 'PKR', url: old.url || null } : null;
+    }).filter(Boolean)]);
+    if (key === 'positioning') { saves.push(['audience', many('bie-aud')]); saves.push(['value_proposition', many('bie-vp')]); saves.push(['brand_voice', one(v('bie-voice'))]); }
+    if (key === 'contact') saves.push(['contact', Object.assign({}, d.contact, { phones: many('bie-ph'), emails: many('bie-em'), address: one(v('bie-addr')), hours: one(v('bie-hrs')) })]);
+    BI.busy = true;
+    (function next(){
+      var s = saves.shift();
+      if (!s) { BI.edit = null; BI.busy = false; BI.msg = { text: 'Saved as your words. Approve the profile to use it.' }; renderShell(); return; }
+      api('/business-profile/knowledge', { method: 'PATCH', body: { field: s[0], value: s[1] } }).then(function(r){ if (biAfter(r, null)) next(); });
+    })();
+  };
+}
+window.addEventListener('hashchange', function(){ if (currentView() !== 'bizprofile') biStop(); else if (BI.prof !== undefined) { BI.prof = undefined; BI.scans = undefined; } });
 
 boot();
 </script>
