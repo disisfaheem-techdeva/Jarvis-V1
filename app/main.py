@@ -88,6 +88,8 @@ app.include_router(make_jarvis_memory_router(_console_identity))
 from .dashboard import make_dashboard_router
 app.include_router(make_dashboard_router(_console_identity))
 from .website_agent import make_business_profile_router
+from .crm import make_crm_router
+app.include_router(make_crm_router(_console_identity))
 app.include_router(make_business_profile_router(_console_identity))
 app.include_router(make_social_router())
 app.include_router(make_media_router())
@@ -206,6 +208,8 @@ class LeadIn(BaseModel):
     phone: str | None = None
     service: str | None = None
     source: str = "manual"
+    email: str | None = None               # CRM upgrade (db/77): optional
+    company: str | None = None
 
     @field_validator("source")
     @classmethod
@@ -236,9 +240,10 @@ def create_lead(body: LeadIn, x_tenant_id: str | None = Header(None),
     if role == "techdeva_admin":
         raise HTTPException(400, "admin has no tenant to write into")
     with tenant_session(tid, role) as cur:
-        cur.execute("""INSERT INTO leads (tenant_id, name, phone, service, source, est_revenue, created_by)
-                       VALUES (current_tenant(), %s,%s,%s,%s,%s,%s) RETURNING id""",
-                    (body.name, body.phone, body.service, body.source, body.est_revenue, role))
+        cur.execute("""INSERT INTO leads (tenant_id, name, phone, service, source, est_revenue, created_by, email, company)
+                       VALUES (current_tenant(), %s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                    (body.name, body.phone, body.service, body.source, body.est_revenue, role,
+                     (body.email or "").strip()[:200] or None, (body.company or "").strip()[:160] or None))
         lead_id = str(cur.fetchone()["id"])
 
     # ---- attribution capture: the first link in the chain ----
@@ -274,8 +279,32 @@ def create_lead(body: LeadIn, x_tenant_id: str | None = Header(None),
 # The lead_status enum, said at the boundary like LEAD_SOURCES above, so a typo
 # is a 400 that names the allowed values rather than a database refusal.
 LEAD_STATUSES = ("new", "qualified", "booked", "showed", "sold", "lost", "fake")
-LEAD_EDITABLE = ("status", "notes", "service", "assigned_operator")
+LEAD_EDITABLE = ("status", "notes", "service", "assigned_operator",
+                 # CRM upgrade (db/77): the lead's own details, its value and why it was lost
+                 "name", "phone", "email", "company", "est_revenue", "priority", "lost_reason")
 _LEAD_VIEW = "id, name, phone, service, status, source, priority, est_revenue"
+
+
+def _plain_value(v):
+    """A database value the audit log and events can carry as JSON."""
+    from decimal import Decimal
+    if isinstance(v, Decimal):
+        return float(v)
+    if isinstance(v, uuid.UUID):
+        return str(v)
+    return v
+
+
+def _same_value(old, new):
+    """Unchanged? Numbers compare as numbers (0 and 0.0, 3 and "3"), the rest as text."""
+    if old is None or new is None:
+        return old is None and new is None
+    try:
+        if isinstance(new, (int, float)) and not isinstance(new, bool):
+            return float(old) == float(new)
+    except (TypeError, ValueError):
+        pass
+    return str(old) == str(new)
 
 
 @app.patch("/leads/{lead_id}")
@@ -299,9 +328,26 @@ def update_lead(lead_id: str, body: dict = Body(...),
         raise HTTPException(400, "nothing to save")
     if "status" in data and data["status"] not in LEAD_STATUSES:
         raise HTTPException(400, "status must be one of " + ", ".join(LEAD_STATUSES))
-    for k in ("notes", "service"):
+    for k in ("notes", "service", "phone", "email", "company", "lost_reason"):
         if k in data and data[k] is not None and not isinstance(data[k], str):
             raise HTTPException(400, "%s must be text" % k)
+    if "name" in data and not (isinstance(data["name"], str) and data["name"].strip() and len(data["name"]) <= 200):
+        raise HTTPException(400, "name must be 1 to 200 characters")
+    for k, n in (("phone", 40), ("email", 200), ("company", 160), ("lost_reason", 300)):
+        if isinstance(data.get(k), str):
+            data[k] = data[k].strip()[:n] or None
+    if data.get("email") and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", data["email"]):
+        raise HTTPException(400, "email is not a valid address")
+    if "est_revenue" in data:
+        try:
+            data["est_revenue"] = None if data["est_revenue"] in (None, "") else float(data["est_revenue"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "est_revenue must be a number")
+        if data["est_revenue"] is not None and data["est_revenue"] < 0:
+            raise HTTPException(400, "est_revenue cannot be negative")
+    if "priority" in data:
+        if not isinstance(data["priority"], int) or not 0 <= data["priority"] <= 100:
+            raise HTTPException(400, "priority must be a whole number from 0 to 100")
     if data.get("assigned_operator") is not None:
         try:
             data["assigned_operator"] = str(uuid.UUID(str(data["assigned_operator"])))
@@ -324,12 +370,14 @@ def update_lead(lead_id: str, body: dict = Body(...),
             cur.execute("SELECT 1 FROM users WHERE id = %s", (data["assigned_operator"],))
             if not cur.fetchone():
                 raise HTTPException(400, "assigned_operator is not a member of this business")
-        changes = {k: {"from": before[k] if k != "assigned_operator" or before[k] is None else str(before[k]),
+        changes = {k: {"from": _plain_value(before[k]),
                        "to": v}
                    for k, v in data.items()
-                   if (str(before[k]) if before[k] is not None else None) != v}
+                   if not _same_value(before[k], v)}
         if changes:
             sets = ", ".join("%s = %%s" % k for k in changes)
+            if "status" in changes:
+                sets += ", status_changed_at = now()"
             cur.execute("UPDATE leads SET " + sets + ", updated_at = now() WHERE id = %s RETURNING "
                         + _LEAD_VIEW, [changes[k]["to"] for k in changes] + [lead_uuid])
         else:
