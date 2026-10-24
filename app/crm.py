@@ -241,7 +241,8 @@ def make_crm_router(identity):
                             WHERE a.lead_id = %s OR (%s::uuid IS NOT NULL AND a.customer_id = %s::uuid)
                             ORDER BY coalesce(a.done_at, a.due_at, a.created_at) DESC LIMIT 200""",
                         (lid, l["converted_customer_id"], l["converted_customer_id"]))
-            acts = [_iso(r) for r in cur.fetchall()]
+            now = _dt.datetime.now(_dt.timezone.utc)
+            acts = [dict(_iso(r), overdue=bool(r["done_at"] is None and r["due_at"] and r["due_at"] < now)) for r in cur.fetchall()]
             cur.execute("""SELECT action, actor, actor_type, detail, at FROM executions
                             WHERE resource = 'leads' AND resource_id = %s ORDER BY at DESC LIMIT 50""", (lid,))
             changes = [_iso(r) for r in cur.fetchall()]

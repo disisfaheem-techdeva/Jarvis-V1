@@ -64,3 +64,12 @@ Customers, Pipeline, Appointments, Calendar); new screens are added after them.
   - `/crm/team`: who a lead or follow-up can go to.
 - **app/main.py**: `POST /leads` also takes email and company; `PATCH /leads` also takes name, phone, email, company, value, priority, lost reason, each validated; unchanged numbers are no longer recorded as changes; audit values that were dropped (a Decimal could not be written) are now recorded.
 - **Tests**: tests/test_crm.py, 8 tests. Full suite 130 passed; the same 11 storefront set-up errors as before.
+
+## Phase C: screens (done)
+
+- **Leads** (same tab, same place): search as you type (name, any spelling of the phone, email, company), stage, source, owner and follow-up filters, sorting, 25 a page, saved views (All, My leads, New, Overdue follow-ups, No follow-up planned, Qualified), bulk assign and bulk move, and **Add lead** that warns when the person is already a lead or customer. Falls back to the old list if the CRM API is not on the server yet.
+- **A lead's page** (`#/leads?id=`): stage and owner, Make customer (asks which one when two customers match), plan a follow-up or log a call, WhatsApp chat, visit, meeting or note, planned follow-ups with Done and Tomorrow, the full history (follow-ups, changes, WhatsApp conversations, bookings), editable details, and the WhatsApp agent's own follow-up shown read-only.
+- **Follow-ups**: a new tab at the end of CRM (Mine, Due today, Overdue, Upcoming, All open, Done).
+- **Customers**: each customer's page also shows planned follow-ups and the history of calls, visits and notes.
+- **Pipeline, Appointments, Calendar, Patients/Customers lists**: unchanged.
+- Checked in a browser at 1440px dark and light and 390px: the whole journey (add, plan, log, move, edit, search, saved view, done, convert, customer page), no sideways scroll, axe WCAG 2.2 AA clean, 44px targets, no script errors. Test data removed; leads proven unchanged.
