@@ -415,4 +415,8 @@
   & .tdm-card[data-lead] { @apply cursor-pointer focus-visible:[box-shadow:var(--focus-ring)] focus-visible:outline-none; }
   & .crm-defs { @apply mt-3; }
   & .crm-defs dt { @apply capitalize; }
+  & .crm-fs { @apply m-0 grid gap-1 rounded-[var(--p-radius-lg)] border border-line p-3; }
+  & .crm-fs legend { @apply px-1 text-xs font-medium text-fg-muted; }
+  & .crm-ai .bi-badge { @apply mb-3; }
+  & .crm-sumdl { @apply mb-2; }
 }

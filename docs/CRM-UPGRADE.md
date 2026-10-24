@@ -92,3 +92,19 @@ Customers, Pipeline, Appointments, Calendar); new screens are added after them.
 | Team (owner only) | Per person: open leads, overdue, follow-ups done, won; open leads with nobody |
 
 Screens: four figure cards on Leads (each opens the matching list), a **CRM Reports** tab after Follow-ups (summary, pipeline by stage, sources, team, recently done, possible duplicates for review, definitions), and the Pipeline shows each stage's value and opens a lead from its card (drag and the stage menu unchanged). Nothing added to the main Dashboard. Tests: tests/test_crm_reports.py (2) check every figure against rows; browser checks pass at 1440 dark and light and 390, axe clean.
+
+## Phase E: rules, Jarvis and AI (done)
+
+- **Rules** (owner only, `GET/PUT /crm/settings`, panel on the Follow-ups tab): share new leads in turn between chosen people, and plan a follow-up when an open lead has had no contact for N days. The scheduler runs them (`crm.run_due`); each lead is handled once per event (unique rule key); a lead someone already has is never moved; they act only on leads that arrive or go quiet after the rule is switched on; people who left drop out of the turn. **Nothing is ever sent to a customer.**
+- **Jarvis**: sees the team's planned follow-ups (`crm_followups`, CRM section only) and lead ids; new actions `add_followup` and `complete_followup` go through `/crm/activities` with the person's own login, so their role decides. A role without CRM cannot do it through Jarvis either.
+- **AI summary** (`POST /crm/leads/{id}/summary`, button on the lead page): from that lead's records only, labelled as written by AI, lists what the records do not say; records are passed as data, not instructions; nothing saved or sent. Without an AI key it says so (503).
+- **Dashboard › Today's focus**: "follow-ups due" now counts the team's CRM follow-ups due today or late and opens the Follow-ups tab. (It used to count the WhatsApp agent's automatic follow-up, which the agent does by itself.)
+- **Not built, on purpose**: lead scoring (not enough history to validate a score), automatic merging of duplicates (shown for review instead), a CRM inbox (WhatsApp stays in Chats), company accounts and a separate deals table (see Phase A).
+- **Tests**: tests/test_crm_rules.py (5). Whole suite: 137 passed; the same 11 storefront set-up errors as before the upgrade.
+
+## Deploying
+
+1. Back up the database.
+2. Apply `db/77_crm.sql` (additive; prints "verify ok"). Rollback: `DROP TABLE crm_activities, crm_settings;` (the new lead columns can stay).
+3. Rebuild and restart api and worker (the worker runs the rules).
+4. Check: `/health`, `GET /crm/leads`, `GET /crm/overview`, a test lead's page, and that the clinic's lead count is unchanged.

@@ -113,7 +113,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=a7fd89f3f7">
+<link rel="stylesheet" href="/assets/td.css?v=64a61c8808">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -10523,6 +10523,93 @@ function crmrWire(){
 (function(){                       // a change to a lead or follow-up refreshes the figures too
   var base = crmAfter;
   crmAfter = function(){ CRMR.kpi = undefined; CRMR.d = undefined; CRMR.key = ''; return base.apply(this, arguments); };
+})();
+
+/* ---- CRM Phase E: the owner's rules (Follow-ups tab), the AI lead summary ---- */
+var CRMS = { s: undefined, msg: null, sum: {} };
+function crmsLoad(){
+  if (CRMS.s !== undefined) return;
+  CRMS.s = null;
+  api('/crm/settings').then(function(r){ CRMS.s = r.ok ? r.data.settings : { error: true }; if (currentView() === 'followups') renderShell(); });
+}
+function crmsHTML(){
+  var s = CRMS.s;
+  if (!s) return panel('CRM rules', loading('Loading…'));
+  if (s.error) return panel('CRM rules', errState('The rules could not be loaded.'));
+  var pool = s.assign_pool || [];
+  var h = '<div class="crm-form"><p class="crm-sub">Rules only make work inside TechDeva: nothing is sent to a customer. They act on leads that arrive, or go quiet, after you switch them on.</p>' +
+    '<label class="crm-lbl">When an open lead has had no contact for<select class="fld" id="crms-days">' +
+    crmOpts([['', 'Off'], [2, '2 days'], [3, '3 days'], [7, '7 days'], [14, '14 days'], [30, '30 days']], s.inactivity_days || '') + '</select></label>' +
+    '<p class="crm-sub">…plan a follow-up for the lead\'s owner (one per quiet spell).</p>' +
+    '<fieldset class="crm-fs"><legend>Share new leads in turn between</legend>' + (CRM.team || []).map(function(p){
+      return '<label class="bi-check"><input type="checkbox" data-crmspool="' + esc(p.id) + '"' + (pool.indexOf(p.id) !== -1 ? ' checked' : '') + '> ' + esc(p.name) + '</label>'; }).join('') +
+    '<p class="crm-sub">Tick nobody to keep sharing off. A lead someone already has is never moved.</p></fieldset>' +
+    '<div class="crm-acts"><button class="btn primary" type="button" id="crms-save">Save rules</button></div>' +
+    (CRMS.msg ? '<p class="crm-msg ' + (CRMS.msg.bad ? 'bad' : 'ok') + '" role="status">' + esc(CRMS.msg.text) + '</p>' : '') + '</div>';
+  return panel('CRM rules', h);
+}
+(function(){
+  var base = VIEWS.followups;
+  VIEWS.followups = function(){
+    var out = base.apply(this, arguments);
+    if (!isOwner()) return out;
+    crmsLoad();
+    return out + crmsHTML();
+  };
+  var rec = crmRecHTML;
+  crmRecHTML = function(){
+    var out = rec.apply(this, arguments);
+    var d = CRM.rec;
+    if (!d || d.error || !d.lead) return out;
+    var s = CRMS.sum[d.lead.id];
+    var card = '<section class="crm-card crm-ai" aria-labelledby="crm-ai-h"><div class="crm-card-h"><h2 id="crm-ai-h">Summary</h2>' +
+      '<button class="btn" type="button" id="crm-sum"' + (s === null ? ' disabled' : '') + '>' + (s === null ? 'Writing…' : s ? 'Write again' : 'Summarize with AI') + '</button></div>';
+    if (!s) card += '<p class="crm-muted">' + (s === null ? 'Reading this lead\'s records…' : 'A short summary of this lead from its own records, with what is still unknown. Uses your AI credits.') + '</p>';
+    else if (s.error) card += '<p class="crm-msg bad" role="status">' + esc(s.error) + '</p>';
+    else card += '<span class="bi-badge warn">' + esc(s.label) + '</span><dl class="crm-dl crm-sumdl">' +
+      [['Relationship', s.summary.relationship], ['Recently', s.summary.recent], ['Still open', s.summary.outstanding], ['Next step', s.summary.next_step]]
+        .filter(function(x){ return x[1]; }).map(function(x){ return '<dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd>'; }).join('') + '</dl>' +
+      (s.missing.length ? '<p class="crm-sub">Not in the records: ' + esc(s.missing.join('; ')) + '</p>' : '') +
+      '<p class="crm-sub">Based on ' + esc(s.based_on.follow_ups_and_notes) + ' follow-ups and notes, ' + esc(s.based_on.changes) + ' changes, ' +
+      esc(s.based_on.conversations) + ' WhatsApp conversations and ' + esc(s.based_on.appointments) + ' bookings.</p>';
+    card += '</section>';
+    var at = out.indexOf('<section class="crm-card" aria-labelledby="crm-det-h">');
+    return at === -1 ? out : out.slice(0, at) + card + out.slice(at);
+  };
+})();
+(function(){
+  var _r = renderShell;
+  renderShell = function(){
+    var r = _r.apply(this, arguments);
+    setTimeout(function(){
+      var g = function(id){ return document.getElementById(id); };
+      if (g('crms-save')) g('crms-save').onclick = function(){
+        var pool = []; document.querySelectorAll('[data-crmspool]').forEach(function(c){ if (c.checked) pool.push(c.getAttribute('data-crmspool')); });
+        var days = g('crms-days').value;
+        g('crms-save').disabled = true;
+        api('/crm/settings', { method: 'PUT', body: { inactivity_days: days ? Number(days) : null, assign_mode: pool.length ? 'round_robin' : 'off', assign_pool: pool } }).then(function(r){
+          CRMS.msg = r.ok ? { text: 'Rules saved.' } : { text: (r.data && r.data.detail) || 'The rules were not saved.', bad: true };
+          if (r.ok) CRMS.s = r.data.settings;
+          renderShell();
+        });
+      };
+      if (g('crm-sum')) g('crm-sum').onclick = function(){
+        var id = CRM.rec.lead.id;
+        CRMS.sum[id] = null; renderShell();
+        api('/crm/leads/' + encodeURIComponent(id) + '/summary', { method: 'POST' }).then(function(r){
+          CRMS.sum[id] = r.ok ? r.data : { error: r.status === 0 ? 'The server could not be reached.' : ((r.data && r.data.detail) || 'The summary could not be written.') };
+          renderShell();
+        });
+      };
+    }, 0);
+    return r;
+  };
+})();
+/* Jarvis planned or finished a follow-up: the lists show it at once */
+(function(){
+  if (typeof jvFreshData !== 'function') return;
+  var base = jvFreshData;
+  jvFreshData = function(){ CRM.fu = undefined; CRM.list = undefined; CRM.key = ''; if (CRM.rid) crmRecLoad(CRM.rid); CRMR.kpi = undefined; return base.apply(this, arguments); };
 })();
 
 boot();

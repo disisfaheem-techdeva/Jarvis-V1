@@ -40,7 +40,8 @@ CONFIRM = {"add_expense", "cancel_appointment", "schedule_post", "publish_post",
            "record_order_payment", "cancel_order"}
 ACTIONS = {"navigate", "book_appointment", "reschedule_appointment", "cancel_appointment",
            "complete_appointment", "add_customer", "add_lead", "add_expense", "schedule_post",
-           "publish_post", "update_order", "record_order_payment", "cancel_order", "write_campaign"}
+           "publish_post", "update_order", "record_order_payment", "cancel_order", "write_campaign",
+           "add_followup", "complete_followup"}
 _HHMM = re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -318,6 +319,30 @@ def run(tid, role, uid, action, args, founder=False):
                 body[k] = str(args[k]).strip()[:200]
         _call(tid, role, uid, "POST", "/leads", body)
         return {"refresh": ["leads"]}, None
+
+    if action == "add_followup":
+        # through /crm/activities with the person's own login: their role decides
+        body = {"title": _need(args, "title", "what the follow-up is"), "via": "jarvis",
+                "kind": args.get("kind") if args.get("kind") in ("task", "call", "visit", "meeting") else "task"}
+        if args.get("due"):
+            body["due_at"] = str(args["due"])
+        if args.get("lead_id"):
+            body["lead_id"] = str(args["lead_id"])
+        else:
+            with tenant_session(tid, role) as cur:
+                c = _find(cur, "customers", _need(args, "customer_name", "which lead or customer"))
+            if not c:
+                raise ActionError("I could not find that lead or customer")
+            body["customer_id"] = str(c["id"])
+        out = _call(tid, role, uid, "POST", "/crm/activities", body)
+        return {"refresh": ["followups"], "activity": out.get("activity")}, None
+
+    if action == "complete_followup":
+        body = {"done": True}
+        if args.get("outcome"):
+            body["outcome"] = str(args["outcome"])[:500]
+        _call(tid, role, uid, "PATCH", "/crm/activities/" + _need(args, "followup_id", "which follow-up"), body)
+        return {"refresh": ["followups"]}, None
 
     if action == "add_expense":
         body = {"description": _need(args, "description", "what the expense was for")[:300],

@@ -195,12 +195,18 @@ def people(cur, tz):
     cur.execute("""SELECT count(*) AS total,
                           count(*) FILTER (WHERE status = 'new') AS new,
                           count(*) FILTER (WHERE status IN ('qualified','booked','showed')) AS in_progress,
-                          count(*) FILTER (WHERE status = 'sold') AS won,
-                          count(*) FILTER (WHERE followup_at IS NOT NULL
-                                             AND (followup_at AT TIME ZONE %s)::date <= (now() AT TIME ZONE %s)::date
-                                             AND status NOT IN ('sold','lost','fake')) AS followups_due
-                     FROM leads""", (tz, tz))
-    l = cur.fetchone()
+                          count(*) FILTER (WHERE status = 'sold') AS won
+                     FROM leads""")
+    l = dict(cur.fetchone())
+    # the team's own follow-ups (CRM, db/77), due today or late; the WhatsApp
+    # agent's automatic follow-up (leads.followup_at) is the agent's work, not the team's
+    cur.execute("SELECT to_regclass('crm_activities') IS NOT NULL AS ok")
+    if cur.fetchone()["ok"]:
+        cur.execute("""SELECT count(*) AS n FROM crm_activities WHERE done_at IS NULL AND kind <> 'note'
+                          AND (due_at AT TIME ZONE %s)::date <= (now() AT TIME ZONE %s)::date""", (tz, tz))
+        l["followups_due"] = int(cur.fetchone()["n"])
+    else:
+        l["followups_due"] = 0
     return {"appointments": {"upcoming": int(a["upcoming"]), "today": int(a["today"])},
             "customers": {"total": int(c["total"]), "new_this_month": int(c["month"])},
             "leads": {k: int(v) for k, v in l.items()}}
@@ -226,8 +232,8 @@ def focus(blocks, money_ok, cur, may):
     add("approvals", ap.get("total", 0), "%d item needs your approval", "%d items need your approval",
         "Open approvals", "#/needshuman")
     pe = blocks.get("people") or {}
-    add("followups", ((pe.get("leads") or {}).get("followups_due")) or 0, "%d lead follow-up is due",
-        "%d lead follow-ups are due", "View follow-ups", "#/leads")
+    add("followups", ((pe.get("leads") or {}).get("followups_due")) or 0, "%d follow-up is due today or late",
+        "%d follow-ups are due today or late", "Open follow-ups", "#/followups")
     add("appointments_today", ((pe.get("appointments") or {}).get("today")) or 0, "%d appointment today",
         "%d appointments today", "Open calendar", "#/appointments")
     if money_ok and _sees(may, "finance"):
