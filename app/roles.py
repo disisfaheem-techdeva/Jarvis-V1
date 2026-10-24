@@ -90,7 +90,7 @@ SECTION_BY_PATH = [
     ("/whatsapp/chats", "chats"), ("/whatsapp", "admin"), ("/social-inbox/settings", "admin"), ("/social-inbox", "chats"),
     ("/chats", "chats"), ("/threads", "chats"), ("/calls/numbers", "admin"), ("/calls", "chats"),
     # CRM
-    ("/leads", "crm"), ("/sales", "crm"), ("/customers", "crm"), ("/business/customers", "crm"), ("/appointments", "crm"),
+    ("/leads", "crm"), ("/crm", "crm"), ("/sales", "crm"), ("/customers", "crm"), ("/business/customers", "crm"), ("/appointments", "crm"),
     ("/operations/appointments", "crm"), ("/calendar", "crm"), ("/business/appointments", "crm"),
     # operations
     ("/orders", "operations"), ("/operations/inventory", "operations"), ("/business/stock_movements", "operations"),

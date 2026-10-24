@@ -53,6 +53,9 @@ def world():
         cur.execute("INSERT INTO customers (tenant_id, name) VALUES (%s, 'Ali'), (%s, 'Sara')", (a, a))
         cur.execute("INSERT INTO leads (tenant_id, source, name, followup_at) VALUES (%s, 'manual', 'Due', now() - interval '1 hour'), "
                     "(%s, 'manual', 'Later', now() + interval '3 days')", (a, a))
+        cur.execute("SELECT id FROM leads WHERE tenant_id = %s AND name = 'Due'", (a,))
+        cur.execute("INSERT INTO crm_activities (tenant_id, lead_id, kind, title, due_at) VALUES (%s, %s, 'task', 'Call back', now() - interval '1 hour')",
+                    (a, cur.fetchone()["id"]))
         cur.execute("INSERT INTO deliverables (tenant_id, agent, kind, title, status) VALUES (%s, 'copy', 'post', 'A draft', 'awaiting_approval')", (a,))
         cur.execute("INSERT INTO social_posts (tenant_id, platforms, caption, status) VALUES (%s, ARRAY['facebook'], 'hi', 'draft')", (a,))
         for prov in ("google", "meta"):

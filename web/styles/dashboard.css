@@ -192,7 +192,8 @@
   & .jvc-t { @apply text-sm font-medium; }
 
   /* Dashboard 2.0: the Overview's main area */
-  & .dv { @apply grid gap-6; }
+  & .dv { @apply grid grid-cols-[minmax(0,1fr)] gap-6; }
+  & .dv > * { @apply min-w-0; }
   & .dv h1 { @apply mb-1; }
   & .dv .sub { @apply mb-0; }
   & .dv-head { @apply flex flex-wrap items-end justify-between gap-4; }
@@ -348,4 +349,74 @@
   & .bi-swatch { @apply inline-flex items-center gap-1.5 font-mono text-xs text-fg-muted; }
   & .bi-swatch i { @apply inline-block h-5 w-5 rounded border border-line-strong; }
   & .bi-more { @apply h-11 justify-self-start; }
+
+  /* CRM upgrade: leads, a lead's page, follow-ups */
+  & .crm-head { @apply mb-3 flex flex-wrap items-start justify-between gap-3; }
+  & .crm-head .sub { @apply mb-0; }
+  & .crm-head .btn, & .crm-acts .btn, & .crm-tools .btn, & .crm-bulk .btn, & .crm-pager .btn { @apply h-11; }
+  & .crm-msg { @apply my-2 rounded-[var(--p-radius-sm)] px-3 py-2 text-sm; }
+  & .crm-msg.ok { @apply bg-success-tint text-success; }
+  & .crm-msg.bad { @apply bg-danger-tint text-danger; }
+  & .crm-views, & .crm-kinds { @apply my-3 flex flex-wrap gap-2; }
+  & .crm-chip { @apply inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-full border border-line-strong bg-surface px-3.5 text-[13px] font-medium text-fg hover:border-accent-line hover:bg-accent-tint focus-visible:[box-shadow:var(--focus-ring)] focus-visible:outline-none; }
+  & .crm-chip.on { @apply border-accent-line bg-accent-tint text-accent-ink; }
+  & .crm-n { @apply rounded-full bg-surface-3 px-1.5 text-xs tabular-nums text-fg-muted; }
+  & .crm-tools { @apply mb-3 flex flex-wrap items-end gap-2.5; }
+  & .crm-lbl { @apply grid gap-1 text-xs font-medium text-fg-muted; }
+  & .crm-lbl .fld { @apply w-full min-w-0; }
+  & .crm-tools .crm-lbl { @apply min-w-36 flex-1 basis-36; }
+  & .crm-tools .crm-grow { @apply basis-64; }
+  & .crm-bulk { @apply mb-3 flex flex-wrap items-end gap-2.5 rounded-[var(--card-radius)] border border-accent-line bg-accent-tint px-4 py-3; }
+  & .crm-bulk b { @apply self-center text-sm text-fg; }
+  & .crm-table td { @apply align-top; }
+  & .crm-table input[type="checkbox"] { @apply h-5 w-5 accent-[var(--accent)]; }
+  & .crm-name a { @apply inline-flex min-h-6 items-center font-medium; }
+  & .crm-sub { @apply block text-xs text-fg-subtle; }
+  & .crm-sub a, & .crm-tl a, & .crm-dup a { @apply underline underline-offset-2; }
+  & .crm-muted { @apply text-sm text-fg-subtle; }
+  & .crm-late { @apply font-medium text-danger; }
+  & .crm-num { @apply tabular-nums; }
+  & .crm-pager { @apply flex flex-wrap items-center justify-between gap-2 border-t border-line px-4 py-3 text-sm text-fg-muted sm:px-5; }
+  & .crm-card { @apply mb-4 rounded-[var(--card-radius)] border border-line bg-surface p-4 sm:p-5; }
+  & .crm-card h2 { @apply mt-0 mb-3 font-display text-base font-semibold text-fg; }
+  & .crm-card-h { @apply mb-3 flex items-center justify-between gap-2; }
+  & .crm-card-h h2 { @apply mb-0; }
+  & .crm-card-h .btn { @apply h-11; }
+  & .crm-grid { @apply grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3; }
+  & .crm-wide { @apply sm:col-span-2 lg:col-span-3; }
+  & .crm-acts { @apply mt-3 flex flex-wrap gap-2; }
+  & .crm-head .crm-acts { @apply mt-0; }
+  & .crm-dup { @apply mb-3 rounded-[var(--card-radius)] border border-[color-mix(in_oklab,var(--warning-ink)_45%,transparent)] bg-warning-tint px-4 py-3 text-sm text-fg; }
+  & .crm-dup ul { @apply my-2 grid gap-1.5 pl-5; }
+  & .crm-dup a { @apply inline-flex min-h-6 items-center font-medium; }
+  & .crm-dup .btn { @apply h-11; }
+  & .crm-crumb { @apply mb-2 flex flex-wrap items-center gap-1.5 text-sm text-fg-muted; }
+  & .crm-crumb a { @apply inline-flex min-h-6 items-center; }
+  & .crm-cols { @apply grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[minmax(0,1fr)_320px]; }
+  & .crm-cols > * { @apply min-w-0; }
+  & .crm-dl { @apply m-0 grid grid-cols-[110px_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm; }
+  & .crm-dl dt { @apply text-fg-muted; }
+  & .crm-dl dd { @apply m-0 break-words text-fg; }
+  & .crm-form { @apply grid gap-3; }
+  & .crm-fu { @apply m-0 grid list-none gap-2 p-0; }
+  & .crm-fu li { @apply flex flex-wrap items-center justify-between gap-3 rounded-[var(--p-radius-lg)] border border-line bg-surface-2 px-4 py-3; }
+  & .crm-fu li.late { @apply border-[color-mix(in_oklab,var(--danger-ink)_45%,transparent)]; }
+  & .crm-fu li > div:first-child { @apply min-w-0 flex-1 basis-56; }
+  & .crm-fu li .crm-acts { @apply mt-0; }
+  & .crm-fu a { @apply inline-flex min-h-6 items-center; }
+  & .crm-tl { @apply m-0 grid list-none gap-3 p-0; }
+  & .crm-tl li { @apply grid grid-cols-[88px_minmax(0,1fr)] gap-3 border-t border-line pt-3 text-sm first:border-t-0 first:pt-0; }
+  & .crm-tl-k { @apply text-xs font-medium tracking-[0.04em] text-fg-subtle uppercase; }
+  & .crm-tl a { @apply inline-flex min-h-6 items-center; }
+  & .crm-custfu { @apply mt-4; }
+  & .crm-kpis { @apply mb-1; }
+  & button.crm-kpi { @apply cursor-pointer text-left font-[inherit] hover:border-accent-line hover:bg-accent-tint focus-visible:[box-shadow:var(--focus-ring)] focus-visible:outline-none; }
+  & .crm-colval { @apply block w-full text-xs font-normal text-fg-subtle tabular-nums; }
+  & .tdm-card[data-lead] { @apply cursor-pointer focus-visible:[box-shadow:var(--focus-ring)] focus-visible:outline-none; }
+  & .crm-defs { @apply mt-3; }
+  & .crm-defs dt { @apply capitalize; }
+  & .crm-fs { @apply m-0 grid gap-1 rounded-[var(--p-radius-lg)] border border-line p-3; }
+  & .crm-fs legend { @apply px-1 text-xs font-medium text-fg-muted; }
+  & .crm-ai .bi-badge { @apply mb-3; }
+  & .crm-sumdl { @apply mb-2; }
 }

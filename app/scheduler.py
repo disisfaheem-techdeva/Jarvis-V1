@@ -109,6 +109,14 @@ class Scheduler:
         except Exception as e:
             print(f"[scheduler] website scans skipped: {e}", flush=True)
 
+        # CRM rules the owner switched on: share new leads in turn, and plan a
+        # follow-up when an open lead goes quiet. In-app only (app/crm.py).
+        try:
+            from .crm import run_due as crm_rules_due
+            emitted += crm_rules_due()
+        except Exception as e:
+            print(f"[scheduler] CRM rules skipped: {e}", flush=True)
+
         # Trial data retention: warn 3 days before, delete unpaid trials 15 days
         # after the trial ended (hourly inside).
         try:

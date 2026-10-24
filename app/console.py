@@ -77,6 +77,8 @@ Fields:
             navigate (open a page of the dashboard),
             book_appointment, reschedule_appointment, cancel_appointment,
             complete_appointment (mark done), add_customer, add_lead,
+            add_followup (plan a follow-up for a lead or customer: call,
+                visit, task), complete_followup (mark a planned follow-up done),
             add_expense, schedule_post (a post to go out at a later time),
             write_campaign (write a PAID ad campaign as a DRAFT the owner
                 checks and launches: only when they ask for an ad, ad
@@ -95,6 +97,12 @@ Fields:
             cancel_appointment / complete_appointment: appointment_id
             add_customer: name, phone, email, notes
             add_lead: name, phone, service
+            add_followup: lead_id (the "id" of one of recent_leads) or
+                customer_name, title (what to do, e.g. "Call about the
+                price"), kind (task, call, visit, meeting), due (ISO time with
+                +05:00), due_words (e.g. "tomorrow at 11")
+            complete_followup: followup_id (the "id" of one of crm_followups),
+                outcome (what happened, if said)
             add_expense: description, amount (number, PKR), category, method
                 (cash, card, bank, jazzcash, easypaisa), spent_on (YYYY-MM-DD)
             write_campaign: provider ("meta" for Facebook/Instagram, the
@@ -563,8 +571,16 @@ _MORE = (
     ("packages", "SELECT name, price, active FROM packages ORDER BY active DESC, name LIMIT 20", "rows"),
     ("offers", """SELECT title, discount_type, discount_value, starts_on, ends_on, active FROM offers
                    WHERE active ORDER BY created_at DESC LIMIT 15""", "rows"),
-    ("recent_leads", """SELECT name, phone, service, status, source, created_at::date AS added FROM leads
+    ("recent_leads", """SELECT id, name, phone, service, status, source, created_at::date AS added FROM leads
                          ORDER BY created_at DESC LIMIT 15""", "rows"),
+    # the team's planned follow-ups (CRM, db/77); ids for complete_followup
+    ("crm_followups", """SELECT a.id, a.title, a.kind, to_char(a.due_at AT TIME ZONE 'Asia/Karachi', 'YYYY-MM-DD HH24:MI') AS due,
+                                a.due_at < now() AS overdue, a.lead_id, l.name AS lead, a.customer_id, c.name AS customer,
+                                u.name AS assigned_to
+                           FROM crm_activities a LEFT JOIN leads l ON l.id = a.lead_id
+                           LEFT JOIN customers c ON c.id = a.customer_id LEFT JOIN users u ON u.id = a.assigned_to
+                          WHERE a.done_at IS NULL AND a.kind <> 'note'
+                          ORDER BY a.due_at ASC NULLS LAST LIMIT 30""", "rows"),
     ("recent_customers", """SELECT name, phone, status, created_at::date AS added FROM customers
                              ORDER BY created_at DESC LIMIT 15""", "rows"),
     ("invoices", """SELECT count(*) FILTER (WHERE status IN ('issued','partial')) AS unpaid,
@@ -591,7 +607,7 @@ _MORE = (
 FACT_SECTION = {
     "business_profile_from_website": "business",
     "upcoming_appointments": "crm", "appointments": "crm", "leads": "crm", "customers": "crm",
-    "recent_leads": "crm", "recent_customers": "crm",
+    "recent_leads": "crm", "recent_customers": "crm", "crm_followups": "crm",
     "services": "business", "business_hours": "business", "products": "business", "packages": "business",
     "orders": "operations",
     "phone_calls": "chats", "social_inbox": "chats",
@@ -768,6 +784,10 @@ def _done_text(action, args):
         return "Done, %s is added to your customers." % (name or "they")
     if action == "add_lead":
         return "Done, %s is added as a new lead." % (name or "they")
+    if action == "add_followup":
+        return "Done, the follow-up is planned%s." % (" for " + str(args.get("due_words")) if args.get("due_words") else "")
+    if action == "complete_followup":
+        return "Done, it's marked as done."
     if action == "add_expense":
         try:
             amt = "PKR {:,.0f}".format(float(str(args.get("amount")).replace(",", "")))

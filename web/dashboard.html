@@ -113,7 +113,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=d9515ca345">
+<link rel="stylesheet" href="/assets/td.css?v=64a61c8808">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -7994,7 +7994,7 @@ function typeHidden(id){
     { num:'02', name:'Jarvis & AI',    icon:'spark', ids:['console','ai','hermes','bizagent','needshuman','history','tools'], sep:true },
     { num:'03', name:'Chats',          icon:'chat',  ids:['inbox','socialinbox','calls'] },
     // Management (23 Oct 2026): the day-to-day pages sit together, Operations next to CRM and Team
-    { num:'04', name:'CRM',            icon:'users', ids:['leads','sales','clientwork','customers','pipeline','appointments','calendar'], group:'Management' },
+    { num:'04', name:'CRM',            icon:'users', ids:['leads','sales','clientwork','customers','pipeline','appointments','calendar','followups','crmreports'], group:'Management' },
     { num:'05', name:'Operations',     icon:'box',   ids:['orders','inventory','dailyentry'] },
     { num:'06', name:'Team & HR',      icon:'badge', ids:['team','attendance','hr','roles'] },
     { num:'07', name:'Marketing',      icon:'mega',  ids:['marketing','posts','captions','autopilot','advisor','analytics'], sep:true },
@@ -8004,7 +8004,7 @@ function typeHidden(id){
   ];
   // the pages added in this block (they are not in NAV)
   var NEW = { history:'Execution History', tools:'Agents', pipeline:'Pipeline',
-              analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer', usage:'AI usage', roles:'Roles', bizprofile:'Business Profile' };
+              analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer', usage:'AI usage', roles:'Roles', bizprofile:'Business Profile', followups:'Follow-ups', crmreports:'CRM Reports' };
   // tab names that follow the approved structure; everything else keeps its own name
   var LABEL = { overview:'Overview', console:'Jarvis Assistant', ai:'AI Agents', needshuman:'Approval Queue',
                 marketing:'Campaigns', posts:'Social Media Publisher', autopilot:'Content Calendar',
@@ -9934,6 +9934,683 @@ function biWire(){
   };
 }
 window.addEventListener('hashchange', function(){ if (currentView() !== 'bizprofile') biStop(); else if (BI.prof !== undefined) { BI.prof = undefined; BI.scans = undefined; } });
+
+/* =====================================================================
+   CRM upgrade (24 Oct 2026; app/crm.py, db/77, docs/CRM-UPGRADE.md).
+   Leads: searched, filtered and paged on the server, with saved views and
+   bulk assign/move. A lead's own page: details, stage, owner, conversion,
+   follow-ups and its whole history. Follow-ups: a new CRM tab, after the
+   existing ones. Customers: their follow-ups and notes. The AI agent's own
+   follow-up (leads.followup_at) is shown, never changed here.
+   ===================================================================== */
+var CRM = { list: undefined, key: '', f: { q: '', status: '', source: '', owner: '', follow: '', sort: 'newest', page: 1 },
+            sel: {}, team: undefined, rec: undefined, rid: null, msg: null, add: false, dup: null, busy: false,
+            fu: undefined, fuView: 'mine', comp: null, cust: {} };
+var CRM_SRC = { hermes: 'WhatsApp agent', human: 'Team', imported: 'Imported', api: 'Website', manual: 'Added by hand',
+                phone_ai: 'Phone assistant', facebook: 'Facebook', instagram: 'Instagram' };
+var CRM_KIND = { task: 'Follow-up', call: 'Call', meeting: 'Meeting', visit: 'Visit', whatsapp: 'WhatsApp', email: 'Email', note: 'Note' };
+var CRM_STATUSES = ['new', 'qualified', 'booked', 'showed', 'sold', 'lost', 'fake'];
+var CRM_VIEWS = [['', 'All leads'], ['mine', 'My leads'], ['new', 'New'], ['overdue', 'Overdue follow-ups'], ['none', 'No follow-up planned'], ['qualified', 'Qualified']];
+function crmTeam(){
+  if (CRM.team !== undefined) return;
+  CRM.team = null;
+  api('/crm/team').then(function(r){ CRM.team = r.ok ? r.data.people : []; renderShell(); });
+}
+function crmQuery(){
+  var f = CRM.f, p = [];
+  ['q', 'status', 'source', 'owner', 'follow', 'sort'].forEach(function(k){ if (f[k]) p.push(k + '=' + encodeURIComponent(f[k])); });
+  p.push('page=' + f.page, 'page_size=25');
+  return p.join('&');
+}
+function crmLoad(force){
+  var k = crmQuery();
+  if (!force && CRM.key === k && (CRM.list !== undefined || CRM.pending === k)) return;
+  CRM.key = k; CRM.list = undefined; CRM.pending = k;
+  api('/crm/leads?' + k).then(function(r){
+    if (CRM.key !== k) return;
+    CRM.pending = null;
+    CRM.list = r.ok ? r.data : { error: r.status === 0 ? 'The server could not be reached.' : ((r.data && r.data.detail) || 'The leads could not be loaded.'), status: r.status };
+    if (currentView() === 'leads') renderShell();
+  });
+}
+function crmSavedView(){
+  var f = CRM.f;
+  if (f.owner === 'mine' || f.owner === 'me') return 'mine';
+  if (f.follow) return f.follow;
+  if (f.status === 'new' || f.status === 'qualified') return f.status;
+  return '';
+}
+function crmSetView(v){
+  CRM.f = { q: CRM.f.q, status: '', source: '', owner: '', follow: '', sort: CRM.f.sort, page: 1 };
+  if (v === 'mine') CRM.f.owner = 'me';
+  else if (v === 'overdue' || v === 'none') CRM.f.follow = v;
+  else if (v) CRM.f.status = v;
+  CRM.sel = {}; crmLoad(true); renderShell();
+}
+function crmOpts(list, sel){ return list.map(function(o){ return '<option value="' + esc(o[0]) + '"' + (String(sel) === String(o[0]) ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join(''); }
+function crmOwnerOpts(sel, withAll){
+  var o = withAll ? [['', 'Anyone'], ['me', 'Me'], ['none', 'Nobody yet']] : [['', 'Nobody yet']];
+  (CRM.team || []).forEach(function(p){ o.push([p.id, p.name + (p.me ? ' (you)' : '')]); });
+  return crmOpts(o, sel);
+}
+function crmIso(local){ if (!local) return null; var d = new Date(local); return isNaN(d) ? null : d.toISOString(); }
+function crmLocal(d){ var p = function(n){ return ('0' + n).slice(-2); }; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes()); }
+function crmTomorrow(){ var d = new Date(); d.setDate(d.getDate() + 1); d.setHours(11, 0, 0, 0); return crmLocal(d); }
+function crmNext(l){
+  if (!l.next_due_at && !l.next_title) return '<span class="crm-muted">' + (['sold', 'lost', 'fake'].indexOf(l.status) === -1 ? 'Nothing planned' : '—') + '</span>';
+  return '<span class="' + (l.overdue ? 'crm-late' : '') + '">' + (l.overdue ? 'Overdue · ' : '') + (l.next_due_at ? when(l.next_due_at) : 'No date') + '</span>' +
+    '<span class="crm-sub">' + esc(l.next_title || '') + '</span>';
+}
+
+/* ---------------------------------------------------------------- leads list */
+function crmListHTML(){
+  var d = CRM.list, f = CRM.f, own = isOwner();
+  var out = '<div class="crm-head"><div><h1>Leads</h1><p class="sub">Everyone who might buy from you, who looks after them, and what happens next.</p></div>' +
+    '<button class="btn primary" type="button" id="crm-add">' + (CRM.add ? 'Close' : 'Add lead') + '</button></div>';
+  if (CRM.add) out += crmAddHTML();
+  if (CRM.msg) out += '<p class="crm-msg ' + (CRM.msg.bad ? 'bad' : 'ok') + '" role="status">' + esc(CRM.msg.text) + '</p>';
+  var sv = crmSavedView();
+  out += '<div class="crm-views" role="group" aria-label="Saved views">' + CRM_VIEWS.map(function(v){
+    return '<button type="button" class="crm-chip' + (sv === v[0] && (v[0] || (!f.status && !f.owner && !f.follow && !f.source)) ? ' on' : '') + '" data-crmview="' + v[0] + '"' +
+      (sv === v[0] ? ' aria-pressed="true"' : ' aria-pressed="false"') + '>' + esc(v[1]) +
+      (d && d.by_status && (v[0] === 'new' || v[0] === 'qualified') ? ' <span class="crm-n">' + esc(d.by_status[v[0]] || 0) + '</span>' : '') + '</button>';
+  }).join('') + '</div>';
+  out += '<div class="crm-tools"><label class="crm-lbl crm-grow">Search<input class="fld" id="crm-q" type="search" placeholder="Name, phone, email, company" value="' + esc(f.q) + '"></label>' +
+    '<label class="crm-lbl">Stage<select class="fld" id="crm-st">' + crmOpts([['', 'Any stage']].concat(CRM_STATUSES.map(function(s){ return [s, stageName(s)]; })), f.status) + '</select></label>' +
+    '<label class="crm-lbl">Source<select class="fld" id="crm-src">' + crmOpts([['', 'Any source']].concat(Object.keys(CRM_SRC).map(function(k){ return [k, CRM_SRC[k]]; })), f.source) + '</select></label>' +
+    '<label class="crm-lbl">Owner<select class="fld" id="crm-own">' + crmOwnerOpts(f.owner, true) + '</select></label>' +
+    '<label class="crm-lbl">Follow-up<select class="fld" id="crm-fol">' + crmOpts([['', 'Any'], ['overdue', 'Overdue'], ['today', 'Due today'], ['none', 'Nothing planned']], f.follow) + '</select></label>' +
+    '<label class="crm-lbl">Sort<select class="fld" id="crm-sort">' + crmOpts([['newest', 'Newest'], ['oldest', 'Oldest'], ['updated', 'Recently changed'], ['followup', 'Next follow-up'], ['value', 'Value'], ['name', 'Name']], f.sort) + '</select></label></div>';
+  if (d === undefined) return out + panel('Leads', loading('Loading leads…'));
+  if (d.error) return out + panel('Leads', errState(d.error));
+  var L = d.leads || [], ids = Object.keys(CRM.sel).filter(function(k){ return CRM.sel[k]; });
+  if (ids.length) out += '<div class="crm-bulk" role="region" aria-label="With the selected leads"><b>' + ids.length + ' selected</b>' +
+    '<label class="crm-lbl">Give to<select class="fld" id="crm-b-own">' + crmOwnerOpts('', false) + '</select></label><button class="btn" type="button" id="crm-b-own-go">Assign</button>' +
+    '<label class="crm-lbl">Move to<select class="fld" id="crm-b-st">' + crmOpts(CRM_STATUSES.map(function(s){ return [s, stageName(s)]; }), '') + '</select></label><button class="btn" type="button" id="crm-b-st-go">Move</button>' +
+    '<button class="btn" type="button" id="crm-b-x">Clear</button></div>';
+  var body;
+  if (!L.length) body = empty(d.total === 0 && !f.q && !f.status && !f.owner && !f.follow && !f.source ? 'No leads yet' : 'No lead matches',
+    d.total === 0 && !f.q ? 'Leads from WhatsApp, your website and ads arrive here by themselves. You can also add one.' : 'Change the search or filters.');
+  else body = '<div class="tbl-wrap" tabindex="0" role="region" aria-label="Leads table"><table class="crm-table"><thead><tr><th scope="col"><input type="checkbox" id="crm-all" aria-label="Select all on this page"></th>' +
+    '<th scope="col">Lead</th><th scope="col">Stage</th><th scope="col">Owner</th><th scope="col">Next follow-up</th><th scope="col">Value</th><th scope="col">Source</th><th scope="col">Added</th></tr></thead><tbody>' +
+    L.map(function(l){
+      return '<tr><td><input type="checkbox" data-crmsel="' + esc(l.id) + '"' + (CRM.sel[l.id] ? ' checked' : '') + ' aria-label="Select ' + esc(l.name || 'lead') + '"></td>' +
+        '<td class="crm-name"><a href="#/leads?id=' + esc(l.id) + '">' + esc(l.name || 'Unnamed') + '</a><span class="crm-sub">' + esc([l.company, l.phone, l.email].filter(Boolean).join(' · ') || '—') + '</span></td>' +
+        '<td><span class="tag">' + esc(stageName(l.status)) + '</span>' + (l.converted_customer_id ? '<span class="crm-sub">Customer</span>' : '') + '</td>' +
+        '<td>' + (l.owner_name ? esc(l.owner_name) : '<span class="crm-muted">Nobody yet</span>') + '</td>' +
+        '<td>' + crmNext(l) + '</td><td class="crm-num">' + (l.est_revenue ? money(l.est_revenue) : '—') + '</td>' +
+        '<td>' + esc(CRM_SRC[l.source] || l.source || '—') + '</td><td>' + onlyDate(l.created_at) + '</td></tr>';
+    }).join('') + '</tbody></table></div>';
+  var pages = Math.max(1, Math.ceil(d.total / d.page_size));
+  var foot = '<div class="crm-pager"><span>' + (d.total ? 'Showing ' + ((d.page - 1) * d.page_size + 1) + '–' + Math.min(d.total, d.page * d.page_size) + ' of ' + d.total : '') + '</span>' +
+    '<span><button class="btn" type="button" id="crm-prev"' + (d.page <= 1 ? ' disabled' : '') + '>Previous</button> ' +
+    '<button class="btn" type="button" id="crm-next"' + (d.page >= pages ? ' disabled' : '') + '>Next</button></span></div>';
+  return out + panel('Leads', body + (L.length ? foot : ''), '<span class="pill count">' + esc(d.total) + '</span>');
+}
+function crmAddHTML(){
+  var dup = CRM.dup;
+  return '<section class="crm-card" aria-labelledby="crm-add-h"><h2 id="crm-add-h">New lead</h2><div class="crm-grid">' +
+    '<label class="crm-lbl">Name<input class="fld" id="crm-n-name" required autocomplete="off"></label>' +
+    '<label class="crm-lbl">Phone<input class="fld" id="crm-n-phone" type="tel" autocomplete="off"></label>' +
+    '<label class="crm-lbl">Email<input class="fld" id="crm-n-email" type="email" autocomplete="off"></label>' +
+    '<label class="crm-lbl">Company (if a business)<input class="fld" id="crm-n-co" autocomplete="off"></label>' +
+    '<label class="crm-lbl">Interested in<input class="fld" id="crm-n-svc" autocomplete="off"></label>' +
+    '<label class="crm-lbl">Likely value (PKR)<input class="fld" id="crm-n-val" type="number" min="0" step="1" inputmode="numeric"></label></div>' +
+    '<div id="crm-dup">' + (dup && dup.length ? crmDupHTML(dup, 'Already here — check before adding:') : '') + '</div>' +
+    '<div class="crm-acts"><button class="btn primary" type="button" id="crm-n-go"' + (CRM.busy ? ' disabled' : '') + '>Save lead</button></div></section>';
+}
+function crmDupHTML(list, title){
+  return '<div class="crm-dup" role="status"><b>' + esc(title) + '</b><ul>' + list.map(function(x){
+    var href = x.type === 'lead' ? '#/leads?id=' + esc(x.id) : '#/customers?c=' + esc(x.id);
+    return '<li><a href="' + href + '">' + esc(x.name) + '</a> <span class="crm-sub">' + esc(x.type === 'lead' ? 'lead' : 'customer') + ' · ' + esc(x.why || '') + (x.phone ? ' · ' + esc(x.phone) : '') + '</span></li>';
+  }).join('') + '</ul><p class="crm-sub">Two people can share a number, so nothing is merged for you.</p></div>';
+}
+
+/* ---------------------------------------------------------------- one lead */
+function crmRecLoad(id){
+  CRM.rid = id; CRM.rec = undefined;
+  api('/crm/leads/' + encodeURIComponent(id)).then(function(r){
+    if (CRM.rid !== id) return;
+    CRM.rec = r.ok ? r.data : { error: r.status === 404 ? 'This lead was not found. It may belong to another business or have been removed.' : ((r.data && r.data.detail) || 'The lead could not be loaded.') };
+    if (currentView() === 'leads') renderShell();
+  });
+}
+function crmComposerHTML(ref){
+  var c = CRM.comp || { kind: 'task' };
+  var task = c.kind === 'task';
+  return '<section class="crm-card" aria-labelledby="crm-comp-h"><h2 id="crm-comp-h">Add to this ' + esc(ref) + '</h2><div class="crm-kinds" role="group" aria-label="What to add">' +
+    ['task', 'call', 'whatsapp', 'visit', 'meeting', 'note'].map(function(k){
+      return '<button type="button" class="crm-chip' + (c.kind === k ? ' on' : '') + '" data-crmkind="' + k + '" aria-pressed="' + (c.kind === k) + '">' +
+        esc({ task: 'Plan a follow-up', call: 'Log a call', whatsapp: 'Log a WhatsApp chat', visit: 'Log a visit', meeting: 'Log a meeting', note: 'Note' }[k]) + '</button>';
+    }).join('') + '</div><div class="crm-grid">' +
+    '<label class="crm-lbl crm-wide">' + (task ? 'What to do' : c.kind === 'note' ? 'Note' : 'What happened') + '<input class="fld" id="crm-c-title" maxlength="200" placeholder="' +
+      (task ? 'e.g. Call about the price' : c.kind === 'note' ? 'e.g. Prefers evening calls' : 'e.g. Talked about the package') + '"></label>' +
+    (task ? '<label class="crm-lbl">When<input class="fld" id="crm-c-due" type="datetime-local" value="' + crmTomorrow() + '"></label>' +
+      '<label class="crm-lbl">Who<select class="fld" id="crm-c-who">' + crmOwnerOpts((CRM.team || []).filter(function(p){ return p.me; }).map(function(p){ return p.id; })[0] || '', false) + '</select></label>' +
+      '<label class="crm-lbl">Priority<select class="fld" id="crm-c-pri">' + crmOpts([['normal', 'Normal'], ['high', 'High'], ['low', 'Low']], 'normal') + '</select></label>'
+      : c.kind !== 'note' ? '<label class="crm-lbl crm-wide">Outcome<input class="fld" id="crm-c-out" maxlength="500" placeholder="e.g. Interested, will visit Saturday"></label>' : '') +
+    '</div><div class="crm-acts"><button class="btn primary" type="button" id="crm-c-go"' + (CRM.busy ? ' disabled' : '') + '>Save</button></div></section>';
+}
+function crmTimeline(items){
+  if (!items.length) return '<p class="crm-muted">Nothing yet. Calls, visits, notes and changes appear here.</p>';
+  return '<ol class="crm-tl">' + items.map(function(i){
+    return '<li><span class="crm-tl-k">' + esc(i.k) + '</span><div><b>' + esc(i.t) + '</b>' + (i.s ? '<div class="crm-sub">' + i.s + '</div>' : '') +
+      '<div class="crm-sub">' + when(i.at) + (i.by ? ' · ' + esc(i.by) : '') + '</div></div></li>';
+  }).join('') + '</ol>';
+}
+var CRM_FIELD = { status: 'Stage', notes: 'Notes', service: 'Interest', assigned_operator: 'Owner', name: 'Name', phone: 'Phone', email: 'Email',
+                  company: 'Company', est_revenue: 'Value', priority: 'Priority', lost_reason: 'Lost reason' };
+function crmRecHTML(){
+  var d = CRM.rec, own = isOwner();
+  var crumb = '<nav class="crm-crumb" aria-label="Breadcrumb"><a href="#/leads">Leads</a> <span aria-hidden="true">›</span> <span>' + esc(d && d.lead ? d.lead.name : 'Lead') + '</span></nav>';
+  if (d === undefined) return crumb + panel('Lead', loading('Loading the lead…'));
+  if (d.error) return crumb + panel('Lead', errState(d.error));
+  var l = d.lead, open = d.activities.filter(function(a){ return !a.done_at && a.kind !== 'note'; });
+  var out = crumb + '<div class="crm-head"><div><h1>' + esc(l.name) + '</h1><p class="sub">' + esc([l.company, l.service ? 'Interested in ' + l.service : ''].filter(Boolean).join(' · ') || 'Lead') +
+    ' · added ' + onlyDate(l.created_at) + '</p></div><div class="crm-acts">' +
+    (l.converted_customer_id ? '<a class="btn" href="#/customers?c=' + esc(l.converted_customer_id) + '">Customer: ' + esc(l.customer_name || 'open') + '</a>'
+      : '<button class="btn primary" type="button" id="crm-conv"' + (CRM.busy ? ' disabled' : '') + '>Make customer</button>') + '</div></div>';
+  if (CRM.msg) out += '<p class="crm-msg ' + (CRM.msg.bad ? 'bad' : 'ok') + '" role="status">' + esc(CRM.msg.text) + '</p>';
+  if (CRM.cands) out += '<div class="crm-dup" role="alert"><b>More than one customer has this number. Which one is it?</b><ul>' + CRM.cands.map(function(c){
+    return '<li><button class="btn" type="button" data-crmpick="' + esc(c.id) + '">' + esc(c.name) + (c.phone ? ' · ' + esc(c.phone) : '') + '</button></li>'; }).join('') +
+    '<li><button class="btn" type="button" data-crmpick="__new">None of them: add a new customer</button></li></ul></div>';
+  if (d.duplicates.length && !l.converted_customer_id) out += crmDupHTML(d.duplicates, 'Possibly the same person:');
+  out += '<div class="crm-cols"><div class="crm-main">';
+  out += '<section class="crm-card" aria-labelledby="crm-st-h"><h2 id="crm-st-h">Stage and owner</h2><div class="crm-grid">' +
+    '<label class="crm-lbl">Stage<select class="fld" id="crm-r-st">' + crmOpts(CRM_STATUSES.map(function(s){ return [s, stageName(s)]; }), l.status) + '</select></label>' +
+    '<label class="crm-lbl">Owner<select class="fld" id="crm-r-own">' + crmOwnerOpts(l.assigned_operator || '', false) + '</select></label>' +
+    (l.status === 'lost' ? '<label class="crm-lbl crm-wide">Why it was lost<input class="fld" id="crm-r-lost" maxlength="300" value="' + esc(l.lost_reason || '') + '"></label>' : '') +
+    '</div>' + (l.followup_at ? '<p class="crm-sub">Your WhatsApp agent follows up by itself on ' + when(l.followup_at) + '. That is separate from your team\'s follow-ups below.</p>' : '') + '</section>';
+  out += crmComposerHTML('lead');
+  out += '<section class="crm-card" aria-labelledby="crm-open-h"><h2 id="crm-open-h">Planned follow-ups</h2>' + (open.length ? '<ul class="crm-fu">' + open.map(crmFuRow).join('') + '</ul>' : '<p class="crm-muted">Nothing planned. Plan the next step above so this lead is not forgotten.</p>') + '</section>';
+  var tl = [];
+  d.activities.filter(function(a){ return a.done_at || a.kind === 'note'; }).forEach(function(a){
+    tl.push({ k: CRM_KIND[a.kind] || a.kind, t: a.title, s: esc(a.outcome || a.body || ''), at: a.done_at || a.created_at, by: a.created_name || (a.source === 'jarvis' ? 'Jarvis' : '') });
+  });
+  d.changes.forEach(function(c){
+    var ch = (c.detail && c.detail.changes) || {}, bits = Object.keys(ch).map(function(k){
+      var to = ch[k].to; if (k === 'status') to = stageName(to); if (k === 'assigned_operator') to = ((CRM.team || []).filter(function(p){ return p.id === to; })[0] || {}).name || (to ? 'someone' : 'nobody');
+      return (CRM_FIELD[k] || k) + ': ' + (to === null || to === '' ? '—' : to);
+    });
+    if (c.action === 'lead.convert') bits = ['Became a customer'];
+    if (bits.length) tl.push({ k: 'Change', t: bits.join(' · '), at: c.at, by: c.actor_type === 'human' ? '' : c.actor_type });
+  });
+  d.conversations.forEach(function(c){ tl.push({ k: 'WhatsApp', t: 'Conversation with your agent (' + (c.status || '') + ')', s: '<a href="#/inbox">Open in Chats</a>', at: c.created_at }); });
+  d.appointments.forEach(function(a){ tl.push({ k: 'Booking', t: (a.service || 'Appointment') + ' · ' + a.status, s: esc(a.at), at: a.at.replace(' ', 'T') }); });
+  tl.sort(function(a, b){ return new Date(b.at) - new Date(a.at); });
+  out += '<section class="crm-card" aria-labelledby="crm-tl-h"><h2 id="crm-tl-h">History</h2>' + crmTimeline(tl) + '</section></div>';
+  out += '<aside class="crm-side"><section class="crm-card" aria-labelledby="crm-det-h"><div class="crm-card-h"><h2 id="crm-det-h">Details</h2>' +
+    '<button class="btn" type="button" id="crm-r-edit">' + (CRM.edit ? 'Cancel' : 'Edit') + '</button></div>';
+  if (CRM.edit) out += '<div class="crm-form">' + [['name', 'Name', 'text'], ['phone', 'Phone', 'tel'], ['email', 'Email', 'email'], ['company', 'Company', 'text'],
+      ['service', 'Interested in', 'text'], ['est_revenue', 'Likely value (PKR)', 'number']].map(function(x){
+      return '<label class="crm-lbl">' + esc(x[1]) + '<input class="fld" data-crmf="' + x[0] + '" type="' + x[2] + '" value="' + esc(l[x[0]] === null || l[x[0]] === undefined ? '' : l[x[0]]) + '"></label>';
+    }).join('') + '<label class="crm-lbl">Notes<textarea class="fld" data-crmf="notes" rows="3">' + esc(l.notes || '') + '</textarea></label>' +
+    '<div class="crm-acts"><button class="btn primary" type="button" id="crm-r-save">Save details</button></div></div>';
+  else out += '<dl class="crm-dl">' + [['Phone', l.phone], ['Email', l.email], ['Company', l.company], ['Interested in', l.service],
+      ['Likely value', l.est_revenue ? money(l.est_revenue) : null, true], ['Source', CRM_SRC[l.source] || l.source], ['Last contacted', l.last_contacted_at ? when(l.last_contacted_at) : null, true],
+      ['Notes', l.notes]].map(function(x){ return '<dt>' + esc(x[0]) + '</dt><dd>' + (x[1] ? (x[2] ? x[1] : esc(x[1])) : '<span class="crm-muted">—</span>') + '</dd>'; }).join('') + '</dl>';
+  out += '</section></aside></div>';
+  return out;
+}
+function crmFuRow(a){
+  return '<li class="' + (a.overdue ? 'late' : '') + '"><div><b>' + esc(a.title) + '</b><span class="crm-sub">' + esc(CRM_KIND[a.kind] || a.kind) + ' · ' +
+    (a.due_at ? (a.overdue ? '<span class="crm-late">Overdue · ' + when(a.due_at) + '</span>' : when(a.due_at)) : 'No date') +
+    (a.assigned_name ? ' · ' + esc(a.assigned_name) : '') + (a.priority === 'high' ? ' · <b>High</b>' : '') +
+    (a.lead_name || a.customer_name ? ' · <a href="' + (a.lead_id ? '#/leads?id=' + esc(a.lead_id) : '#/customers?c=' + esc(a.customer_id)) + '">' + esc(a.lead_name || a.customer_name) + '</a>' : '') + '</span></div>' +
+    '<div class="crm-acts"><button class="btn" type="button" data-crmdone="' + esc(a.id) + '">Done</button>' +
+    '<button class="btn" type="button" data-crmlater="' + esc(a.id) + '">Tomorrow</button></div></li>';
+}
+
+/* ---------------------------------------------------------------- follow-ups tab */
+function crmFuLoad(){
+  var v = CRM.fuView;
+  CRM.fu = undefined; CRM.fuPending = v;
+  api('/crm/activities?view=' + v + '&page_size=100').then(function(r){
+    if (CRM.fuView !== v) return;
+    CRM.fuPending = null;
+    CRM.fu = r.ok ? r.data : { error: (r.data && r.data.detail) || 'Follow-ups could not be loaded.' };
+    if (currentView() === 'followups') renderShell();
+  });
+}
+VIEWS.followups = function(){
+  crmTeam();
+  if (CRM.fu === undefined && CRM.fuPending !== CRM.fuView) crmFuLoad();
+  var d = CRM.fu, c = (d && d.counts) || {};
+  var out = '<h1>Follow-ups</h1><p class="sub">What your team has planned for leads and customers. Overdue ones stay here until they are done or moved.</p>';
+  if (CRM.msg) out += '<p class="crm-msg ' + (CRM.msg.bad ? 'bad' : 'ok') + '" role="status">' + esc(CRM.msg.text) + '</p>';
+  out += '<div class="crm-views" role="tablist" aria-label="Which follow-ups">' + [['mine', 'Mine', c.mine], ['today', 'Due today', c.today], ['overdue', 'Overdue', c.overdue],
+    ['upcoming', 'Upcoming'], ['all', 'All open', c.open], ['done', 'Done']].map(function(v){
+    return '<button type="button" role="tab" class="crm-chip' + (CRM.fuView === v[0] ? ' on' : '') + '" aria-selected="' + (CRM.fuView === v[0]) + '" data-crmfu="' + v[0] + '">' +
+      esc(v[1]) + (v[2] !== undefined ? ' <span class="crm-n">' + esc(v[2]) + '</span>' : '') + '</button>'; }).join('') + '</div>';
+  if (d === undefined) return out + panel('Follow-ups', loading('Loading follow-ups…'));
+  if (d.error) return out + panel('Follow-ups', errState(d.error));
+  var A = d.activities || [];
+  if (!A.length) return out + panel('Follow-ups', empty(CRM.fuView === 'overdue' ? 'Nothing overdue' : 'Nothing here', 'Plan a follow-up from a lead\'s page or a customer\'s page.'));
+  if (CRM.fuView === 'done') return out + panel('Follow-ups', '<ul class="crm-fu">' + A.map(function(a){
+    return '<li><div><b>' + esc(a.title) + '</b><span class="crm-sub">' + esc(CRM_KIND[a.kind] || a.kind) + ' · done ' + when(a.done_at) + (a.outcome ? ' · ' + esc(a.outcome) : '') +
+      (a.lead_name || a.customer_name ? ' · <a href="' + (a.lead_id ? '#/leads?id=' + esc(a.lead_id) : '#/customers?c=' + esc(a.customer_id)) + '">' + esc(a.lead_name || a.customer_name) + '</a>' : '') + '</span></div></li>';
+  }).join('') + '</ul>');
+  return out + panel('Follow-ups', '<ul class="crm-fu">' + A.map(crmFuRow).join('') + '</ul>', '<span class="pill count">' + esc(d.total) + '</span>');
+};
+
+/* ---------------------------------------------------------------- views and wiring */
+(function(){
+  var base = VIEWS.leads;
+  VIEWS.leads = function(){
+    crmTeam();
+    var id = hq('id');
+    if (id) {
+      if (CRM.rid !== id) { CRM.edit = false; CRM.comp = null; CRM.cands = null; CRM.msg = null; crmRecLoad(id); }
+      return crmRecHTML();
+    }
+    CRM.rid = null;
+    crmLoad(false);
+    if (CRM.list && CRM.list.status === 404) return base.apply(this, arguments);     // the CRM API is not on this server yet
+    return crmListHTML();
+  };
+})();
+function crmAfter(r, ok, reload){
+  CRM.busy = false;
+  if (!r.ok) {
+    var dt = r.data && r.data.detail;
+    CRM.msg = { text: r.status === 0 ? 'The server could not be reached. Nothing was changed.' : (typeof dt === 'string' ? dt : (dt && dt.message) || 'That did not work. Nothing was changed.'), bad: true };
+    renderShell(); return false;
+  }
+  if (ok) CRM.msg = { text: ok };
+  if (reload !== false) {
+    if (CRM.rid) crmRecLoad(CRM.rid);
+    CRM.list = undefined; CRM.key = '';
+    if (currentView() === 'followups') crmFuLoad();
+  }
+  renderShell(); return true;
+}
+function crmWire(){
+  var g = function(id){ return document.getElementById(id); }, v = function(id){ return g(id) ? g(id).value.trim() : ''; };
+  var t = null;
+  if (g('crm-q')) g('crm-q').oninput = function(){ clearTimeout(t); t = setTimeout(function(){ CRM.f.q = v('crm-q'); CRM.f.page = 1; crmLoad(false); }, 300); };
+  [['crm-st', 'status'], ['crm-src', 'source'], ['crm-own', 'owner'], ['crm-fol', 'follow'], ['crm-sort', 'sort']].forEach(function(x){
+    if (g(x[0])) g(x[0]).onchange = function(){ CRM.f[x[1]] = g(x[0]).value; CRM.f.page = 1; CRM.sel = {}; crmLoad(false); renderShell(); };
+  });
+  document.querySelectorAll('[data-crmview]').forEach(function(b){ b.onclick = function(){ crmSetView(b.getAttribute('data-crmview')); }; });
+  if (g('crm-prev')) g('crm-prev').onclick = function(){ CRM.f.page--; crmLoad(false); renderShell(); };
+  if (g('crm-next')) g('crm-next').onclick = function(){ CRM.f.page++; crmLoad(false); renderShell(); };
+  if (g('crm-add')) g('crm-add').onclick = function(){ CRM.add = !CRM.add; CRM.dup = null; CRM.msg = null; renderShell(); };
+  var dupCheck = function(){
+    var ph = v('crm-n-phone'), em = v('crm-n-email');
+    if (!ph && !em) return;
+    api('/crm/duplicates/check?phone=' + encodeURIComponent(ph) + '&email=' + encodeURIComponent(em)).then(function(r){
+      var box = g('crm-dup'); CRM.dup = r.ok ? r.data.matches : null;
+      if (box) box.innerHTML = CRM.dup && CRM.dup.length ? crmDupHTML(CRM.dup, 'Already here — check before adding:') : '';
+    });
+  };
+  if (g('crm-n-phone')) g('crm-n-phone').onblur = dupCheck;
+  if (g('crm-n-email')) g('crm-n-email').onblur = dupCheck;
+  if (g('crm-n-go')) g('crm-n-go').onclick = function(){
+    var name = v('crm-n-name');
+    if (!name) { CRM.msg = { text: 'Give the lead a name.', bad: true }; renderShell(); return; }
+    CRM.busy = true; g('crm-n-go').disabled = true;
+    var body = { name: name, phone: v('crm-n-phone') || null, email: v('crm-n-email') || null, company: v('crm-n-co') || null,
+                 service: v('crm-n-svc') || null, est_revenue: Number(v('crm-n-val')) || 0, source: 'manual' };
+    api('/leads', { method: 'POST', body: body }).then(function(r){
+      if (crmAfter(r, 'Lead saved.')) { CRM.add = false; CRM.dup = null; location.hash = '#/leads?id=' + r.data.id; }
+    });
+  };
+  var all = g('crm-all');
+  if (all) all.onchange = function(){ (CRM.list.leads || []).forEach(function(l){ CRM.sel[l.id] = all.checked; }); renderShell(); };
+  document.querySelectorAll('[data-crmsel]').forEach(function(c){ c.onchange = function(){ CRM.sel[c.getAttribute('data-crmsel')] = c.checked; renderShell(); }; });
+  var bulk = function(field, value, label){
+    var ids = Object.keys(CRM.sel).filter(function(k){ return CRM.sel[k]; }), done = 0, bad = 0;
+    CRM.busy = true;
+    (function next(){
+      var id = ids.shift();
+      if (!id) { CRM.sel = {}; crmAfter({ ok: true }, (done + ' ' + label) + (bad ? '; ' + bad + ' could not be changed' : '') + '.'); return; }
+      var b = {}; b[field] = value || null;
+      api('/leads/' + id, { method: 'PATCH', body: b }).then(function(r){ if (r.ok) done++; else bad++; next(); });
+    })();
+  };
+  if (g('crm-b-own-go')) g('crm-b-own-go').onclick = function(){ bulk('assigned_operator', g('crm-b-own').value, 'assigned'); };
+  if (g('crm-b-st-go')) g('crm-b-st-go').onclick = function(){ bulk('status', g('crm-b-st').value, 'moved'); };
+  if (g('crm-b-x')) g('crm-b-x').onclick = function(){ CRM.sel = {}; renderShell(); };
+  // one lead
+  var patch = function(body, ok){
+    CRM.busy = true;
+    api('/leads/' + CRM.rid, { method: 'PATCH', body: body }).then(function(r){ crmAfter(r, ok); });
+  };
+  if (g('crm-r-st')) g('crm-r-st').onchange = function(){ patch({ status: g('crm-r-st').value }, 'Moved to ' + stageName(g('crm-r-st').value) + '.'); };
+  if (g('crm-r-own')) g('crm-r-own').onchange = function(){ patch({ assigned_operator: g('crm-r-own').value || null }, 'Owner saved.'); };
+  if (g('crm-r-lost')) g('crm-r-lost').onchange = function(){ patch({ lost_reason: v('crm-r-lost') || null }, 'Saved.'); };
+  if (g('crm-r-edit')) g('crm-r-edit').onclick = function(){ CRM.edit = !CRM.edit; renderShell(); };
+  if (g('crm-r-save')) g('crm-r-save').onclick = function(){
+    var body = {}, l = CRM.rec.lead;
+    document.querySelectorAll('[data-crmf]').forEach(function(i){
+      var k = i.getAttribute('data-crmf'), val = i.value.trim();
+      if (k === 'est_revenue') val = val === '' ? null : Number(val);
+      else val = val || null;
+      if (k === 'name' && !val) return;
+      if (String(val === null ? '' : val) !== String(l[k] === null || l[k] === undefined ? '' : l[k])) body[k] = val;
+    });
+    if (!Object.keys(body).length) { CRM.edit = false; renderShell(); return; }
+    CRM.edit = false; patch(body, 'Details saved.');
+  };
+  var convert = function(extra){
+    CRM.busy = true; CRM.cands = null;
+    api('/crm/leads/' + CRM.rid + '/convert', { method: 'POST', body: extra || {} }).then(function(r){
+      if (r.status === 409 && r.data && r.data.detail && r.data.detail.candidates) { CRM.busy = false; CRM.cands = r.data.detail.candidates; renderShell(); return; }
+      crmAfter(r, r.ok ? (r.data.already ? 'This lead is already a customer.' : r.data.created ? 'Now a customer. Their follow-ups and notes moved with them.' : 'Linked to the customer who was already here. Nothing was duplicated.') : null);
+    });
+  };
+  if (g('crm-conv')) g('crm-conv').onclick = function(){ convert(); };
+  document.querySelectorAll('[data-crmpick]').forEach(function(b){ b.onclick = function(){
+    var c = b.getAttribute('data-crmpick'); convert(c === '__new' ? { create_new: true } : { customer_id: c });
+  }; });
+  document.querySelectorAll('[data-crmkind]').forEach(function(b){ b.onclick = function(){ CRM.comp = { kind: b.getAttribute('data-crmkind') }; renderShell(); }; });
+  if (g('crm-c-go')) g('crm-c-go').onclick = function(){
+    var kind = (CRM.comp || {}).kind || 'task', title = v('crm-c-title');
+    if (!title) { CRM.msg = { text: kind === 'task' ? 'Say what to do.' : 'Write what happened.', bad: true }; renderShell(); return; }
+    var body = { kind: kind, title: title };
+    if (CRM.rid) body.lead_id = CRM.rid; else if (CRM.custId) body.customer_id = CRM.custId;
+    if (kind === 'task') { body.due_at = crmIso(v('crm-c-due')); body.assigned_to = g('crm-c-who').value || null; body.priority = g('crm-c-pri').value; }
+    else { body.done = true; if (g('crm-c-out')) body.outcome = v('crm-c-out') || null; }
+    CRM.busy = true;
+    api('/crm/activities', { method: 'POST', body: body }).then(function(r){
+      if (crmAfter(r, kind === 'task' ? 'Follow-up planned.' : 'Saved to the history.')) { CRM.comp = { kind: kind }; if (CRM.custId) crmCustLoad(CRM.custId); }
+    });
+  };
+  document.querySelectorAll('[data-crmdone]').forEach(function(b){ b.onclick = function(){
+    b.disabled = true;
+    api('/crm/activities/' + b.getAttribute('data-crmdone'), { method: 'PATCH', body: { done: true } }).then(function(r){
+      if (crmAfter(r, 'Marked done.') && CRM.custId) crmCustLoad(CRM.custId);
+    });
+  }; });
+  document.querySelectorAll('[data-crmlater]').forEach(function(b){ b.onclick = function(){
+    b.disabled = true;
+    api('/crm/activities/' + b.getAttribute('data-crmlater'), { method: 'PATCH', body: { due_at: crmIso(crmTomorrow()) } }).then(function(r){
+      if (crmAfter(r, 'Moved to tomorrow 11:00.') && CRM.custId) crmCustLoad(CRM.custId);
+    });
+  }; });
+  document.querySelectorAll('[data-crmfu]').forEach(function(b){ b.onclick = function(){ CRM.fuView = b.getAttribute('data-crmfu'); crmFuLoad(); renderShell(); }; });
+}
+
+/* ---------------------------------------------------------------- customers: follow-ups and notes */
+function crmCustLoad(id){
+  Promise.all([api('/crm/activities?view=all&page_size=100&customer_id=' + encodeURIComponent(id)),
+               api('/crm/activities?view=done&page_size=100&customer_id=' + encodeURIComponent(id))]).then(function(rs){
+    CRM.cust[id] = rs[0].ok && rs[1].ok ? { open: rs[0].data.activities, done: rs[1].data.activities } : { error: 'Follow-ups could not be loaded.' };
+    if (currentView() === 'customers') renderShell();
+  });
+}
+(function(){
+  if (typeof custDetailHTML !== 'function') return;
+  var base = custDetailHTML;
+  custDetailHTML = function(id){
+    var out = base.apply(this, arguments);
+    CRM.custId = id; CRM.rid = null;
+    crmTeam();
+    if (CRM.cust[id] === undefined) { CRM.cust[id] = null; crmCustLoad(id); }
+    var d = CRM.cust[id];
+    var h = '<div class="crm-custfu">' + crmComposerHTML('customer');
+    if (d === null) h += panel('Follow-ups and notes', loading('Loading…'));
+    else if (d.error) h += panel('Follow-ups and notes', errState(d.error));
+    else h += panel('Planned follow-ups', d.open.length ? '<ul class="crm-fu">' + d.open.map(crmFuRow).join('') + '</ul>' : empty('Nothing planned', 'Plan the next step above.')) +
+      panel('Done and notes', d.done.length ? crmTimeline(d.done.map(function(a){ return { k: CRM_KIND[a.kind] || a.kind, t: a.title, s: esc(a.outcome || a.body || ''), at: a.done_at, by: '' }; }))
+        : empty('Nothing yet', 'Calls, visits and notes you log appear here.'));
+    return out + h + '</div>';
+  };
+})();
+(function(){
+  var _r = renderShell;
+  renderShell = function(){
+    var r = _r.apply(this, arguments);
+    var v = currentView();
+    if (v === 'leads' || v === 'followups' || v === 'customers') setTimeout(crmWire, 0);
+    return r;
+  };
+})();
+window.addEventListener('hashchange', function(){
+  var v = currentView();
+  if (v !== 'leads') { CRM.rid = null; }
+  if (v === 'followups' && CRM.fuPending !== CRM.fuView) crmFuLoad();
+  if (v !== 'customers') CRM.custId = null;
+  CRM.msg = null;
+});
+
+/* ---- CRM figures (Phase D): Leads page cards, the CRM Reports tab, Pipeline values ---- */
+var CRMR = { d: undefined, days: 30, owner: '', key: '', pending: null, dups: undefined, kpi: undefined, kpiAt: 0 };
+function crmrLoad(){
+  var k = CRMR.days + '|' + CRMR.owner;
+  if ((CRMR.key === k && CRMR.d !== undefined) || CRMR.pending === k) return;
+  CRMR.key = k; CRMR.d = undefined; CRMR.pending = k;
+  api('/crm/overview?days=' + CRMR.days + (CRMR.owner ? '&owner=' + encodeURIComponent(CRMR.owner) : '')).then(function(r){
+    if (CRMR.key !== k) return;
+    CRMR.pending = null;
+    CRMR.d = r.ok ? r.data : { error: (r.data && r.data.detail) || 'The figures could not be loaded.' };
+    if (currentView() === 'crmreports') renderShell();
+  });
+}
+function crmKpiLoad(force){
+  if (!force && (CRMR.kpi === null || (CRMR.kpi && Date.now() - CRMR.kpiAt < 30000))) return;
+  CRMR.kpi = null; CRMR.kpiAt = Date.now();
+  api('/crm/overview?days=30').then(function(r){ CRMR.kpi = r.ok ? r.data : { error: true }; if (currentView() === 'leads' && !hq('id')) renderShell(); });
+}
+function crmKpiHTML(){
+  var d = CRMR.kpi;
+  if (!d || d.error) return '';
+  var card = function(label, value, note, act, attn){
+    return '<button type="button" class="dv-card crm-kpi' + (attn && value > 0 ? ' attn' : '') + '" data-crmkpi="' + act + '"><span class="dv-card-label">' + esc(label) + '</span>' +
+      '<span class="dv-card-value">' + esc(Number(value).toLocaleString()) + '</span><span class="dv-card-note">' + note + '</span></button>';
+  };
+  return '<div class="dv-grid crm-kpis">' +
+    card('Open leads', d.leads.open, d.pipeline.open_value ? money(d.pipeline.open_value) + ' likely value' : 'not sold, lost or spam', 'open') +
+    card('New in 30 days', d.leads.new, 'created in the last 30 days', 'new30') +
+    card('Overdue follow-ups', d.followups.overdue, 'planned and not done in time', 'overdue', true) +
+    card('Nothing planned', d.leads.no_followup, 'open leads with no next step', 'none', true) + '</div>';
+}
+(function(){
+  var base = VIEWS.leads;
+  VIEWS.leads = function(){
+    var out = base.apply(this, arguments);
+    if (hq('id') || out.indexOf('crm-views') === -1) return out;
+    crmKpiLoad(false);
+    var at = out.indexOf('<div class="crm-views"');
+    return out.slice(0, at) + crmKpiHTML() + out.slice(at);
+  };
+})();
+function crmrTable(head, rows){
+  return '<div class="tbl-wrap" tabindex="0" role="region" aria-label="' + esc(head[0]) + ' table"><table><thead><tr>' + head.map(function(h, i){ return '<th scope="col"' + (i ? ' class="crm-num"' : '') + '>' + esc(h) + '</th>'; }).join('') +
+    '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>';
+}
+VIEWS.crmreports = function(){
+  crmTeam(); crmrLoad();
+  var own = isOwner(), d = CRMR.d;
+  var out = '<h1>CRM reports</h1><p class="sub">How leads arrive, move and turn into customers. Every figure says what it counts; values on leads are estimates, money received is in Finance.</p>';
+  out += '<div class="crm-tools"><label class="crm-lbl">Period<select class="fld" id="crmr-days">' + crmOpts([[30, 'Last 30 days'], [90, 'Last 90 days'], [365, 'Last 12 months']], CRMR.days) + '</select></label>' +
+    '<label class="crm-lbl">Whose<select class="fld" id="crmr-own">' + crmOpts([['', own ? 'Whole team' : 'Everyone'], ['me', 'Mine']].concat((own ? (CRM.team || []) : []).map(function(p){ return [p.id, p.name]; })), CRMR.owner) + '</select></label></div>';
+  if (d === undefined) return out + panel('Figures', loading('Counting…'));
+  if (d.error) return out + panel('Figures', errState(d.error));
+  var c = function(label, value, note, isMoney){
+    var has = value !== null && value !== undefined;
+    return '<div class="dv-card"><span class="dv-card-label">' + esc(label) + '</span><span class="dv-card-value' + (has ? '' : ' none') + '">' +
+      (has ? (isMoney ? money(value) : esc(typeof value === 'number' ? value.toLocaleString() : value)) : '—') + '</span><span class="dv-card-note">' + esc(note) + '</span></div>';
+  };
+  var conv = d.conversion, cyc = d.cycle_days;
+  out += '<section class="dv-sec" aria-labelledby="crmr-h1"><div class="dv-sec-head"><h2 id="crmr-h1">Summary</h2><span class="dv-asof">Since ' + esc(d.since) + '</span></div><div class="dv-grid">' +
+    c('New leads', d.leads.new, 'created in the period') +
+    c('Conversion', conv.rate === null ? null : conv.rate + '%', conv.rate === null ? conv.note : conv.converted + ' of ' + conv.of + ' new leads sold or became customers') +
+    c('Won', d.won.count, d.won.value ? 'PKR ' + Number(d.won.value).toLocaleString() + ' written on them' : 'moved to sold in the period') +
+    c('Lost', d.won.lost, 'moved to lost in the period') +
+    c('Open pipeline', d.pipeline.open_value, d.pipeline.open_count + ' open leads; an estimate, not money', true) +
+    c('Overdue follow-ups', d.followups.overdue, d.followups.open + ' planned in all') +
+    c('Days to win', cyc.value, cyc.value === null ? 'Needs 3 leads won since the upgrade (' + cyc.from + ' so far)' : 'average from ' + cyc.from + ' leads') + '</div></section>';
+  var st = d.pipeline.by_stage, order = ['new', 'qualified', 'booked', 'showed', 'sold', 'lost', 'fake'];
+  out += '<section class="dv-sec" aria-labelledby="crmr-h2"><div class="dv-sec-head"><h2 id="crmr-h2">Pipeline by stage</h2><a class="btn" href="#/pipeline">Open pipeline</a></div>' +
+    crmrTable(['Stage', 'Leads', 'Likely value'], order.filter(function(s){ return st[s]; }).map(function(s){
+      return '<tr><td><a href="#/leads" data-crmstage="' + s + '">' + esc(stageName(s)) + '</a></td><td class="crm-num">' + esc(st[s].count) + '</td><td class="crm-num">' + (st[s].value ? money(st[s].value) : '—') + '</td></tr>';
+    })) + '<p class="dv-foot">All leads, whenever they arrived. The value is what was written on each lead.</p></section>';
+  out += '<section class="dv-sec" aria-labelledby="crmr-h3"><div class="dv-sec-head"><h2 id="crmr-h3">Where leads come from</h2></div>' +
+    (d.sources.length ? crmrTable(['Source', 'New leads', 'Converted', 'Rate'], d.sources.map(function(s){
+      return '<tr><td>' + esc(CRM_SRC[s.source] || s.source) + '</td><td class="crm-num">' + esc(s.leads) + '</td><td class="crm-num">' + esc(s.converted) + '</td><td class="crm-num">' +
+        (s.rate === null ? '<span class="crm-muted">too few</span>' : esc(s.rate) + '%') + '</td></tr>'; })) +
+      '<p class="dv-foot">A rate is shown from 5 leads, so a single sale does not look like 100%.</p>' : '<p class="crm-muted">No new leads in this period.</p>') + '</section>';
+  if (d.team) out += '<section class="dv-sec" aria-labelledby="crmr-h4"><div class="dv-sec-head"><h2 id="crmr-h4">Team</h2>' +
+    (d.unassigned ? '<a class="btn" href="#/leads" data-crmunassigned="1">' + esc(d.unassigned) + ' open lead' + (d.unassigned === 1 ? '' : 's') + ' with nobody</a>' : '') + '</div>' +
+    crmrTable(['Person', 'Open leads', 'Overdue', 'Follow-ups done', 'Won'], d.team.map(function(t){
+      return '<tr><td>' + esc(t.name) + '</td><td class="crm-num">' + esc(t.open_leads) + '</td><td class="crm-num">' + (t.overdue ? '<span class="crm-late">' + esc(t.overdue) + '</span>' : '0') +
+        '</td><td class="crm-num">' + esc(t.done) + '</td><td class="crm-num">' + esc(t.won) + '</td></tr>'; })) + '</section>';
+  out += '<section class="dv-sec" aria-labelledby="crmr-h5"><div class="dv-sec-head"><h2 id="crmr-h5">Recently done</h2><a class="btn" href="#/followups">Follow-ups</a></div>' +
+    (d.recent.length ? crmTimeline(d.recent.map(function(a){ return { k: CRM_KIND[a.kind] || a.kind, t: a.title,
+      s: (a.outcome ? esc(a.outcome) + ' · ' : '') + (a.lead_name || a.customer_name ? '<a href="' + (a.lead_id ? '#/leads?id=' + esc(a.lead_id) : '#/customers?c=' + esc(a.customer_id)) + '">' + esc(a.lead_name || a.customer_name) + '</a>' : ''), at: a.done_at }; }))
+      : '<p class="crm-muted">Nothing logged yet.</p>') + '</section>';
+  if (CRMR.dups === undefined) out += '<section class="dv-sec"><div class="dv-sec-head"><h2>Possible duplicates</h2><button class="btn" type="button" id="crmr-dups">Check now</button></div><p class="crm-muted">Finds leads and customers with the same phone number or email. Nothing is merged for you.</p></section>';
+  else if (CRMR.dups) out += '<section class="dv-sec" aria-labelledby="crmr-h6"><div class="dv-sec-head"><h2 id="crmr-h6">Possible duplicates</h2></div>' +
+    (CRMR.dups.length ? '<ul class="crm-fu">' + CRMR.dups.map(function(g){ return '<li><div><b>' + esc(g.reason) + '</b><span class="crm-sub">' + g.records.map(function(x){
+      return '<a href="' + (x.type === 'lead' ? '#/leads?id=' + esc(x.id) : '#/customers?c=' + esc(x.id)) + '">' + esc(x.name) + '</a> (' + esc(x.type) + ')'; }).join(' · ') + '</span></div></li>'; }).join('') + '</ul>'
+      : '<p class="crm-muted">None found.</p>') + '<p class="dv-foot">Two people can share a number, so each one is for you to check.</p></section>';
+  out += '<details class="dv-sec"><summary>What each figure counts</summary><dl class="crm-dl crm-defs">' + Object.keys(d.definitions).map(function(k){
+    return '<dt>' + esc(k.replace(/_/g, ' ')) + '</dt><dd>' + esc(d.definitions[k]) + '</dd>'; }).join('') + '</dl></details>';
+  return '<div class="dv">' + out + '</div>';
+};
+function crmrWire(){
+  var g = function(id){ return document.getElementById(id); };
+  if (g('crmr-days')) g('crmr-days').onchange = function(){ CRMR.days = Number(g('crmr-days').value); crmrLoad(); renderShell(); };
+  if (g('crmr-own')) g('crmr-own').onchange = function(){ CRMR.owner = g('crmr-own').value; crmrLoad(); renderShell(); };
+  if (g('crmr-dups')) g('crmr-dups').onclick = function(){
+    g('crmr-dups').disabled = true;
+    api('/crm/duplicates').then(function(r){ CRMR.dups = r.ok ? r.data.groups : null; renderShell(); });
+  };
+  document.querySelectorAll('[data-crmstage]').forEach(function(a){ a.onclick = function(){ CRM.f = { q: '', status: a.getAttribute('data-crmstage'), source: '', owner: '', follow: '', sort: 'newest', page: 1 }; CRM.list = undefined; CRM.key = ''; }; });
+  document.querySelectorAll('[data-crmunassigned]').forEach(function(a){ a.onclick = function(){ CRM.f = { q: '', status: '', source: '', owner: 'none', follow: '', sort: 'newest', page: 1 }; CRM.list = undefined; CRM.key = ''; }; });
+  document.querySelectorAll('[data-crmkpi]').forEach(function(b){ b.onclick = function(){
+    var k = b.getAttribute('data-crmkpi'), f = { q: '', status: '', source: '', owner: '', follow: '', sort: 'newest', page: 1 };
+    if (k === 'overdue' || k === 'none') f.follow = k;
+    if (k === 'open') f.status = 'new,qualified,booked,showed';
+    CRM.f = f; CRM.sel = {}; crmLoad(true); renderShell();
+  }; });
+}
+/* Pipeline: each stage's likely value (all leads, from the server), and a card opens the lead */
+(function(){
+  var base = VIEWS.pipeline;
+  if (!base) return;
+  VIEWS.pipeline = function(){
+    var out = base.apply(this, arguments);
+    crmKpiLoad(false);
+    var st = CRMR.kpi && CRMR.kpi.pipeline && CRMR.kpi.pipeline.by_stage;
+    if (st) out = out.replace(/(<div class="tdm-col" data-stage="([a-z]+)"><div class="tdm-col-head"><span>[^<]*<\/span><span class="mono">[^<]*<\/span>)/g, function(m, all, s){
+      var v = st[s];
+      return m + (v && v.value ? '<span class="crm-colval">' + money(v.value) + '</span>' : '');
+    });
+    return out;
+  };
+})();
+(function(){
+  var _r = renderShell;
+  renderShell = function(){
+    var r = _r.apply(this, arguments);
+    var v = currentView();
+    if (v === 'crmreports' || v === 'leads') setTimeout(crmrWire, 0);
+    if (v === 'pipeline') setTimeout(function(){
+      // a card opens the lead; dragging and the stage menu work as before
+      document.querySelectorAll('.tdm-card[data-lead]:not([data-crmopen])').forEach(function(c){
+        c.setAttribute('data-crmopen', '1');
+        if (!c.hasAttribute('tabindex')) c.setAttribute('tabindex', '0');
+        c.addEventListener('click', function(e){ if (e.target.closest('select')) return; location.hash = '#/leads?id=' + c.getAttribute('data-lead'); });
+        c.addEventListener('keydown', function(e){ if (e.key === 'Enter' && !e.target.closest('select')) location.hash = '#/leads?id=' + c.getAttribute('data-lead'); });
+      });
+    }, 0);
+    return r;
+  };
+})();
+
+(function(){                       // a change to a lead or follow-up refreshes the figures too
+  var base = crmAfter;
+  crmAfter = function(){ CRMR.kpi = undefined; CRMR.d = undefined; CRMR.key = ''; return base.apply(this, arguments); };
+})();
+
+/* ---- CRM Phase E: the owner's rules (Follow-ups tab), the AI lead summary ---- */
+var CRMS = { s: undefined, msg: null, sum: {} };
+function crmsLoad(){
+  if (CRMS.s !== undefined) return;
+  CRMS.s = null;
+  api('/crm/settings').then(function(r){ CRMS.s = r.ok ? r.data.settings : { error: true }; if (currentView() === 'followups') renderShell(); });
+}
+function crmsHTML(){
+  var s = CRMS.s;
+  if (!s) return panel('CRM rules', loading('Loading…'));
+  if (s.error) return panel('CRM rules', errState('The rules could not be loaded.'));
+  var pool = s.assign_pool || [];
+  var h = '<div class="crm-form"><p class="crm-sub">Rules only make work inside TechDeva: nothing is sent to a customer. They act on leads that arrive, or go quiet, after you switch them on.</p>' +
+    '<label class="crm-lbl">When an open lead has had no contact for<select class="fld" id="crms-days">' +
+    crmOpts([['', 'Off'], [2, '2 days'], [3, '3 days'], [7, '7 days'], [14, '14 days'], [30, '30 days']], s.inactivity_days || '') + '</select></label>' +
+    '<p class="crm-sub">…plan a follow-up for the lead\'s owner (one per quiet spell).</p>' +
+    '<fieldset class="crm-fs"><legend>Share new leads in turn between</legend>' + (CRM.team || []).map(function(p){
+      return '<label class="bi-check"><input type="checkbox" data-crmspool="' + esc(p.id) + '"' + (pool.indexOf(p.id) !== -1 ? ' checked' : '') + '> ' + esc(p.name) + '</label>'; }).join('') +
+    '<p class="crm-sub">Tick nobody to keep sharing off. A lead someone already has is never moved.</p></fieldset>' +
+    '<div class="crm-acts"><button class="btn primary" type="button" id="crms-save">Save rules</button></div>' +
+    (CRMS.msg ? '<p class="crm-msg ' + (CRMS.msg.bad ? 'bad' : 'ok') + '" role="status">' + esc(CRMS.msg.text) + '</p>' : '') + '</div>';
+  return panel('CRM rules', h);
+}
+(function(){
+  var base = VIEWS.followups;
+  VIEWS.followups = function(){
+    var out = base.apply(this, arguments);
+    if (!isOwner()) return out;
+    crmsLoad();
+    return out + crmsHTML();
+  };
+  var rec = crmRecHTML;
+  crmRecHTML = function(){
+    var out = rec.apply(this, arguments);
+    var d = CRM.rec;
+    if (!d || d.error || !d.lead) return out;
+    var s = CRMS.sum[d.lead.id];
+    var card = '<section class="crm-card crm-ai" aria-labelledby="crm-ai-h"><div class="crm-card-h"><h2 id="crm-ai-h">Summary</h2>' +
+      '<button class="btn" type="button" id="crm-sum"' + (s === null ? ' disabled' : '') + '>' + (s === null ? 'Writing…' : s ? 'Write again' : 'Summarize with AI') + '</button></div>';
+    if (!s) card += '<p class="crm-muted">' + (s === null ? 'Reading this lead\'s records…' : 'A short summary of this lead from its own records, with what is still unknown. Uses your AI credits.') + '</p>';
+    else if (s.error) card += '<p class="crm-msg bad" role="status">' + esc(s.error) + '</p>';
+    else card += '<span class="bi-badge warn">' + esc(s.label) + '</span><dl class="crm-dl crm-sumdl">' +
+      [['Relationship', s.summary.relationship], ['Recently', s.summary.recent], ['Still open', s.summary.outstanding], ['Next step', s.summary.next_step]]
+        .filter(function(x){ return x[1]; }).map(function(x){ return '<dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd>'; }).join('') + '</dl>' +
+      (s.missing.length ? '<p class="crm-sub">Not in the records: ' + esc(s.missing.join('; ')) + '</p>' : '') +
+      '<p class="crm-sub">Based on ' + esc(s.based_on.follow_ups_and_notes) + ' follow-ups and notes, ' + esc(s.based_on.changes) + ' changes, ' +
+      esc(s.based_on.conversations) + ' WhatsApp conversations and ' + esc(s.based_on.appointments) + ' bookings.</p>';
+    card += '</section>';
+    var at = out.indexOf('<section class="crm-card" aria-labelledby="crm-det-h">');
+    return at === -1 ? out : out.slice(0, at) + card + out.slice(at);
+  };
+})();
+(function(){
+  var _r = renderShell;
+  renderShell = function(){
+    var r = _r.apply(this, arguments);
+    setTimeout(function(){
+      var g = function(id){ return document.getElementById(id); };
+      if (g('crms-save')) g('crms-save').onclick = function(){
+        var pool = []; document.querySelectorAll('[data-crmspool]').forEach(function(c){ if (c.checked) pool.push(c.getAttribute('data-crmspool')); });
+        var days = g('crms-days').value;
+        g('crms-save').disabled = true;
+        api('/crm/settings', { method: 'PUT', body: { inactivity_days: days ? Number(days) : null, assign_mode: pool.length ? 'round_robin' : 'off', assign_pool: pool } }).then(function(r){
+          CRMS.msg = r.ok ? { text: 'Rules saved.' } : { text: (r.data && r.data.detail) || 'The rules were not saved.', bad: true };
+          if (r.ok) CRMS.s = r.data.settings;
+          renderShell();
+        });
+      };
+      if (g('crm-sum')) g('crm-sum').onclick = function(){
+        var id = CRM.rec.lead.id;
+        CRMS.sum[id] = null; renderShell();
+        api('/crm/leads/' + encodeURIComponent(id) + '/summary', { method: 'POST' }).then(function(r){
+          CRMS.sum[id] = r.ok ? r.data : { error: r.status === 0 ? 'The server could not be reached.' : ((r.data && r.data.detail) || 'The summary could not be written.') };
+          renderShell();
+        });
+      };
+    }, 0);
+    return r;
+  };
+})();
+/* Jarvis planned or finished a follow-up: the lists show it at once */
+(function(){
+  if (typeof jvFreshData !== 'function') return;
+  var base = jvFreshData;
+  jvFreshData = function(){ CRM.fu = undefined; CRM.list = undefined; CRM.key = ''; if (CRM.rid) crmRecLoad(CRM.rid); CRMR.kpi = undefined; return base.apply(this, arguments); };
+})();
 
 boot();
 </script>
