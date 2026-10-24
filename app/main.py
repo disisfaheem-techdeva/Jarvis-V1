@@ -87,6 +87,8 @@ from .console import _identity as _console_identity
 app.include_router(make_jarvis_memory_router(_console_identity))
 from .dashboard import make_dashboard_router
 app.include_router(make_dashboard_router(_console_identity))
+from .website_agent import make_business_profile_router
+app.include_router(make_business_profile_router(_console_identity))
 app.include_router(make_social_router())
 app.include_router(make_media_router())
 app.include_router(make_video_router())
