@@ -121,7 +121,8 @@ def test_pictures_become_a_designed_draft_and_yes_posts_it(client, env):
     assert client.patch("/social/posts/" + pid, json={"image_urls": [designed]}, headers=OWNER).status_code == 200
     r = client.post("/console", json={"confirm": d["confirm"]}, headers=OWNER)
     assert r.status_code == 200, r.text
-    assert r.json()["ok"] is True and r.json()["reply"] == "Done, it's posted."
+    # the reply says only what the platforms confirmed (both answered with a post id)
+    assert r.json()["ok"] is True and r.json()["reply"] == "Posted on Facebook and Instagram; confirmed by the platform."
     assert _status(pid)["status"] == "published"
     assert [p[0] for p in env["published"]] == ["facebook", "instagram"]
     assert env["published"][0][2] == [designed]

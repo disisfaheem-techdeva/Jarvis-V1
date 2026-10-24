@@ -81,6 +81,10 @@ app.include_router(make_whatsapp_router())
 app.include_router(make_policy_router())
 app.include_router(make_brand_router())
 app.include_router(make_console_router())
+# Jarvis conversations, kept per business and per person (db/75)
+from .jarvis_memory import make_jarvis_memory_router
+from .console import _identity as _console_identity
+app.include_router(make_jarvis_memory_router(_console_identity))
 app.include_router(make_social_router())
 app.include_router(make_media_router())
 app.include_router(make_video_router())
@@ -123,9 +127,6 @@ from .usage import CreditMeter
 app.add_middleware(CreditMeter)
 from .usage import make_usage_router
 app.include_router(make_usage_router())
-# Alerts: what needs a person in this business (shown with the incidents)
-from .alerts import make_alerts_router
-app.include_router(make_alerts_router())
 from .autopilot import make_autopilot_router
 app.include_router(make_autopilot_router())
 from .social_agent import make_meta_webhook_router, make_social_inbox_router
