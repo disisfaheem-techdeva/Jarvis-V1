@@ -44,6 +44,9 @@ class Orchestrator:
             self.persist.halt_agent(tenant_id, **action["halt_agent"])
         elif "update_lead" in action:
             self.persist.update_lead(tenant_id, **action["update_lead"])
+        elif "marketing_apply" in action and hasattr(self.persist, "marketing_apply"):
+            # the content agent's gallery work, written as drafts (app/marketing/campaigns.py)
+            self.persist.marketing_apply(tenant_id, **action["marketing_apply"])
 
     def _queue_pipeline(self, tenant_id: str, steps: list):
         """Queue a chain of tasks where each waits for the previous to finish."""

@@ -9,6 +9,7 @@ from .hermes import HermesAgent
 from .specialists import ContentAgent, DesignAgent, AdsAgent, PublishingAgent
 from .growth_agents import AnalysisAgent, GrowthPlannerAgent
 from .oversight import QualityControlAgent, CampaignOptimizerAgent
+from .gallery import GalleryContentAgent, GalleryPublishingAgent
 from ..attribution import build_attribution_report
 
 
@@ -113,6 +114,8 @@ REGISTRY: list[Agent] = [
     GrowthPlannerAgent(), # 11 — turns the report into a growth pipeline
     QualityControlAgent(),   # 12 — reviews output before it reaches a client
     CampaignOptimizerAgent(),# 13 — proposes budget changes (never executes)
+    GalleryContentAgent(),   # 02 — Autopilot Gallery: look at pictures, write captions (drafts)
+    GalleryPublishingAgent(),# 05 — Autopilot Gallery: publish one approved post at its time
 ]
 
 

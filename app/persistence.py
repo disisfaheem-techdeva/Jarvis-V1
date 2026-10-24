@@ -204,11 +204,17 @@ class Persistence:
     # ---------- tasks ----------
     def has_open_task(self, tenant_id, agent, type_, payload) -> bool:
         with self._sess(tenant_id) as cur:
+            # the same work = the same lead, post and campaign (gallery tasks carry the last two;
+            # without them every second campaign's captions or every second due post looked like a repeat)
             cur.execute("""SELECT 1 FROM tasks
                            WHERE agent=%s AND type=%s AND status IN ('queued','running')
                              AND (payload->>'lead_id') IS NOT DISTINCT FROM %s
+                             AND (payload->>'post_id') IS NOT DISTINCT FROM %s
+                             AND (payload->>'campaign_id') IS NOT DISTINCT FROM %s
                            LIMIT 1""",
-                        (agent, type_, payload.get("lead_id")))
+                        (agent, type_, payload.get("lead_id"),
+                         None if payload.get("post_id") is None else str(payload.get("post_id")),
+                         None if payload.get("campaign_id") is None else str(payload.get("campaign_id"))))
             return cur.fetchone() is not None
 
     def enqueue_task(self, tenant_id, spec: dict):
@@ -449,6 +455,12 @@ class Persistence:
                         (conversation_id,))
             row = cur.fetchone()
             return bool(row) and (row["handled_by"] == "human" or row["status"] == "human_active")
+
+    def marketing_apply(self, tenant_id, kind, payload):
+        """Autopilot Gallery: the content agent's analysis or captions, written as drafts."""
+        from .marketing.campaigns import apply_agent_output
+        with self._sess(tenant_id) as cur:
+            apply_agent_output(cur, kind, payload)
 
     def notify(self, tenant_id, role, message):
         # Phase B: record as an event; a notifier agent/channel consumes it later
