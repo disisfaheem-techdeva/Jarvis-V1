@@ -172,4 +172,39 @@ def rules_for(event: dict) -> list[dict]:
         return [{"notify": {"role": "owner",
                             "message": f"🎉 Event enquiry from {p.get('name')}{people} ({p.get('phone')})"}}]
 
+    # ---- Autopilot Gallery (app/marketing, docs/AUTOPILOT-GALLERY.md) ----
+
+    # 24. A drip campaign was created from gallery media -> Jarvis looks at each picture first
+    if et == "marketing.campaign_created":
+        return [{"queue_task": {"agent": "content", "type": "content.analyze_media",
+                                "payload": {"campaign_id": p.get("campaign_id")}}}]
+
+    # 25. Pictures analysed -> save what was seen (drafts only), then write every caption in one go
+    if et == "marketing.media_analyzed":
+        return [{"marketing_apply": {"kind": "analysis", "payload": p}},
+                {"queue_task": {"agent": "content", "type": "content.caption_batch",
+                                "payload": {"campaign_id": p.get("campaign_id")}}}]
+
+    # 26. Captions written -> saved as drafts; a person approves the campaign
+    if et == "marketing.captions_ready":
+        return [{"marketing_apply": {"kind": "captions", "payload": p}}]
+
+    # 27. Someone asked for one caption again
+    if et == "marketing.recaption_requested":
+        return [{"queue_task": {"agent": "content", "type": "content.recaption_one",
+                                "payload": {"post_id": p.get("post_id"), "campaign_id": p.get("campaign_id")}}}]
+    if et == "marketing.caption_rewritten":
+        return [{"marketing_apply": {"kind": "recaption", "payload": p}}]
+
+    # 28. Approved posts reached their time (scheduler) -> one publishing task per post
+    if et == "marketing.posts_due":
+        return [{"queue_task": {"agent": "publishing", "type": "publish_post", "payload": {"post_id": pid}}}
+                for pid in p.get("post_ids") or []]
+
+    # 29. Meta refused the business's login -> the campaign is paused; the owner reconnects
+    if et == "marketing.reconnect_needed":
+        return [{"notify": {"role": "owner",
+                            "message": "Autopilot campaign %r is paused: Facebook needs to be reconnected "
+                                       "(Integrations > Connect Facebook), then press Resume." % p.get("campaign")}}]
+
     return []

@@ -90,6 +90,9 @@ app.include_router(make_dashboard_router(_console_identity))
 from .website_agent import make_business_profile_router
 from .crm import make_crm_router
 app.include_router(make_crm_router(_console_identity))
+from .marketing.api import make_marketing_router, make_gallery_media_router
+app.include_router(make_marketing_router())
+app.include_router(make_gallery_media_router())
 app.include_router(make_business_profile_router(_console_identity))
 app.include_router(make_social_router())
 app.include_router(make_media_router())

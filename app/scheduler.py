@@ -61,6 +61,15 @@ class Scheduler:
         except Exception as e:
             print(f"[scheduler] scheduled posts skipped: {e}", flush=True)
 
+        # Autopilot Gallery: approved gallery posts whose time has come -> one
+        # marketing.posts_due per business (a rule queues the publishing agent);
+        # posts left 'publishing' with no saved answer become failed, never re-sent.
+        try:
+            from .marketing.publisher import tick as gallery_tick
+            emitted += gallery_tick(self.p.emit)
+        except Exception as e:
+            print(f"[scheduler] gallery posts skipped: {e}", flush=True)
+
         # Content autopilot: read each recent post's results back from Meta
         # (reach, likes, comments, shares, saves) and follower counts. Throttled inside.
         try:
