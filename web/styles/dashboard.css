@@ -190,4 +190,107 @@
   & .jvc-item { @apply flex min-h-11 w-full flex-col items-start gap-0.5 rounded-lg border border-transparent bg-transparent px-3 py-2 text-left font-[inherit] text-fg hover:bg-accent-tint; }
   & .jvc-item.on { @apply border-accent-line bg-accent-tint; }
   & .jvc-t { @apply text-sm font-medium; }
+
+  /* Dashboard 2.0: the Overview's main area */
+  & .dv { @apply grid gap-6; }
+  & .dv h1 { @apply mb-1; }
+  & .dv .sub { @apply mb-0; }
+  & .dv-head { @apply flex flex-wrap items-end justify-between gap-4; }
+  & .dv-title { @apply min-w-0 flex-1 basis-72; }
+  & .dv-tools { @apply flex flex-wrap items-end gap-2.5; }
+  & .dv-tools .btn { @apply h-11; }
+  & .dv-lbl { @apply grid gap-1 text-xs font-medium text-fg-muted; }
+  & .dv-lbl .fld { @apply min-w-36; }
+  & .dv-asof { @apply text-xs font-normal text-fg-subtle; }
+  & .dv-stale { @apply m-0 rounded-[var(--p-radius-sm)] border border-line bg-warning-tint px-4 py-2.5 text-sm text-warning; }
+  & .dv-skel { @apply rounded-[var(--card-radius)] border border-line bg-surface px-5 py-10 text-center text-sm text-fg-muted; }
+  & .dv-sec { @apply rounded-[var(--card-radius)] border border-line bg-surface p-4 sm:p-5; }
+  & .dv-sec-head { @apply mb-4 flex flex-wrap items-center justify-between gap-3; }
+  & .dv-sec-head h2 { @apply m-0 font-display text-lg font-semibold tracking-tight text-fg; }
+  & .dv-group + .dv-group { @apply mt-5; }
+  & .dv-sub { @apply mb-2.5 text-label font-medium text-fg-subtle uppercase; }
+  & .dv-grid { @apply grid grid-cols-2 gap-3 lg:grid-cols-[repeat(auto-fill,minmax(180px,1fr))]; }
+  & .dv-card { @apply flex min-h-28 min-w-0 flex-col rounded-[var(--p-radius-lg)] border border-line bg-surface-2 p-3.5 sm:p-4 text-fg no-underline transition-colors motion-reduce:transition-none; }
+  & a.dv-card { @apply hover:border-accent-line hover:bg-accent-tint hover:no-underline focus-visible:[box-shadow:var(--focus-ring)] focus-visible:outline-none; }
+  & .dv-card.attn { @apply border-[color-mix(in_oklab,var(--warning-ink)_45%,transparent)]; }
+  & .dv-card-label { @apply text-[13px] font-medium text-fg-muted; }
+  & .dv-card-value { @apply mt-2 font-display text-[1.75rem] leading-none font-semibold tracking-tight text-fg tabular-nums max-[900px]:text-[1.45rem] max-[480px]:text-[1.2rem]; }
+  & .dv-card-value.big { @apply text-[2.25rem] max-[900px]:text-[1.75rem]; }
+  & .dv-card-value.none { @apply text-fg-subtle; }
+  & .dv-card-note { @apply mt-auto pt-2 text-xs text-fg-subtle; }
+  & .dv-foot { @apply mt-3 mb-0 text-xs text-fg-subtle; }
+  & .dv-empty { @apply rounded-[var(--p-radius-lg)] border border-dashed border-line-strong px-5 py-7 text-center text-sm text-fg-muted; }
+  & .dv-empty strong { @apply mb-1 block text-[15px] font-semibold text-fg; }
+  & .dv-empty.err strong { @apply text-danger; }
+  & .dv-empty .btn { @apply mt-3; }
+
+  & .dv-setup {
+    @apply flex flex-wrap items-center gap-4 rounded-[var(--card-radius)] border border-accent-line px-5 py-4;
+    background: radial-gradient(70% 140% at 0% 0%, var(--ambient-1), transparent 70%), var(--card-glass-bg);
+  }
+  & .dv-setup-txt { @apply min-w-52 flex-1; }
+  & .dv-setup h2 { @apply m-0 font-display text-lg font-semibold text-fg; }
+  & .dv-setup p { @apply mt-1 mb-0 text-sm text-fg-muted; }
+  & .dv-setup .btn { @apply h-11; }
+  & .dv-bar { @apply mt-2.5 h-1.5 max-w-sm overflow-hidden rounded-full bg-surface-3; }
+  & .dv-bar i { @apply block h-full bg-accent-ink; }
+
+  & .dv-focus { @apply m-0 grid list-none gap-2 p-0; }
+  & .dv-focus li { @apply flex flex-wrap items-center gap-3 rounded-[var(--p-radius-lg)] border border-line bg-surface-2 px-4 py-3; }
+  & .dv-focus-n { @apply grid h-9 min-w-9 place-items-center rounded-full bg-accent-tint px-2 font-display text-base font-semibold text-accent-ink tabular-nums; }
+  & .dv-focus-t { @apply min-w-40 flex-1 text-sm text-fg; }
+  & .dv-focus .btn { @apply h-11; }
+
+  & .dv-perf-tools { @apply -mt-2 mb-4 flex flex-wrap gap-3; }
+  & .dv-perf-sum { @apply mb-3 flex flex-wrap items-end justify-between gap-3; }
+  & .dv-perf-sum > div:first-child { @apply grid gap-1.5; }
+  & .dv-chg { @apply grid justify-items-end gap-1 text-right max-[560px]:justify-items-start max-[560px]:text-left; }
+  & .dv-pill { @apply inline-flex h-6 items-center rounded-full px-2.5 text-xs font-semibold tabular-nums; }
+  & .dv-pill.up { @apply bg-success-tint text-success; }
+  & .dv-pill.down { @apply bg-danger-tint text-danger; }
+  & .dv-legend { @apply mb-1 flex flex-wrap gap-4 text-xs text-fg-muted; }
+  & .dv-legend span, & .dv-tip span { @apply inline-flex items-center gap-1.5; }
+  & .dv-k { @apply inline-block h-0.5 w-4 rounded-full; }
+  & .dv-k.cur { @apply bg-[var(--chart-1)]; }
+  & .dv-k.prev { @apply bg-fg-subtle; }
+  & .dv-chart { @apply relative; }
+  & .dv-chart svg { @apply block h-auto w-full overflow-visible focus-visible:rounded-md focus-visible:[box-shadow:var(--focus-ring)] focus-visible:outline-none; }
+  & .dv-gl { stroke: var(--chart-grid); stroke-width: 1; }
+  & .dv-ax { fill: var(--chart-axis); font-size: 11px; font-family: var(--font-mono, inherit); }
+  & .dv-cur { fill: none; stroke: var(--chart-1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  & .dv-prev { fill: none; stroke: var(--fg-subtle); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  & .dv-dot { fill: var(--chart-1); stroke: var(--surface); stroke-width: 2; }
+  & .dv-xh { stroke: var(--line-strong); stroke-width: 1; }
+  & .dv-tip { @apply pointer-events-none absolute top-0 grid min-w-44 gap-1 rounded-[var(--p-radius-sm)] border border-line-strong bg-bg-elevated px-3 py-2 text-xs text-fg shadow-lg; }
+  & .dv-table { @apply mt-3; }
+  & .dv-table .tbl-wrap { @apply mt-2 max-h-72 overflow-y-auto rounded-[var(--p-radius-sm)] border border-line; }
+
+  /* Jarvis on the right of the Overview (1280px and wider); smaller screens keep the round button */
+  &.jv-side .main { @apply pr-[380px]; }
+  & #jv-dock[data-mode="side"] { @apply fixed top-0 right-0 bottom-0 z-30 w-[380px]; }
+  & .dvj { @apply flex h-full flex-col border-l border-line bg-bg-elevated; }
+  & .dvj-head { @apply flex h-16 flex-none items-center gap-3 border-b border-line px-4; }
+  & .dvj-head .jv-orb { @apply h-9 w-9 flex-none; }
+  & .dvj-name { @apply flex min-w-0 flex-1 flex-col; }
+  & .dvj-name b { @apply font-display text-base font-semibold text-fg; }
+  & .dvj-name > span:nth-child(2) { @apply text-xs text-fg-subtle; }
+  & .dvj-name .jv-state { @apply sr-only; }
+  & .dvj-name .card-note { @apply mt-0 truncate; }
+  & .dvj-name .card-note:empty { @apply hidden; }
+  & .dvj-scroll { @apply grid flex-1 content-start gap-4 overflow-y-auto p-4; }
+  & .dvj-insight { @apply rounded-[var(--p-radius-lg)] border border-accent-line bg-accent-tint p-3.5; }
+  & .dvj-insight p { @apply mt-1 mb-0 text-sm text-fg; }
+  & .dvj-acts { @apply mt-3 flex flex-wrap gap-2; }
+  & .dvj-prompts { @apply flex flex-wrap gap-2; }
+  & .dvj-chip { @apply min-h-11 cursor-pointer rounded-full border border-line-strong bg-surface px-3.5 py-2 text-left font-[inherit] text-[13px] text-fg hover:border-accent-line hover:bg-accent-tint focus-visible:[box-shadow:var(--focus-ring)] focus-visible:outline-none; }
+  & .dvj-convs { @apply grid gap-1; }
+  & .dvj-convs-h { @apply flex items-center justify-between; }
+  & .dvj-link { @apply min-h-11 cursor-pointer border-0 bg-transparent px-2 font-[inherit] text-sm font-medium text-accent-ink hover:underline; }
+  & .dvj-conv { @apply flex min-h-11 w-full cursor-pointer flex-col items-start gap-0.5 rounded-lg border border-transparent bg-transparent px-3 py-2 text-left font-[inherit] text-sm text-fg hover:bg-surface-2; }
+  & .dvj-conv.on { @apply border-accent-line bg-accent-tint; }
+  & .dvj-conv .dv-card-note { @apply pt-0; }
+  & .dvj-out { @apply min-h-0 overflow-visible p-0; }
+  & .dvj-input { @apply grid flex-none gap-2 border-t border-line p-4; }
+  & .dvj-input .jv-mic { @apply h-11 w-full; }
+  & .dvj-input .btn.primary { @apply h-11; }
 }
