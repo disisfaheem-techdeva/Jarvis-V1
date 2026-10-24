@@ -449,4 +449,88 @@
   & .crm-fs legend { @apply px-1 text-xs font-medium text-fg-muted; }
   & .crm-ai .bi-badge { @apply mb-3; }
   & .crm-sumdl { @apply mb-2; }
+
+  /* ---------- Marketing › Autopilot Gallery ---------- */
+  & .gal { @apply grid grid-cols-[minmax(0,1fr)] gap-5; }
+  & .gal > * { @apply min-w-0; }
+  & .gal .panel { @apply mb-0; }
+  & .gal .btn { @apply min-h-11; }
+  & .gal-drop { @apply grid cursor-pointer place-items-center gap-1 rounded-[var(--p-radius-lg)] border-2 border-dashed border-line-strong bg-surface-2 px-4 py-8 text-center text-sm text-fg-muted focus-within:[box-shadow:var(--focus-ring)] motion-reduce:transition-none; }
+  & .gal-drop strong { @apply text-base font-semibold text-fg; }
+  & .gal-drop.over { @apply border-accent-line bg-accent-tint; }
+  & .gal-drop input { @apply sr-only; }
+  & .gal-uplist { @apply mt-3 mb-0 grid list-none gap-1.5 p-0; }
+  & .gal-uplist li { @apply flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[var(--p-radius-sm)] border border-line px-3 py-2 text-sm; }
+  & .gal-uplist li.error { @apply border-[color-mix(in_oklab,var(--danger-ink)_45%,transparent)]; }
+  & .gal-uplist li.error .gal-upmsg { @apply text-danger; }
+  & .gal-uplist li.warn .gal-upmsg { @apply text-warning; }
+  & .gal-uplist progress { @apply h-2 w-40 max-w-full accent-[var(--chart-1)]; }
+  & .gal-upname { @apply min-w-0 flex-1 basis-40 truncate font-medium text-fg; }
+  & .gal-upmsg { @apply text-fg-muted; }
+  & .gal-selbar { @apply my-3 flex flex-wrap items-center justify-between gap-2 text-sm text-fg-muted; }
+  & .gal-grid { @apply m-0 grid list-none grid-cols-2 gap-3 p-0 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))]; }
+  & .gal-tile { @apply grid min-w-0 content-start gap-1.5 rounded-[var(--p-radius-lg)] border border-line bg-surface-2 p-2; }
+  & .gal-tile.on { @apply border-accent-line bg-accent-tint; }
+  & .gal-tile label { @apply grid cursor-pointer gap-1.5; }
+  & .gal-thumb { @apply block aspect-square w-full rounded-[var(--p-radius-sm)] bg-surface-3 object-cover; }
+  & .gal-tilebar { @apply flex min-h-11 items-center gap-2 text-xs text-fg; }
+  & .gal-tilebar input { @apply h-6 w-6 flex-none; }
+  & .gal-tilename { @apply min-w-0 truncate; }
+  & .gal-tag { @apply inline-flex w-fit items-center rounded-full bg-surface-3 px-2 py-0.5 text-xs font-medium text-fg; }
+  & .gal-warn { @apply m-0 text-xs text-warning; }
+  & .gal-form { @apply grid gap-4 md:grid-cols-2; }
+  & .gal-fs { @apply m-0 grid gap-2 rounded-[var(--p-radius-lg)] border border-line p-3; }
+  & .gal-fs legend { @apply px-1 text-xs font-medium text-fg-muted; }
+  & .gal-days, & .gal-times, & .gal-pfs { @apply flex flex-wrap items-center gap-2; }
+  & .gal-day { @apply min-h-11 min-w-11 cursor-pointer rounded-full border border-line-strong bg-surface px-3 font-[inherit] text-sm text-fg hover:border-accent-line focus-visible:[box-shadow:var(--focus-ring)] focus-visible:outline-none; }
+  & .gal-day.on { @apply border-accent-line bg-accent-tint font-semibold text-accent-ink; }
+  & .gal-time { @apply flex items-center gap-2; }
+  & .gal-time .fld { @apply w-32; }
+  & .bi-check.off { @apply cursor-not-allowed text-fg-subtle; }
+  & .gal-soon { @apply rounded-full bg-surface-3 px-2 py-0.5 text-xs text-fg-muted; }
+  & .gal-preview { @apply mt-4 mb-0 rounded-[var(--p-radius-sm)] bg-surface-2 px-3 py-2.5 text-sm font-medium text-fg; }
+  & .gal-acts { @apply flex flex-wrap items-center gap-2; }
+  & .gal-banner { @apply mb-3 flex flex-wrap items-center justify-between gap-3 rounded-[var(--p-radius-lg)] border border-[color-mix(in_oklab,var(--danger-ink)_45%,transparent)] bg-danger-tint px-4 py-3 text-sm text-fg; }
+  & .gal-camps { @apply m-0 grid list-none gap-2 p-0; }
+  & .gal-camps li { @apply flex flex-wrap items-center justify-between gap-3 rounded-[var(--p-radius-lg)] border border-line bg-surface-2 px-3 py-2; }
+  & .gal-camps li.on { @apply border-accent-line; }
+  & .gal-camp-main { @apply flex min-w-0 flex-1 basis-64 flex-wrap items-center gap-x-3 gap-y-1; }
+  & .gal-camp-name { @apply min-h-11 cursor-pointer border-0 bg-transparent p-0 text-left font-[inherit] text-base font-semibold text-accent-ink underline underline-offset-2 focus-visible:[box-shadow:var(--focus-ring)] focus-visible:outline-none; }
+  & .gal-st { @apply inline-flex h-6 items-center rounded-full px-2.5 text-xs font-semibold text-fg; }
+  & .gal-st.draft, & .gal-st.awaiting_approval { @apply bg-warning-tint; }
+  & .gal-st.approved, & .gal-st.active { @apply bg-accent-tint; }
+  & .gal-st.publishing { @apply bg-info-tint; }
+  & .gal-st.published, & .gal-st.completed { @apply bg-success-tint; }
+  & .gal-st.failed, & .gal-st.paused { @apply bg-danger-tint; }
+  & .gal-st.cancelled { @apply bg-surface-3 text-fg-muted; }
+  & .gal-boardbar { @apply my-3 flex flex-wrap items-center justify-between gap-3; }
+  & .gal-seg { @apply flex gap-1.5; }
+  & .gal-approve { @apply flex flex-wrap items-center gap-2; }
+  & .gal-writing { @apply mb-3 flex items-center gap-2 rounded-[var(--p-radius-sm)] bg-surface-2 px-3 py-2.5 text-sm text-fg; }
+  & .gal-posts { @apply m-0 grid list-none gap-3 p-0; }
+  & .gal-post { @apply grid gap-3 rounded-[var(--p-radius-lg)] border border-line bg-surface-2 p-3 sm:grid-cols-[160px_minmax(0,1fr)]; }
+  & .gal-post.focus { @apply border-accent-line; }
+  & .gal-pmedia { @apply block aspect-square w-full max-w-60 rounded-[var(--p-radius-sm)] bg-surface-3 object-cover sm:max-w-none; }
+  & .gal-pbody { @apply grid min-w-0 content-start gap-2.5; }
+  & .gal-phead { @apply flex flex-wrap items-center gap-2 text-sm; }
+  & .gal-pf { @apply font-semibold text-fg; }
+  & .gal-when { @apply text-fg-muted; }
+  & .gal-cap { @apply min-h-28 w-full resize-y; }
+  & .gal-captext { @apply m-0 text-sm whitespace-pre-wrap text-fg; }
+  & .gal-flags { @apply m-0 grid list-disc gap-1 pl-5 text-sm text-warning; }
+  & .gal-move { @apply flex flex-wrap items-center gap-2 text-sm text-fg-muted; }
+  & .gal-move .fld { @apply w-56 max-w-full; }
+  & .gal-cal { @apply grid gap-1 overflow-x-auto; }
+  & .gal-calrow { @apply grid min-w-0 grid-cols-7 gap-1; }
+  & .gal-calhead span { @apply px-1 text-center text-xs font-medium text-fg-muted; }
+  & .gal-cell { @apply grid min-h-20 min-w-0 content-start gap-1 rounded-[var(--p-radius-sm)] border border-line bg-surface p-1; }
+  & .gal-cell.over { @apply border-accent-line bg-accent-tint; }
+  & .gal-cellday { @apply text-[11px] text-fg-subtle; }
+  & .gal-chip { @apply min-h-8 w-full cursor-pointer truncate rounded-md border border-line-strong bg-surface-2 px-1 text-left font-[inherit] text-[11px] text-fg focus-visible:[box-shadow:var(--focus-ring)] focus-visible:outline-none sm:min-h-11 sm:text-xs; }
+  & .gal-chip[draggable=true] { @apply cursor-grab; }
+  & .gal-chip.approved { @apply border-accent-line; }
+  & .gal-chip.published { @apply bg-success-tint; }
+  & .gal-chip.failed { @apply bg-danger-tint; }
+  & .gal-dlg { @apply w-[min(32rem,calc(100vw-2rem))] rounded-[var(--card-radius)] border border-line-strong bg-bg-elevated p-5 text-fg backdrop:bg-black/60; }
+  & .gal-dlg h2 { @apply mt-0 mb-2 font-display text-lg font-semibold; }
 }

@@ -113,7 +113,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=215e354a90">
+<link rel="stylesheet" href="/assets/td.css?v=d989a08646">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -7997,14 +7997,14 @@ function typeHidden(id){
     { num:'04', name:'CRM',            icon:'users', ids:['leads','sales','clientwork','customers','pipeline','appointments','calendar','followups','crmreports'], group:'Management' },
     { num:'05', name:'Operations',     icon:'box',   ids:['orders','inventory','dailyentry'] },
     { num:'06', name:'Team & HR',      icon:'badge', ids:['team','attendance','hr','roles'] },
-    { num:'07', name:'Marketing',      icon:'mega',  ids:['marketing','posts','captions','autopilot','advisor','analytics'], sep:true },
+    { num:'07', name:'Marketing',      icon:'mega',  ids:['marketing','posts','captions','autopilot','advisor','analytics','gallery'], sep:true },
     { num:'08', name:'Business',       icon:'store', ids:['services','products','packages','deals','reports','bizprofile','settings'] },
     { num:'09', name:'Finance',        icon:'wallet',ids:['revenue','invoices','expenses','dayclose','pnl'] },
     { num:'10', name:'Administration', icon:'shield',ids:['integrations','whatsapp','billing','usage','permissions'], sep:true }
   ];
   // the pages added in this block (they are not in NAV)
   var NEW = { history:'Execution History', tools:'Agents', pipeline:'Pipeline',
-              analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer', usage:'AI usage', roles:'Roles', bizprofile:'Business Profile', followups:'Follow-ups', crmreports:'CRM Reports' };
+              analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer', usage:'AI usage', roles:'Roles', bizprofile:'Business Profile', followups:'Follow-ups', crmreports:'CRM Reports', gallery:'Autopilot Gallery' };
   // tab names that follow the approved structure; everything else keeps its own name
   var LABEL = { overview:'Overview', console:'Jarvis Assistant', ai:'AI Agents', needshuman:'Approval Queue',
                 marketing:'Campaigns', posts:'Social Media Publisher', autopilot:'Content Calendar',
@@ -10769,6 +10769,443 @@ function crmsHTML(){
   if (typeof jvFreshData !== 'function') return;
   var base = jvFreshData;
   jvFreshData = function(){ CRM.fu = undefined; CRM.list = undefined; CRM.key = ''; if (CRM.rid) crmRecLoad(CRM.rid); CRMR.kpi = undefined; return base.apply(this, arguments); };
+})();
+
+/* =====================================================================
+   Marketing › Autopilot Gallery (24 Oct 2026; app/marketing, docs/AUTOPILOT-GALLERY.md).
+   Upload photos and videos -> choose days and times -> Jarvis looks at each
+   picture and writes the captions from the business's own config -> a person
+   checks them and the owner approves -> the worker publishes each post at its
+   time. A new tab at the end of Marketing; nothing else moves.
+   ===================================================================== */
+var GAL = { media: undefined, mediaErr: null, limits: null, sel: {}, up: [], name: '',
+            rule: { days: ['Tue', 'Thu', 'Sat'], times: ['12:00'], start: '', platforms: ['facebook', 'instagram'] },
+            prev: null, prevKey: '', camps: undefined, campsErr: null, tz: 'Asia/Karachi', gbp: false,
+            cid: null, camp: undefined, campErr: null, board: 'list', msg: null, busy: false, override: {}, focus: null, timer: null };
+var GAL_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+var GAL_ST = { draft: 'Draft', approved: 'Approved', publishing: 'Publishing', published: 'Published', failed: 'Failed', cancelled: 'Cancelled',
+               awaiting_approval: 'Waiting for approval', active: 'Active', paused: 'Paused', completed: 'Completed' };
+var GAL_PF = { facebook: 'Facebook', instagram: 'Instagram', gbp: 'Google Business Profile' };
+
+function galCanApprove(){
+  if (!isOwner() || (S.me && S.me.role === 'techdeva_admin')) return false;      // the client decides, never the founder
+  var p = window.TD_ROLE && TD_ROLE.permissions;
+  return !p || (p.marketing || []).indexOf('approve') !== -1;
+}
+function galSay(t, bad){ GAL.msg = { text: t, bad: !!bad }; renderShell(); }
+function galErr(r, fallback){
+  if (r.status === 0) return 'The server could not be reached. Nothing was changed.';
+  var d = r.data && r.data.detail;
+  return (d && (d.message || (typeof d === 'string' ? d : ''))) || fallback;
+}
+function galLoad(force){
+  if (force || GAL.media === undefined) {
+    if (GAL.media === undefined) GAL.media = null;
+    api('/marketing/media').then(function(r){
+      GAL.media = r.ok ? r.data.media : (GAL.media || []); GAL.limits = r.ok ? r.data.limits : GAL.limits;
+      GAL.mediaErr = r.ok ? null : galErr(r, 'Your gallery could not be loaded.');
+      if (currentView() === 'gallery') renderShell();
+    });
+  }
+  if (force || GAL.camps === undefined) {
+    if (GAL.camps === undefined) GAL.camps = null;
+    api('/marketing/campaigns').then(function(r){
+      GAL.camps = r.ok ? r.data.campaigns : (GAL.camps || []); GAL.campsErr = r.ok ? null : galErr(r, 'Campaigns could not be loaded.');
+      if (r.ok) { GAL.tz = r.data.timezone; GAL.gbp = r.data.gbp_enabled; }
+      if (currentView() === 'gallery') renderShell();
+    });
+  }
+}
+function galOpen(cid){
+  GAL.cid = cid; GAL.camp = undefined; GAL.campErr = null; GAL.override = {};
+  api('/marketing/campaigns/' + encodeURIComponent(cid)).then(function(r){
+    if (GAL.cid !== cid) return;
+    GAL.camp = r.ok ? r.data : null; GAL.campErr = r.ok ? null : galErr(r, 'The campaign could not be loaded.');
+    galPoll();
+    if (currentView() === 'gallery') renderShell();
+  });
+}
+/* while Jarvis is still looking and writing, check again every 3 seconds */
+function galPoll(){
+  clearTimeout(GAL.timer);
+  var c = GAL.camp;
+  var busy = c && (c.captioning === 'pending' || c.captioning === 'running' ||
+    c.posts.some(function(p){ return p.flags.some(function(f){ return f.code === 'recaptioning'; }); }));
+  if (!busy) return;
+  GAL.timer = setTimeout(function(){
+    if (currentView() !== 'gallery' || !GAL.cid) return;
+    api('/marketing/campaigns/' + encodeURIComponent(GAL.cid)).then(function(r){
+      if (r.ok && GAL.camp && r.data.id === GAL.camp.id) { GAL.camp = r.data; galLoad(true); }
+      galPoll();
+      if (!document.querySelector('.gal textarea:focus, .gal input:focus')) renderShell();
+    });
+  }, 3000);
+}
+
+/* ---- times in the business's own time zone ---- */
+function galTz(){ return (GAL.camp && GAL.camp.timezone) || GAL.tz || 'Asia/Karachi'; }
+function galWhen(iso, withYear){
+  var d = new Date(iso);
+  return isNaN(d) ? '' : d.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', year: withYear ? 'numeric' : undefined,
+                                                 hour: 'numeric', minute: '2-digit', timeZone: galTz() });
+}
+function galParts(d, tz){
+  var o = {};
+  new Intl.DateTimeFormat('en-GB', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    .formatToParts(d).forEach(function(p){ o[p.type] = p.value; });
+  return o;
+}
+function galLocalInput(iso){ var p = galParts(new Date(iso), galTz()); return p.year + '-' + p.month + '-' + p.day + 'T' + p.hour + ':' + p.minute; }
+function galDayKey(iso){ var p = galParts(new Date(iso), galTz()); return p.year + '-' + p.month + '-' + p.day; }
+/* "2026-11-07T12:00" read as wall-clock time in the business's zone -> an exact moment */
+function galToIso(local){
+  var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(local || '');
+  if (!m) return null;
+  var t = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  var off = function(ms){ var p = galParts(new Date(ms), galTz()); return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute) - ms; };
+  var utc = t - off(t);
+  utc = t - off(utc);
+  return new Date(utc).toISOString();
+}
+
+/* ---- upload (each file on its own, with progress) ---- */
+function galUpload(files){
+  var list = Array.prototype.slice.call(files || []);
+  if (!list.length) return;
+  var start = GAL.up.length;
+  list.forEach(function(f){ GAL.up.push({ name: f.name, pct: 0, state: 'waiting', msg: '' }); });
+  renderShell();
+  var next = function(i){
+    if (i >= list.length) { galLoad(true); return; }
+    var row = GAL.up[start + i], fd = new FormData(), xhr = new XMLHttpRequest();
+    fd.append('files', list[i], list[i].name);
+    row.state = 'uploading';
+    xhr.open('POST', '/marketing/media');
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = function(e){
+      if (e.lengthComputable) { row.pct = Math.round(100 * e.loaded / e.total); var b = document.getElementById('gal-up-' + (start + i)); if (b) b.value = row.pct; }
+    };
+    xhr.onload = function(){
+      var d = null; try { d = JSON.parse(xhr.responseText); } catch (e) {}
+      var res = d && d.results && d.results[0];
+      if (xhr.status === 200 && res && res.ok) {
+        row.state = 'done'; row.pct = 100; GAL.sel[res.asset.id] = true;
+        row.msg = res.asset.warnings.length ? res.asset.warnings.map(function(w){ return w.text; }).join(' ') : '';
+        row.warn = !!res.asset.warnings.length;
+      } else {
+        row.state = 'error';
+        row.msg = (res && res.error) || (d && d.detail && (d.detail.message || d.detail)) || 'The upload did not go through.';
+      }
+      renderShell(); next(i + 1);
+    };
+    xhr.onerror = function(){ row.state = 'error'; row.msg = 'The server could not be reached.'; renderShell(); next(i + 1); };
+    xhr.send(fd);
+  };
+  next(0);
+}
+
+/* ---- the rule preview line ---- */
+function galRuleBody(){
+  var r = GAL.rule, out = { days: r.days.slice(), times: r.times.filter(Boolean), platforms: r.platforms.slice() };
+  if (r.start) out.start_date = r.start;
+  return out;
+}
+function galSelected(){ return (GAL.media || []).filter(function(m){ return GAL.sel[m.id]; }); }
+function galPreview(){
+  var n = galSelected().length, body = { count: n, rule_config: galRuleBody() }, key = JSON.stringify(body);
+  if (key === GAL.prevKey) return;
+  GAL.prevKey = key;
+  if (!n || !body.rule_config.days.length || !body.rule_config.times.length || !body.rule_config.platforms.length) { GAL.prev = null; return; }
+  clearTimeout(GAL.prevT);
+  GAL.prevT = setTimeout(function(){
+    api('/marketing/autopilot/preview', { method: 'POST', body: body }).then(function(r){
+      if (GAL.prevKey !== key) return;
+      GAL.prev = r.ok ? { text: r.data.text } : { err: galErr(r, 'These days and times do not work.') };
+      if (currentView() === 'gallery') renderShell();
+    });
+  }, 250);
+}
+
+/* ---- pieces of the page ---- */
+function galBadge(st){ return '<span class="gal-st ' + esc(st) + '">' + esc(GAL_ST[st] || st) + '</span>'; }
+function galMediaHTML(m, cls){
+  if (!m || !m.url) return '<div class="' + cls + ' none" aria-hidden="true"></div>';
+  return m.kind === 'video' ? '<video class="' + cls + '" src="' + esc(m.url) + '" muted playsinline preload="metadata" aria-label="' + esc(m.name || 'Video') + '"></video>'
+                            : '<img class="' + cls + '" src="' + esc(m.url) + '" alt="' + esc(m.name || 'Picture') + '" loading="lazy">';
+}
+function galBanner(c){
+  if (c.status !== 'paused' || c.paused_reason !== 'meta_auth') return '';
+  return '<div class="gal-banner" role="alert"><div><strong>' + esc(c.name) + ' is paused.</strong> Facebook stopped accepting this business\'s login, ' +
+    'so nothing more was posted. Reconnect Facebook, then press Resume.</div><div class="gal-acts"><a class="btn primary" href="/connect/meta">Reconnect Meta</a>' +
+    (galCanApprove() ? '<button class="btn" type="button" data-galstate="resume" data-gid="' + esc(c.id) + '">Resume</button>' : '') + '</div></div>';
+}
+function galUploadHTML(){
+  var lim = GAL.limits;
+  var h = '<label class="gal-drop" id="gal-drop"><input type="file" id="gal-file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime">' +
+    '<strong>Drop photos and videos here</strong><span>or choose files · JPG, PNG, WEBP, MP4, MOV' +
+    (lim ? ' · pictures up to ' + esc(lim.max_image_mb) + ' MB, videos up to ' + esc(lim.max_video_mb) + ' MB and ' + esc(lim.max_video_s) + ' seconds' : '') + '</span></label>';
+  if (GAL.up.length) h += '<ul class="gal-uplist">' + GAL.up.map(function(u, i){
+    return '<li class="' + esc(u.state) + (u.warn ? ' warn' : '') + '"><span class="gal-upname">' + esc(u.name) + '</span>' +
+      (u.state === 'uploading' || u.state === 'waiting' ? '<progress id="gal-up-' + i + '" max="100" value="' + u.pct + '" aria-label="Uploading ' + esc(u.name) + '"></progress>'
+        : '<span class="gal-upmsg" role="status">' + esc(u.state === 'done' ? (u.msg || 'Uploaded') : u.msg) + '</span>') + '</li>';
+  }).join('') + '</ul>';
+  var m = GAL.media;
+  if (m === null || m === undefined) h += loading('Loading your gallery...');
+  else if (GAL.mediaErr) h += errState(GAL.mediaErr);
+  else if (!m.length) h += empty('Your gallery is empty', 'Upload the photos and videos you want posted. They stay here for future campaigns too.');
+  else {
+    var n = galSelected().length;
+    h += '<div class="gal-selbar"><span>' + n + ' of ' + m.length + ' chosen for the next campaign</span>' +
+      '<button class="btn" type="button" id="gal-all">' + (n === m.length ? 'Choose none' : 'Choose all') + '</button></div>' +
+      '<ul class="gal-grid">' + m.map(function(a){
+        var on = !!GAL.sel[a.id];
+        return '<li class="gal-tile' + (on ? ' on' : '') + '"><label>' + galMediaHTML({ url: a.public_url, kind: a.kind, name: a.original_name }, 'gal-thumb') +
+          '<span class="gal-tilebar"><input type="checkbox" data-galsel="' + esc(a.id) + '"' + (on ? ' checked' : '') + '> <span class="gal-tilename">' + esc(a.original_name || a.kind) + '</span></span></label>' +
+          (a.service_tag ? '<span class="gal-tag">' + esc(a.service_tag) + '</span>' : '') +
+          (a.warnings.length ? '<p class="gal-warn">' + esc(a.warnings.map(function(w){ return w.text; }).join(' ')) + '</p>' : '') + '</li>';
+      }).join('') + '</ul>';
+  }
+  return panel('1. Photos and videos', h);
+}
+function galRuleHTML(){
+  var r = GAL.rule, n = galSelected().length;
+  galPreview();
+  var h = '<div class="gal-form"><label class="crm-lbl">Campaign name<input class="fld" id="gal-name" maxlength="120" value="' + esc(GAL.name) + '" placeholder="e.g. November posts"></label>' +
+    '<fieldset class="gal-fs"><legend>Days</legend><div class="gal-days">' + GAL_DAYS.map(function(d){
+      var on = r.days.indexOf(d) !== -1;
+      return '<button type="button" class="gal-day' + (on ? ' on' : '') + '" aria-pressed="' + on + '" data-galday="' + d + '">' + d + '</button>';
+    }).join('') + '</div></fieldset>' +
+    '<fieldset class="gal-fs"><legend>Times</legend><div class="gal-times">' + r.times.map(function(t, i){
+      return '<span class="gal-time"><input class="fld" type="time" data-galtime="' + i + '" value="' + esc(t) + '" aria-label="Time ' + (i + 1) + '">' +
+        (r.times.length > 1 ? '<button type="button" class="btn" data-galtimerm="' + i + '" aria-label="Remove time ' + (i + 1) + '">Remove</button>' : '') + '</span>';
+    }).join('') + (r.times.length < 4 ? '<button type="button" class="btn" id="gal-timeadd">Add a time</button>' : '') + '</div></fieldset>' +
+    '<label class="crm-lbl">Start date<input class="fld" type="date" id="gal-start" value="' + esc(r.start) + '"></label>' +
+    '<fieldset class="gal-fs"><legend>Post on</legend><div class="gal-pfs">' + ['facebook', 'instagram', 'gbp'].map(function(p){
+      var dis = p === 'gbp' && !GAL.gbp;
+      return '<label class="bi-check' + (dis ? ' off' : '') + '"><input type="checkbox" data-galpf="' + p + '"' + (r.platforms.indexOf(p) !== -1 ? ' checked' : '') + (dis ? ' disabled' : '') + '> ' +
+        esc(GAL_PF[p]) + (dis ? ' <span class="gal-soon">coming soon</span>' : '') + '</label>';
+    }).join('') + '</div></fieldset></div>';
+  var p = GAL.prev;
+  h += '<p class="gal-preview" role="status">' + (!n ? 'Choose photos or videos above.' : p && p.err ? esc(p.err) : p ? esc(p.text) + ' · ' + esc(GAL.tz) + ' time' : 'Working out the dates…') + '</p>';
+  var why = !n ? 'Choose at least one photo or video.' : !GAL.name.trim() ? 'Give the campaign a name.' : !r.days.length ? 'Choose at least one day.' :
+    !r.times.filter(Boolean).length ? 'Choose at least one time.' : !r.platforms.length ? 'Choose where to post.' : p && p.err ? p.err : '';
+  h += '<div class="crm-acts"><button class="btn primary" type="button" id="gal-gen"' + (why || GAL.busy ? ' disabled aria-describedby="gal-gen-why"' : '') + '>' +
+    (GAL.busy ? 'Creating…' : 'Generate drip campaign') + '</button>' + (why ? '<span class="crm-sub" id="gal-gen-why">' + esc(why) + '</span>' : '') + '</div>';
+  return panel('2. When to post', h);
+}
+function galCampsHTML(){
+  var c = GAL.camps;
+  if (c === null || c === undefined) return panel('Campaigns', loading('Loading campaigns...'));
+  if (GAL.campsErr) return panel('Campaigns', errState(GAL.campsErr));
+  if (!c.length) return panel('Campaigns', empty('No campaigns yet', 'Choose photos, set the days and times, and press Generate.'));
+  return panel('Campaigns', c.map(galBanner).join('') + '<ul class="gal-camps">' + c.map(function(x){
+    var counts = Object.keys(x.counts || {}).map(function(k){ return x.counts[k] + ' ' + (GAL_ST[k] || k).toLowerCase(); }).join(' · ');
+    return '<li class="' + (x.id === GAL.cid ? 'on' : '') + '"><div class="gal-camp-main"><button class="gal-camp-name" type="button" data-galopen="' + esc(x.id) + '">' + esc(x.name) + '</button>' + galBadge(x.status) +
+      '<span class="crm-sub">' + esc(counts || 'no posts') + (x.first_at ? ' · ' + esc(galWhen(x.first_at)) + ' – ' + esc(galWhen(x.last_at)) : '') + '</span></div>' +
+      (galCanApprove() ? '<div class="gal-acts">' +
+        (x.status === 'active' || x.status === 'awaiting_approval' ? '<button class="btn" type="button" data-galstate="pause" data-gid="' + esc(x.id) + '">Pause</button>' : '') +
+        (x.status === 'paused' ? '<button class="btn" type="button" data-galstate="resume" data-gid="' + esc(x.id) + '">Resume</button>' : '') +
+        (x.status !== 'cancelled' && x.status !== 'completed' ? '<button class="btn" type="button" data-galstate="cancel" data-gid="' + esc(x.id) + '">Cancel</button>' : '') + '</div>' : '') + '</li>';
+  }).join('') + '</ul>');
+}
+function galPostCard(p){
+  var editable = p.status === 'draft' || p.status === 'approved' || p.status === 'failed';
+  var flags = p.flags.filter(function(f){ return f.code !== 'recaptioning'; });
+  var rewriting = p.flags.some(function(f){ return f.code === 'recaptioning'; });
+  var h = '<li class="gal-post' + (GAL.focus === p.id ? ' focus' : '') + '" id="gal-post-' + esc(p.id) + '">' + galMediaHTML(p.media, 'gal-pmedia') +
+    '<div class="gal-pbody"><div class="gal-phead">' + galBadge(p.status) + '<span class="gal-pf">' + esc(GAL_PF[p.platform] || p.platform) + '</span>' +
+    (p.service_tag ? '<span class="gal-tag">' + esc(p.service_tag) + '</span>' : '') + '<span class="gal-when">' + esc(galWhen(p.scheduled_at, true)) + '</span>' +
+    (p.test_mode ? '<span class="gal-soon">test mode, not really posted</span>' : '') + '</div>';
+  if (rewriting) h += '<p class="crm-muted" role="status"><span class="spin"></span> Jarvis is rewriting this caption…</p>';
+  else if (editable) h += '<label class="crm-lbl">Caption<textarea class="fld gal-cap" rows="5" data-galcap="' + esc(p.id) + '" maxlength="2200">' + esc(p.caption) + '</textarea></label>' +
+    '<label class="crm-lbl">Hashtags<input class="fld" data-galtags="' + esc(p.id) + '" value="' + esc((p.hashtags || []).join(' ')) + '" placeholder="#glow #salon"></label>';
+  else h += '<p class="gal-captext">' + esc(p.caption) + (p.hashtags && p.hashtags.length ? '\n\n' + esc(p.hashtags.join(' ')) : '') + '</p>';
+  if (flags.length) h += '<ul class="gal-flags">' + flags.map(function(f){ return '<li>' + esc(f.text) + '</li>'; }).join('') + '</ul>' +
+    (p.status === 'draft' && galCanApprove() && p.caption ? '<label class="bi-check"><input type="checkbox" data-galover="' + esc(p.id) + '"' + (GAL.override[p.id] ? ' checked' : '') + '> I have read this; approve it anyway</label>' : '');
+  if (p.last_error) h += '<p class="crm-msg bad">' + esc(p.last_error) + '</p>';
+  if (p.status === 'approved') h += '<p class="crm-sub">Approved ' + esc(galWhen(p.approved_at, true)) + '</p>';
+  if (editable && !rewriting) h += '<div class="gal-acts"><button class="btn" type="button" data-galsave="' + esc(p.id) + '">Save caption</button>' +
+    '<button class="btn" type="button" data-galre="' + esc(p.id) + '">Regenerate caption</button>' +
+    '<label class="gal-move">Move to <input class="fld" type="datetime-local" data-galmove="' + esc(p.id) + '" value="' + esc(galLocalInput(p.scheduled_at)) + '"></label>' +
+    '<button class="btn" type="button" data-galcancel="' + esc(p.id) + '">Cancel post</button></div>';
+  return h + '</div></li>';
+}
+function galCalendarHTML(c){
+  var posts = c.posts.filter(function(p){ return p.status !== 'cancelled'; });
+  if (!posts.length) return empty('Nothing scheduled', 'Every post in this campaign was cancelled.');
+  var first = new Date(galDayKey(posts[0].scheduled_at) + 'T00:00:00Z'), last = new Date(galDayKey(posts[posts.length - 1].scheduled_at) + 'T00:00:00Z');
+  var day = new Date(first.getTime() - ((first.getUTCDay() + 6) % 7) * 864e5), h = '<div class="gal-cal" role="grid" aria-label="Campaign calendar">' +
+    '<div class="gal-calrow gal-calhead" role="row">' + GAL_DAYS.map(function(d){ return '<span role="columnheader">' + d + '</span>'; }).join('') + '</div>';
+  while (day <= last) {
+    h += '<div class="gal-calrow" role="row">';
+    for (var i = 0; i < 7; i++) {
+      var key = day.toISOString().slice(0, 10), here = posts.filter(function(p){ return galDayKey(p.scheduled_at) === key; });
+      h += '<div class="gal-cell" role="gridcell" data-galdrop="' + key + '"><span class="gal-cellday">' + day.getUTCDate() + ' ' + day.toLocaleDateString([], { month: 'short', timeZone: 'UTC' }) + '</span>' +
+        here.map(function(p){
+          var can = p.status === 'draft' || p.status === 'approved';
+          return '<button type="button" class="gal-chip ' + esc(p.status) + '"' + (can ? ' draggable="true"' : '') + ' data-galchip="' + esc(p.id) + '" title="' + esc(GAL_PF[p.platform] + ' · ' + galWhen(p.scheduled_at)) + '">' +
+            esc(galParts(new Date(p.scheduled_at), galTz()).hour + ':' + galParts(new Date(p.scheduled_at), galTz()).minute) + ' ' + esc(p.platform === 'facebook' ? 'FB' : p.platform === 'instagram' ? 'IG' : 'GBP') + '</button>';
+        }).join('') + '</div>';
+      day = new Date(day.getTime() + 864e5);
+    }
+    h += '</div>';
+  }
+  return h + '</div><p class="crm-sub">Drag a post to another day to move it to the same time that day, or open it in the list to choose an exact time. A moved post needs approving again.</p>';
+}
+function galBoardHTML(){
+  if (!GAL.cid) return '';
+  var c = GAL.camp;
+  if (c === undefined) return panel('Review', loading('Loading the campaign...'));
+  if (c === null) return panel('Review', errState(GAL.campErr));
+  var writing = c.captioning === 'pending' || c.captioning === 'running';
+  var drafts = c.posts.filter(function(p){ return p.status === 'draft'; });
+  var block = c.blockers.filter(function(b){ return !(b.reason === 'flagged' && GAL.override[b.post_id]); });
+  var why = writing ? 'Jarvis is still writing captions.' : !drafts.length ? 'Nothing is waiting for approval.' :
+    block.length ? block.length + ' post' + (block.length === 1 ? ' needs' : 's need') + ' a caption or a decision on its flags first.' : '';
+  var head = '<div class="gal-boardbar"><div class="gal-seg" role="group" aria-label="View">' +
+    '<button type="button" class="btn' + (GAL.board === 'list' ? ' primary' : '') + '" aria-pressed="' + (GAL.board === 'list') + '" data-galboard="list">List</button>' +
+    '<button type="button" class="btn' + (GAL.board === 'calendar' ? ' primary' : '') + '" aria-pressed="' + (GAL.board === 'calendar') + '" data-galboard="calendar">Calendar</button></div>' +
+    (galCanApprove() ? '<div class="gal-approve"><button class="btn primary" type="button" id="gal-approve"' + (why ? ' disabled aria-describedby="gal-approve-why"' : '') + '>Approve campaign</button>' +
+      (why ? '<span class="crm-sub" id="gal-approve-why">' + esc(why) + '</span>' : '') + '</div>'
+      : '<span class="crm-sub">Only the business owner can approve posts.</span>') + '</div>';
+  var body = galBanner(c) + (writing ? '<div class="gal-writing" role="status"><span class="spin"></span>Jarvis is looking at each picture and writing the captions from your business details…</div>' : '') +
+    (c.captioning === 'failed' ? '<p class="crm-msg bad">Some captions could not be written. They are marked below: write them or press Regenerate.</p>' : '');
+  body += GAL.board === 'calendar' ? galCalendarHTML(c) : '<ul class="gal-posts">' + c.posts.map(galPostCard).join('') + '</ul>';
+  var counts = Object.keys(c.counts).map(function(k){ return c.counts[k] + ' ' + (GAL_ST[k] || k).toLowerCase(); }).join(' · ');
+  return '<section class="panel gal-board" aria-labelledby="gal-board-h"><div class="panel-head"><h2 class="panel-title" id="gal-board-h">' + esc(c.name) + '</h2>' + galBadge(c.status) + '</div>' +
+    '<p class="crm-sub">' + esc(counts) + ' · times in ' + esc(c.timezone) + '</p>' + head + body + '</section>' +
+    '<dialog class="gal-dlg" id="gal-dlg" aria-labelledby="gal-dlg-h"></dialog>';
+}
+VIEWS.gallery = function(){
+  galLoad(false);
+  var msg = GAL.msg ? '<p class="crm-msg ' + (GAL.msg.bad ? 'bad' : 'ok') + '" role="status">' + esc(GAL.msg.text) + '</p>' : '';
+  return '<div class="gal"><h1>Autopilot Gallery</h1><p class="sub">Upload photos and videos, choose the days and times, and Jarvis writes each caption from your own services and prices. ' +
+    'Nothing is posted until you approve it.</p>' + msg + galUploadHTML() + galRuleHTML() + galCampsHTML() + galBoardHTML() + '</div>';
+};
+
+/* ---- actions ---- */
+function galPatch(id, body, done){
+  api('/marketing/posts/' + encodeURIComponent(id), { method: 'PATCH', body: body }).then(function(r){
+    if (!r.ok) { galSay(galErr(r, 'That change was not saved.'), true); return; }
+    galSay(done || (r.data.needs_approval ? 'Saved. This post needs approving again.' : 'Saved.'));
+    galOpen(GAL.cid); galLoad(true);
+  });
+}
+function galConfirmApprove(){
+  var c = GAL.camp, d = document.getElementById('gal-dlg');
+  var drafts = c.posts.filter(function(p){ return p.status === 'draft'; });
+  var pfs = drafts.map(function(p){ return GAL_PF[p.platform]; }).filter(function(x, i, a){ return a.indexOf(x) === i; });
+  d.innerHTML = '<h2 id="gal-dlg-h">Approve ' + drafts.length + ' post' + (drafts.length === 1 ? '' : 's') + '?</h2>' +
+    '<p>They will be posted on ' + esc(pfs.join(' and ')) + ' from ' + esc(galWhen(drafts[0].scheduled_at, true)) + ' to ' + esc(galWhen(drafts[drafts.length - 1].scheduled_at, true)) + ' (' + esc(c.timezone) + ' time), each at its own time.</p>' +
+    '<p class="crm-sub">You can still pause the campaign, or change or cancel a post before it goes out.</p>' +
+    '<div class="crm-acts"><button class="btn primary" type="button" id="gal-dlg-yes">Approve and schedule</button><button class="btn" type="button" id="gal-dlg-no">Not yet</button></div>';
+  d.showModal();
+  document.getElementById('gal-dlg-no').onclick = function(){ d.close(); };
+  document.getElementById('gal-dlg-yes').onclick = function(){
+    this.disabled = true;
+    api('/marketing/campaigns/' + encodeURIComponent(c.id) + '/approve', { method: 'POST', body: { override_post_ids: Object.keys(GAL.override).filter(function(k){ return GAL.override[k]; }) } }).then(function(r){
+      d.close();
+      if (!r.ok) { galSay(galErr(r, 'The campaign was not approved.'), true); galOpen(c.id); return; }
+      galSay(r.data.approved + ' post' + (r.data.approved === 1 ? ' is' : 's are') + ' approved and will go out at their times.');
+      galOpen(c.id); galLoad(true);
+    });
+  };
+}
+(function(){
+  var _r = renderShell;
+  renderShell = function(){
+    var out = _r.apply(this, arguments);
+    if (currentView() !== 'gallery') { clearTimeout(GAL.timer); return out; }
+    setTimeout(function(){
+      var g = function(id){ return document.getElementById(id); }, all = function(s){ return document.querySelectorAll(s); };
+      var file = g('gal-file'), drop = g('gal-drop');
+      if (file) file.onchange = function(){ galUpload(file.files); file.value = ''; };
+      if (drop) {
+        drop.ondragover = function(e){ e.preventDefault(); drop.classList.add('over'); };
+        drop.ondragleave = function(){ drop.classList.remove('over'); };
+        drop.ondrop = function(e){ e.preventDefault(); drop.classList.remove('over'); galUpload(e.dataTransfer.files); };
+      }
+      all('[data-galsel]').forEach(function(c){ c.onchange = function(){ GAL.sel[c.getAttribute('data-galsel')] = c.checked; renderShell(); }; });
+      if (g('gal-all')) g('gal-all').onclick = function(){
+        var every = galSelected().length === (GAL.media || []).length;
+        (GAL.media || []).forEach(function(m){ GAL.sel[m.id] = !every; }); renderShell();
+      };
+      if (g('gal-name')) g('gal-name').oninput = function(){ GAL.name = this.value; };
+      if (g('gal-name')) g('gal-name').onchange = function(){ renderShell(); };
+      all('[data-galday]').forEach(function(b){ b.onclick = function(){
+        var d = b.getAttribute('data-galday'), i = GAL.rule.days.indexOf(d);
+        if (i === -1) GAL.rule.days.push(d); else GAL.rule.days.splice(i, 1);
+        GAL.rule.days.sort(function(a, z){ return GAL_DAYS.indexOf(a) - GAL_DAYS.indexOf(z); }); renderShell();
+      }; });
+      all('[data-galtime]').forEach(function(t){ t.onchange = function(){ GAL.rule.times[+t.getAttribute('data-galtime')] = t.value; renderShell(); }; });
+      all('[data-galtimerm]').forEach(function(b){ b.onclick = function(){ GAL.rule.times.splice(+b.getAttribute('data-galtimerm'), 1); renderShell(); }; });
+      if (g('gal-timeadd')) g('gal-timeadd').onclick = function(){ GAL.rule.times.push('18:00'); renderShell(); };
+      if (g('gal-start')) g('gal-start').onchange = function(){ GAL.rule.start = this.value; renderShell(); };
+      all('[data-galpf]').forEach(function(c){ c.onchange = function(){
+        var p = c.getAttribute('data-galpf'), i = GAL.rule.platforms.indexOf(p);
+        if (c.checked && i === -1) GAL.rule.platforms.push(p); if (!c.checked && i !== -1) GAL.rule.platforms.splice(i, 1); renderShell();
+      }; });
+      if (g('gal-gen')) g('gal-gen').onclick = function(){
+        GAL.busy = true; renderShell();
+        api('/marketing/autopilot/generate', { method: 'POST', body: { name: GAL.name, media_asset_ids: galSelected().map(function(m){ return m.id; }), rule_config: galRuleBody() } }).then(function(r){
+          GAL.busy = false;
+          if (!r.ok) { galSay(galErr(r, 'The campaign was not created.'), true); return; }
+          GAL.sel = {}; GAL.name = ''; GAL.prevKey = ''; GAL.msg = { text: 'Campaign created. Jarvis is writing the captions now.' };
+          galOpen(r.data.campaign_id); galLoad(true);
+        });
+      };
+      all('[data-galopen]').forEach(function(b){ b.onclick = function(){ galOpen(b.getAttribute('data-galopen')); renderShell(); }; });
+      all('[data-galstate]').forEach(function(b){ b.onclick = function(){
+        var a = b.getAttribute('data-galstate'), id = b.getAttribute('data-gid');
+        if (a === 'cancel' && !window.confirm('Cancel this campaign? Posts not yet published will not go out.')) return;
+        b.disabled = true;
+        api('/marketing/campaigns/' + encodeURIComponent(id) + '/' + a, { method: 'POST' }).then(function(r){
+          if (!r.ok) galSay(galErr(r, 'That did not work.'), true);
+          else galSay(a === 'pause' ? 'Paused. Nothing more will be posted until you resume.' : a === 'resume' ? 'Resumed.' : 'Cancelled.');
+          galLoad(true); if (GAL.cid === id) galOpen(id);
+        });
+      }; });
+      all('[data-galboard]').forEach(function(b){ b.onclick = function(){ GAL.board = b.getAttribute('data-galboard'); renderShell(); }; });
+      all('[data-galsave]').forEach(function(b){ b.onclick = function(){
+        var id = b.getAttribute('data-galsave'), cap = document.querySelector('[data-galcap="' + id + '"]'), tags = document.querySelector('[data-galtags="' + id + '"]');
+        galPatch(id, { caption: cap.value, hashtags: (tags.value || '').split(/[\s,]+/).filter(Boolean) });
+      }; });
+      all('[data-galre]').forEach(function(b){ b.onclick = function(){
+        b.disabled = true;
+        api('/marketing/posts/' + encodeURIComponent(b.getAttribute('data-galre')) + '/recaption', { method: 'POST' }).then(function(r){
+          if (!r.ok) { galSay(galErr(r, 'Jarvis could not start on it.'), true); return; }
+          galSay('Jarvis is rewriting that caption.'); galOpen(GAL.cid);
+        });
+      }; });
+      all('[data-galmove]').forEach(function(t){ t.onchange = function(){
+        var iso = galToIso(t.value);
+        if (iso) galPatch(t.getAttribute('data-galmove'), { scheduled_at: iso }, 'Moved. This post needs approving again.');
+      }; });
+      all('[data-galcancel]').forEach(function(b){ b.onclick = function(){
+        if (window.confirm('Cancel this post? It will not be published.')) galPatch(b.getAttribute('data-galcancel'), { cancel: true }, 'Post cancelled.');
+      }; });
+      all('[data-galover]').forEach(function(c){ c.onchange = function(){ GAL.override[c.getAttribute('data-galover')] = c.checked; renderShell(); }; });
+      if (g('gal-approve')) g('gal-approve').onclick = galConfirmApprove;
+      /* calendar: drag a post to another day; click it to open it in the list */
+      all('[data-galchip]').forEach(function(ch){
+        ch.ondragstart = function(e){ e.dataTransfer.setData('text/plain', ch.getAttribute('data-galchip')); };
+        ch.onclick = function(){ GAL.board = 'list'; GAL.focus = ch.getAttribute('data-galchip'); renderShell();
+          setTimeout(function(){ var el = g('gal-post-' + GAL.focus); if (el) { el.scrollIntoView({ block: 'center' }); var f = el.querySelector('textarea,button'); if (f) f.focus(); } }, 0); };
+      });
+      all('[data-galdrop]').forEach(function(cell){
+        cell.ondragover = function(e){ e.preventDefault(); cell.classList.add('over'); };
+        cell.ondragleave = function(){ cell.classList.remove('over'); };
+        cell.ondrop = function(e){
+          e.preventDefault(); cell.classList.remove('over');
+          var id = e.dataTransfer.getData('text/plain'), p = GAL.camp && GAL.camp.posts.filter(function(x){ return x.id === id; })[0];
+          if (!p) return;
+          var hhmm = galLocalInput(p.scheduled_at).slice(11), iso = galToIso(cell.getAttribute('data-galdrop') + 'T' + hhmm);
+          if (iso && galDayKey(iso) !== galDayKey(p.scheduled_at)) galPatch(id, { scheduled_at: iso }, 'Moved. This post needs approving again.');
+        };
+      });
+    }, 0);
+    return out;
+  };
 })();
 
 boot();
