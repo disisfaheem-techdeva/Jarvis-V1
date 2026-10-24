@@ -95,14 +95,14 @@ def test_owner_sees_every_block_from_the_real_rows(client, world):
     for k in ("orders_new", "orders_delivery", "approvals", "followups", "invoices_overdue", "integrations"):
         assert k in keys, keys
     assert next(f for f in d["focus"] if f["key"] == "orders_new")["text"] == "2 orders waiting for you to confirm"
-    assert {x["key"] for x in d["chart_metrics"]} == {"sales", "collected", "orders", "customers", "leads"}
+    assert {x["key"] for x in d["chart_metrics"]} == {"sales", "collected", "orders", "customers", "leads", "appointments"}
     assert d["setup"]["total"] == 11 and d["setup"]["next"]["key"] == "brand"
 
 
 def test_another_business_sees_nothing_of_it(client, world):
     d = client.get("/dashboard/overview", headers=world["h"]["b_owner"]).json()
     assert d["orders"]["counts"]["new"] == 0 and d["month"]["collected"] == 0 and d["focus"] == []
-    assert {x["key"] for x in d["chart_metrics"]} == {"collected", "customers", "leads"}    # no orders yet: no orders chart
+    assert {x["key"] for x in d["chart_metrics"]} == {"collected", "customers", "leads", "appointments"}    # no orders yet: no orders chart
 
 
 def test_shopkeeper_gets_no_money_and_no_ai(client, world):
@@ -110,7 +110,7 @@ def test_shopkeeper_gets_no_money_and_no_ai(client, world):
     assert d["money_visible"] is False and "money" not in d["orders"] and "hidden" in d["month"]
     assert "Jarvis" in d["ai"]["hidden"] and "Administration" in d["integrations"]["hidden"]
     assert "invoices_overdue" not in [f["key"] for f in d["focus"]]
-    assert {x["key"] for x in d["chart_metrics"]} == {"orders", "customers", "leads"}
+    assert {x["key"] for x in d["chart_metrics"]} == {"orders", "customers", "leads", "appointments"}
     r = client.get("/dashboard/performance?metric=sales&days=30", headers=world["h"]["shop"])
     assert r.status_code == 403
 
