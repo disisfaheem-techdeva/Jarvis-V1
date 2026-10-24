@@ -113,7 +113,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=50c373e3a8">
+<link rel="stylesheet" href="/assets/td.css?v=bf31ce3f51">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -9286,6 +9286,397 @@ function jvConvPanel(){
     if (S.me && !JVC.restored) jvLoadConvs();     // the dock on any page continues the last conversation too
     if (currentView() === 'console') wire();
   };
+})();
+
+/* =====================================================================
+   Dashboard 2.0 (24 Oct 2026). Only the Overview's main area changes; the
+   sidebar, the module tabs and every other page stay as they are.
+   Figures come from GET /dashboard/overview and /dashboard/performance
+   (app/dashboard.py), which reuse the Orders, P&L, setup and approval rules
+   the other pages already use. On wide screens Jarvis sits on the right as a
+   panel: the same dock, the same stored conversations (db/75).
+   ===================================================================== */
+var DV = { data: undefined, err: null, at: 0, perf: undefined, perfErr: null, perfKey: '', metric: null, days: 30,
+           start: '', end: '', custom: false, hidden: false };
+try { DV.hidden = localStorage.getItem('td_dv_jarvis') === 'hidden'; } catch (e) {}
+var DV_METRIC_NOTE = { sales: 'Delivered and fully paid orders, on the day they became a sale.',
+  collected: 'Every payment received, on the day it was paid. Not the same as sales: it includes invoices and part payments.',
+  orders: 'Orders on the day they were placed, cancelled ones included.', customers: 'Customers on the day they were added.',
+  leads: 'Leads on the day they arrived.' };
+function dvLoad(force){
+  if (!S.me || !S.me.tenant_id) return;
+  if (!force && (DV.loading || (DV.data !== undefined && Date.now() - DV.at < 60000))) return;
+  DV.loading = true;
+  api('/dashboard/overview').then(function(r){
+    DV.loading = false; DV.at = Date.now();
+    if (r.ok) { DV.data = r.data; DV.err = null; }
+    else { DV.err = r.status === 0 ? 'unreachable' : ((r.data && r.data.detail) || 'The dashboard figures could not be loaded.'); if (DV.data === undefined) DV.data = null; }
+    if (currentView() === 'overview') renderShell();
+  });
+}
+function dvPerfQuery(){
+  var q = 'metric=' + encodeURIComponent(DV.metric || '') ;
+  return DV.custom && DV.start && DV.end ? q + '&start=' + DV.start + '&end=' + DV.end : q + '&days=' + DV.days;
+}
+function dvPerfLoad(force){
+  if (!DV.metric) return;
+  var key = dvPerfQuery();
+  if (!force && (DV.perfKey === key)) return;
+  DV.perfKey = key; DV.perf = undefined; DV.perfErr = null;
+  api('/dashboard/performance?' + key).then(function(r){
+    if (DV.perfKey !== key) return;                 // a newer choice is on its way
+    if (r.ok) DV.perf = r.data;
+    else { DV.perf = null; DV.perfErr = r.status === 0 ? 'The server could not be reached. Nothing was changed.' : ((r.data && r.data.detail) || 'The chart could not be loaded.'); }
+    if (currentView() === 'overview') renderShell();
+  });
+}
+function dvFmt(v, isMoney){ return isMoney ? money(v) : esc(Number(v || 0).toLocaleString()); }
+function dvCompact(n){
+  var a = Math.abs(n);
+  if (a >= 1e7) return (n / 1e6).toFixed(0) + 'M';
+  if (a >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (a >= 1e4) return (n / 1e3).toFixed(0) + 'k';
+  if (a >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
+  return String(Math.round(n * 100) / 100);
+}
+function dvDay(d, long){
+  var x = new Date(d + 'T00:00:00');
+  return isNaN(x) ? esc(d) : x.toLocaleDateString(undefined, long ? { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' } : { day: 'numeric', month: 'short' });
+}
+/* one figure: a link to where it comes from; "—" with the reason when it is not there */
+function dvCard(label, value, note, href, o){
+  o = o || {};
+  var has = value !== null && value !== undefined;
+  var v = has ? (o.money ? money(value) : esc(Number(value).toLocaleString())) : '—';
+  var inner = '<span class="dv-card-label">' + esc(label) + '</span>' +
+    '<span class="dv-card-value' + (has ? '' : ' none') + (o.big ? ' big' : '') + '">' + v + '</span>' +
+    '<span class="dv-card-note">' + esc(has ? (note || '') : (o.why || 'Not available')) + '</span>';
+  return href && has ? '<a class="dv-card' + (o.attn && value > 0 ? ' attn' : '') + '" href="' + href + '">' + inner + '</a>'
+                     : '<div class="dv-card">' + inner + '</div>';
+}
+function dvSection(title, inner, right, id){
+  return '<section class="dv-sec"' + (id ? ' aria-labelledby="' + id + '"' : '') + '><div class="dv-sec-head"><h2' + (id ? ' id="' + id + '"' : '') + '>' + esc(title) + '</h2>' +
+    (right || '') + '</div>' + inner + '</section>';
+}
+function dvOrders(d){
+  var o = d.orders;
+  if (!o || o.hidden) return '';
+  var c = o.counts || {}, t = typeof BP !== 'undefined' && BP.data && BP.data.business_type;
+  // the same rule as before: a shop or restaurant, or any order activity
+  if (!(o.has_orders || c.month > 0 || c['new'] > 0 || c.waiting_delivery > 0 || t === 'shop' || t === 'restaurant')) return '';
+  var m = o.money, why = d.money_visible ? 'Not available' : 'Money figures are for the owner';
+  var h = '<div class="dv-group"><h3 class="dv-sub">Orders</h3><div class="dv-grid">' +
+    dvCard('New orders', c['new'], 'waiting for you to confirm', '#/orders?status=new', { attn: true }) +
+    dvCard('Confirmed', c.confirmed, 'confirmed, not yet sent', '#/orders?status=confirmed') +
+    dvCard('Out for delivery', c.out_for_delivery, 'on the way now', '#/orders?status=out_for_delivery') +
+    dvCard('Delivered', c.delivered_month, 'this month', '#/orders?status=delivered') + '</div></div>';
+  h += '<div class="dv-group"><h3 class="dv-sub">Sales</h3><div class="dv-grid">' +
+    dvCard("Today's sales", m ? m.sales_today : null, 'delivered and fully paid today', '#/orders?status=delivered', { money: true, why: why }) +
+    dvCard('This month', m ? m.sales_month : null, 'delivered and fully paid', '#/orders?status=delivered', { money: true, why: why }) +
+    dvCard('Outstanding', m ? m.outstanding : null, m ? m.outstanding_orders + ' delivered order' + (m.outstanding_orders === 1 ? '' : 's') + ' not fully paid' : '', '#/orders?status=unpaid', { money: true, why: why }) +
+    dvCard('Collected today', m ? m.collected_today : null, 'payments received for orders', '#/orders', { money: true, why: why }) + '</div></div>';
+  h += '<div class="dv-group"><h3 class="dv-sub">Operations</h3><div class="dv-grid">' +
+    dvCard('Waiting for delivery', c.waiting_delivery, 'confirmed or on the way', '#/orders?status=waiting') +
+    dvCard('Low stock', c.low_stock, 'products at or below their alert level', '#/inventory', { attn: true }) +
+    dvCard('Cancelled', c.cancelled_month, 'this month', '#/orders?status=cancelled') + '</div></div>';
+  if ((o.sources || []).length) h += '<p class="dv-foot">Where this month\'s orders came from: ' + o.sources.map(function(x){
+    return esc((typeof ORD_SRC !== 'undefined' && ORD_SRC[x.source]) || x.source) + ' ' + x.share + '% (' + x.orders + ' order' + (x.orders === 1 ? '' : 's') + ', ' + x.sold + ' sold)';
+  }).join(' · ') + '</p>';
+  return dvSection('Orders and sales', h, '<a class="btn" href="#/orders">Open orders</a>', 'dv-h-orders');
+}
+function dvSetup(d){
+  var s = d.setup;
+  if (!s || s.hidden || s.percent >= 100) return '';
+  return '<section class="dv-setup" aria-labelledby="dv-h-setup"><div class="dv-setup-txt"><h2 id="dv-h-setup">Complete your business setup</h2>' +
+    '<p>' + esc(s.complete) + ' of ' + esc(s.total) + ' steps done' + (s.next ? '. Next: ' + esc(s.next.label) : '') + '</p>' +
+    '<div class="dv-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + esc(s.percent) + '" aria-label="Setup progress"><i style="width:' + esc(s.percent) + '%"></i></div></div>' +
+    '<a class="btn primary" href="' + esc(s.href || '/onboarding') + '">Continue setup</a></section>';
+}
+function dvAi(d){
+  var a = d.ai, p = d.people, ig = d.integrations;
+  var aiWhy = a && a.hidden, pWhy = p && p.hidden, iWhy = ig && ig.hidden;
+  var t = a && !aiWhy ? a.tasks : null, ap = a && !aiWhy ? a.approvals : null;
+  var taskNote = t ? (t.total ? [t.running ? t.running + ' running' : '', t.waiting ? t.waiting + ' waiting' : '', t.done ? t.done + ' done' : '',
+      t.failed ? t.failed + ' failed' : '', t.paused ? t.paused + ' paused for you' : ''].filter(Boolean).join(' · ') : 'none yet') : '';
+  var apNote = ap ? [ap.deliverables ? ap.deliverables + ' AI work' : '', ap.posts ? ap.posts + ' post' + (ap.posts === 1 ? '' : 's') : '',
+      ap.paused_tasks ? ap.paused_tasks + ' paused task' + (ap.paused_tasks === 1 ? '' : 's') : ''].filter(Boolean).join(' · ') || 'nothing waiting' : '';
+  var l = p && !pWhy ? p.leads : null;
+  var h = '<div class="dv-grid">' +
+    dvCard('Leads', l ? l.total : null, l ? (l['new'] + ' new · ' + l.in_progress + ' in progress · ' + l.won + ' won') : '', '#/leads', { why: pWhy }) +
+    dvCard('AI tasks', t ? t.total : null, taskNote, '#/history', { why: aiWhy }) +
+    dvCard('Needs your approval', ap ? ap.total : null, apNote, '#/needshuman', { why: aiWhy, attn: true }) +
+    dvCard('AI deliverables', a && !aiWhy ? a.deliverables.total : null, 'reports and work your AI team produced', '#/needshuman', { why: aiWhy }) +
+    dvCard('Analysis runs', a && !aiWhy ? a.analysis_runs : null, 'business analyses completed', '#/reports', { why: aiWhy }) +
+    dvCard('Connections working', ig && !iWhy ? ig.healthy : null, ig && !iWhy ? (ig.configured + ' set up' + (ig.attention.length ? ' · ' + ig.attention.length + ' need attention' : '')) : '', '#/integrations', { why: iWhy }) +
+    '</div>';
+  return dvSection('AI and business operations', h, '', 'dv-h-ai');
+}
+function dvFocus(d){
+  var f = d.focus || [];
+  var body = !f.length ? '<div class="dv-empty"><strong>Nothing is waiting on you</strong>Orders to confirm, approvals, follow-ups and anything else that needs you will show here.</div>'
+    : '<ul class="dv-focus">' + f.map(function(x){
+        return '<li><span class="dv-focus-n" aria-hidden="true">' + esc(x.count) + '</span><span class="dv-focus-t">' + esc(x.text) + '</span>' +
+          '<a class="btn" href="' + esc(x.href) + '">' + esc(x.action) + '</a></li>';
+      }).join('') + '</ul>';
+  return dvSection("Today's focus", body, '<span class="dv-asof">From your records</span>', 'dv-h-focus');
+}
+function dvMonth(d){
+  var m = d.month, p = d.people, why = m && m.hidden, pWhy = p && p.hidden;
+  var mm = m && !why ? m : null;
+  var h = '<div class="dv-grid">' +
+    dvCard('Collected', mm ? mm.collected : null, mm ? mm.payment_count + ' payment' + (mm.payment_count === 1 ? '' : 's') + ' received this month' : '', '#/revenue', { money: true, why: why }) +
+    dvCard('Invoiced', mm ? mm.invoiced : null, mm ? mm.invoice_count + ' invoice' + (mm.invoice_count === 1 ? '' : 's') + ' issued this month' : '', '#/invoices', { money: true, why: why }) +
+    dvCard('Outstanding', mm ? mm.outstanding_all_time : null, 'owed to you on invoices, all time', '#/invoices', { money: true, why: why });
+  if (bizMode() !== 'product') h += dvCard('Upcoming appointments', p && !pWhy ? p.appointments.upcoming : null, 'booked from now on', '#/appointments', { why: pWhy });
+  h += dvCard('Customers', p && !pWhy ? p.customers.total : null, p && !pWhy ? 'on your list · ' + p.customers.new_this_month + ' new this month' : '', '#/customers', { why: pWhy }) + '</div>';
+  var range = mm ? '<span class="dv-asof">' + esc(dvDay(mm.start)) + ' – ' + esc(dvDay(mm.end)) + '</span>' : '';
+  return dvSection('This month', h + '<p class="dv-foot">Collected is money received; invoiced is what you billed. An unpaid invoice is not income yet.</p>', range, 'dv-h-month');
+}
+/* ---- the chart: one measure, this period against the one before, one axis ---- */
+function dvChart(p){
+  // a phone gets a narrower drawing, so the labels stay readable instead of shrinking
+  var narrow = window.innerWidth < 640, W = narrow ? 360 : 720, H = narrow ? 220 : 240, L = 40, R = 10, T = 14, B = 30;
+  var cur = p.series, prev = p.previous.series, n = cur.length;
+  var max = 0; cur.concat(prev).forEach(function(x){ if (x.value > max) max = x.value; });
+  if (max <= 0) max = 1;
+  var step = Math.pow(10, Math.floor(Math.log10(max))), nice = Math.ceil(max / step) * step;
+  if (nice / step > 5 && step > 0) nice = Math.ceil(max / (step * 2)) * step * 2;
+  var xs = function(i){ return L + (n === 1 ? (W - L - R) / 2 : i * (W - L - R) / (n - 1)); };
+  var ys = function(v){ return T + (H - T - B) * (1 - v / nice); };
+  var line = function(s){ return s.map(function(x, i){ return (i ? 'L' : 'M') + xs(i).toFixed(1) + ' ' + ys(x.value).toFixed(1); }).join(' '); };
+  var g = '';
+  for (var k = 0; k <= 4; k++) {
+    var v = nice * k / 4, y = ys(v).toFixed(1);
+    g += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '" class="dv-gl"/>' +
+         '<text x="' + (L - 8) + '" y="' + y + '" class="dv-ax" text-anchor="end" dominant-baseline="middle">' + esc(dvCompact(v)) + '</text>';
+  }
+  var ticks = Math.min(narrow ? 3 : 6, n), lab = '';
+  for (var j = 0; j < ticks; j++) {
+    var i = ticks === 1 ? 0 : Math.round(j * (n - 1) / (ticks - 1));
+    lab += '<text x="' + xs(i).toFixed(1) + '" y="' + (H - 8) + '" class="dv-ax" text-anchor="' + (j === 0 ? 'start' : j === ticks - 1 ? 'end' : 'middle') + '">' + esc(dvDay(cur[i].date)) + '</text>';
+  }
+  var dots = n <= 31 ? cur.map(function(x, i){ return x.value ? '<circle cx="' + xs(i).toFixed(1) + '" cy="' + ys(x.value).toFixed(1) + '" r="3" class="dv-dot"/>' : ''; }).join('') : '';
+  var sum = p.label + ' from ' + dvDay(p.start, true) + ' to ' + dvDay(p.end, true) + ': ' + (p.money ? 'PKR ' : '') + Number(p.total).toLocaleString() +
+    ', previous period ' + (p.money ? 'PKR ' : '') + Number(p.previous.total).toLocaleString() + '. The table below lists every day.';
+  return '<div class="dv-chart" id="dv-chart"><svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(sum) + '" tabindex="0">' + g + lab +
+    '<path d="' + line(prev) + '" class="dv-prev"/><path d="' + line(cur) + '" class="dv-cur"/>' + dots +
+    '<line id="dv-xh" class="dv-xh" x1="0" x2="0" y1="' + T + '" y2="' + (H - B) + '" visibility="hidden"/>' +
+    '<rect x="' + L + '" y="' + T + '" width="' + (W - L - R) + '" height="' + (H - T - B) + '" fill="transparent" id="dv-hit"/></svg>' +
+    '<div class="dv-tip" id="dv-tip" role="status" hidden></div></div>';
+}
+function dvPerf(d){
+  var p = DV.perf, avail = (p && p.available) || DV.avail || [];
+  var head = '<div class="dv-perf-tools"><label class="dv-lbl">Figure <select class="fld" id="dv-metric">' + avail.map(function(a){
+      return '<option value="' + esc(a.key) + '"' + (a.key === DV.metric ? ' selected' : '') + '>' + esc(a.label) + '</option>'; }).join('') + '</select></label></div>';
+  var body;
+  if (!DV.metric) body = '<div class="dv-empty"><strong>No figures to chart</strong>Your role does not include a figure that can be charted.</div>';
+  else if (p === undefined) body = '<div class="dv-skel" aria-busy="true"><span class="spin"></span>Loading the chart…</div>';
+  else if (p === null) body = '<div class="dv-empty err"><strong>The chart could not be loaded</strong>' + esc(DV.perfErr || '') + ' <button class="btn" id="dv-perf-retry" type="button">Try again</button></div>';
+  else {
+    var chg = p.change_pct, up = chg !== null && chg >= 0;
+    var tot = '<div class="dv-perf-sum"><div><span class="dv-card-label">' + esc(p.label) + ', ' + esc(dvDay(p.start)) + ' – ' + esc(dvDay(p.end)) + '</span>' +
+      '<span class="dv-card-value big">' + dvFmt(p.total, p.money) + '</span></div><div class="dv-chg">' +
+      (chg === null ? '<span class="dv-card-note">No figures in the ' + esc(p.days) + ' days before, so no comparison</span>'
+        : '<span class="dv-pill ' + (up ? 'up' : 'down') + '">' + (up ? '▲ ' : '▼ ') + esc(Math.abs(chg)) + '%</span><span class="dv-card-note">vs ' + dvFmt(p.previous.total, p.money) + ' in the ' + esc(p.days) + ' days before</span>') + '</div></div>';
+    var any = p.series.some(function(x){ return x.value; }) || p.previous.series.some(function(x){ return x.value; });
+    body = tot + (!any ? '<div class="dv-empty"><strong>Nothing in this period</strong>No ' + esc(p.label.toLowerCase()) + ' between these dates. Try a longer period.</div>'
+      : '<div class="dv-legend"><span><i class="dv-k cur"></i>This period</span><span><i class="dv-k prev"></i>The ' + esc(p.days) + ' days before</span></div>' + dvChart(p) +
+        '<details class="dv-table"><summary>Show as a table</summary><div class="tbl-wrap"><table><thead><tr><th>Day</th><th>' + esc(p.label) + '</th><th>Same day, period before</th></tr></thead><tbody>' +
+        p.series.map(function(x, i){ return '<tr><td>' + esc(dvDay(x.date, true)) + '</td><td>' + dvFmt(x.value, p.money) + '</td><td>' + dvFmt(p.previous.series[i].value, p.money) + '</td></tr>'; }).join('') +
+        '</tbody></table></div></details>') +
+      '<p class="dv-foot">' + esc(DV_METRIC_NOTE[p.metric] || p.definition) + ' Days are in ' + esc(p.timezone) + ' time.</p>';
+  }
+  return dvSection('Business performance', head + body, '', 'dv-h-perf');
+}
+function dvHeader(d){
+  var id = bizIdentity(), name = id.setup ? 'your business' : id.name;
+  var t = d && d.as_of ? new Date(d.as_of) : null;
+  var opts = [[7, 'Last 7 days'], [30, 'Last 30 days'], [90, 'Last 90 days']].map(function(o){
+    return '<option value="' + o[0] + '"' + (!DV.custom && DV.days === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') +
+    '<option value="custom"' + (DV.custom ? ' selected' : '') + '>Custom dates</option>';
+  var today = d && d.as_of ? d.as_of.slice(0, 10) : '';
+  return '<div class="dv-head"><div class="dv-title"><h1>Business overview</h1><p class="sub">Here\'s what\'s happening across ' + esc(name) + ' today.' +
+    (t && !isNaN(t) ? ' <span class="dv-asof">Updated ' + esc(t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })) + '</span>' : '') + '</p></div>' +
+    '<div class="dv-tools"><label class="dv-lbl">Chart period <select class="fld" id="dv-range">' + opts + '</select></label>' +
+    (DV.custom ? '<label class="dv-lbl">From <input class="fld" type="date" id="dv-start" value="' + esc(DV.start) + '" max="' + esc(today) + '"></label>' +
+      '<label class="dv-lbl">To <input class="fld" type="date" id="dv-end" value="' + esc(DV.end) + '" max="' + esc(today) + '"></label>' : '') +
+    '<button class="btn" id="dv-refresh" type="button"' + (DV.loading ? ' disabled' : '') + '>' + (DV.loading ? 'Refreshing…' : 'Refresh') + '</button></div></div>';
+}
+(function(){
+  var base = VIEWS.overview;
+  VIEWS.overview = function(){
+    // the earlier layers still run: they start the loads other pages share and
+    // put the plan, trial and "Jarvis read your page" notices first
+    var old = base.apply(this, arguments), at = old.indexOf('<h1>');
+    var notices = at > 0 ? old.slice(0, at) : '';
+    var sg = /<div class="panel" style="padding:14px;display:flex[\s\S]*?href="#\/bizagent">Review<\/a><\/div>/.exec(old);
+    dvLoad(false);
+    var d = DV.data;
+    var out = dvHeader(d) + notices + (sg ? sg[0] : '') + (typeof pinnedHTML === 'function' ? (pinnedHTML() || '') : '');
+    if (d === undefined) return out + '<div class="dv-skel" aria-busy="true"><span class="spin"></span>Loading your business figures…</div>';
+    if (d === null) return out + (DV.err === 'unreachable'
+      ? errState('The server could not be reached. Check your internet and press Refresh. Nothing was changed.')
+      : errState(DV.err || 'The dashboard figures could not be loaded.'));
+    if (DV.err) out += '<p class="dv-stale">' + esc(DV.err === 'unreachable' ? 'The last refresh could not reach the server; these figures are from ' + when(d.as_of) + '.' : DV.err) + '</p>';
+    // the chart's figure: the first this person may see, money first for the owner
+    DV.avail = d.chart_metrics || [];
+    if (!DV.metric || !DV.avail.some(function(a){ return a.key === DV.metric; }))
+      DV.metric = (['sales', 'collected', 'orders', 'leads', 'customers'].filter(function(k){ return DV.avail.some(function(a){ return a.key === k; }); })[0]) || null;
+    dvPerfLoad(false);
+    out += dvOrders(d) + dvSetup(d) + dvAi(d) + dvPerf(d) + dvFocus(d) + dvMonth(d);
+    setTimeout(dvWire, 0);
+    return '<div class="dv">' + out + '</div>';
+  };
+})();
+function dvWire(){
+  var g = function(id){ return document.getElementById(id); };
+  if (g('dv-refresh')) g('dv-refresh').onclick = function(){
+    dvLoad(true); dvPerfLoad(true);
+    if (typeof ordSummary === 'function') ordSummary(true);
+    renderShell();
+  };
+  if (g('dv-range')) g('dv-range').onchange = function(){
+    var v = g('dv-range').value;
+    if (v === 'custom') { DV.custom = true; renderShell(); return; }
+    DV.custom = false; DV.days = Number(v); dvPerfLoad(false); renderShell();
+  };
+  var dates = function(){
+    var s = g('dv-start').value, e = g('dv-end').value;
+    DV.start = s; DV.end = e;
+    if (s && e) { dvPerfLoad(false); renderShell(); }
+  };
+  if (g('dv-start')) g('dv-start').onchange = dates;
+  if (g('dv-end')) g('dv-end').onchange = dates;
+  if (g('dv-metric')) g('dv-metric').onchange = function(){ DV.metric = g('dv-metric').value; dvPerfLoad(false); renderShell(); };
+  if (g('dv-perf-retry')) g('dv-perf-retry').onclick = function(){ dvPerfLoad(true); renderShell(); };
+  var hit = g('dv-hit'), svg = hit && hit.ownerSVGElement, p = DV.perf;
+  if (hit && p) {
+    var n = p.series.length, tip = g('dv-tip'), xh = g('dv-xh');
+    var show = function(i){
+      var vb = svg.viewBox.baseVal, L = 40, R = 10, x = L + (n === 1 ? (vb.width - L - R) / 2 : i * (vb.width - L - R) / (n - 1));
+      xh.setAttribute('x1', x); xh.setAttribute('x2', x); xh.setAttribute('visibility', 'visible');
+      tip.innerHTML = '<b>' + esc(dvDay(p.series[i].date, true)) + '</b><span><i class="dv-k cur"></i>' + dvFmt(p.series[i].value, p.money) + '</span>' +
+        '<span><i class="dv-k prev"></i>' + esc(dvDay(p.previous.series[i].date)) + ': ' + dvFmt(p.previous.series[i].value, p.money) + '</span>';
+      tip.hidden = false;
+      var box = svg.getBoundingClientRect(), px = x / vb.width * box.width;
+      tip.style.left = Math.max(0, Math.min(box.width - tip.offsetWidth, px - tip.offsetWidth / 2)) + 'px';
+      svg.setAttribute('data-i', i);
+    };
+    var hide = function(){ tip.hidden = true; xh.setAttribute('visibility', 'hidden'); };
+    svg.addEventListener('mousemove', function(e){
+      var box = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal, L = 40, R = 10;
+      var x = (e.clientX - box.left) / box.width * vb.width;
+      show(Math.max(0, Math.min(n - 1, Math.round((x - L) / ((vb.width - L - R) / Math.max(1, n - 1))))));
+    });
+    svg.addEventListener('mouseleave', hide);
+    svg.addEventListener('blur', hide);
+    svg.addEventListener('keydown', function(e){
+      var i = Number(svg.getAttribute('data-i') || n - 1);
+      if (e.key === 'ArrowLeft') { e.preventDefault(); show(Math.max(0, i - 1)); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); show(Math.min(n - 1, i + 1)); }
+      else if (e.key === 'Escape') hide();
+    });
+    svg.addEventListener('focus', function(){ show(n - 1); });
+  }
+}
+window.addEventListener('hashchange', function(){ if (currentView() === 'overview') dvLoad(false); });
+
+/* ---- Jarvis as the Overview's right-hand panel (wide screens) ---- */
+var DV_PROMPTS = [
+  { t: 'Summarize my sales performance', money: true },
+  { t: 'Which orders need attention?', orders: true },
+  { t: 'Show my outstanding payments', money: true },
+  { t: 'What needs my approval?' },
+  { t: 'Summarize my AI tasks' }
+];
+function dvSide(){
+  return !!(S.me && currentView() === 'overview' && !DV.hidden && window.matchMedia && window.matchMedia('(min-width: 1280px)').matches);
+}
+function dvJarvisCtx(){
+  var d = DV.data, h = '';
+  var top = d && d.focus && d.focus[0];
+  if (top) h += '<div class="dvj-insight"><span class="dv-card-label">From your records</span><p>' +
+    esc(d.focus.length === 1 ? 'One thing is waiting: ' + top.text.charAt(0).toLowerCase() + top.text.slice(1) + '.'
+      : d.focus.length + ' things are waiting. First: ' + top.text.charAt(0).toLowerCase() + top.text.slice(1) + '.') + '</p>' +
+    '<div class="dvj-acts"><a class="btn" href="' + esc(top.href) + '">' + esc(top.action) + '</a>' +
+    '<button class="btn" type="button" data-dvq="What needs my attention today?">Ask Jarvis</button></div></div>';
+  else if (d) h += '<div class="dvj-insight"><span class="dv-card-label">From your records</span><p>Nothing is waiting on you right now.</p></div>';
+  var money = !!(d && d.money_visible), orders = !!(d && d.orders && !d.orders.hidden && d.orders.has_orders);
+  var ps = DV_PROMPTS.filter(function(p){ return (!p.money || money) && (!p.orders || orders); });
+  h += '<div class="dvj-prompts" role="group" aria-label="Suggested questions">' + ps.map(function(p){
+    return '<button class="dvj-chip" type="button" data-dvq="' + esc(p.t) + '">' + esc(p.t) + '</button>'; }).join('') + '</div>';
+  var l = typeof JVC !== 'undefined' ? JVC.list : null;
+  if (l && l.length) h += '<div class="dvj-convs"><div class="dvj-convs-h"><span class="dv-card-label">Recent conversations</span>' +
+    '<button class="dvj-link" type="button" id="dvj-new">New</button></div>' + l.slice(0, 3).map(function(c){
+      return '<button class="dvj-conv' + (c.id === JV.convId ? ' on' : '') + '" type="button" data-dvc="' + esc(c.id) + '"' + (c.id === JV.convId ? ' aria-current="true"' : '') + '>' +
+        '<span>' + esc(c.title || 'Conversation') + '</span><span class="dv-card-note">' + esc(when(c.updated_at)) + '</span></button>';
+    }).join('') + '</div>';
+  else if (l === null) h += '<p class="dv-card-note">Your earlier conversations could not be loaded.</p>';
+  return h;
+}
+function dvJarvisHTML(){
+  return '<aside class="dvj" aria-label="Jarvis, your AI business assistant"><div class="dvj-head">' +
+    '<div id="jv-orb" class="jv-orb ' + JV.state + '"></div><div class="dvj-name"><b>Jarvis</b><span>Your AI business assistant</span>' +
+    '<span id="jv-state" class="jv-state">' + JV_LABEL[JV.state] + '</span><span id="jv-msg" class="card-note">' + esc(JV.msg) + '</span>' +
+    '<span id="jv-time" class="card-note"></span></div>' +
+    '<button class="btn" id="dvj-hide" type="button" title="Hide Jarvis" aria-label="Hide Jarvis">Hide</button></div>' +
+    '<div class="dvj-scroll"><div id="dvj-ctx">' + dvJarvisCtx() + '</div><div id="con-out" class="jv-dock-out dvj-out">' + jvTranscript() + '</div></div>' +
+    '<div class="dvj-input"><button id="con-mic" class="btn jv-mic" type="button">●  Start conversation</button>' +
+    '<div class="jv-inrow"><label class="sr-only" for="con-in">Message Jarvis</label><textarea id="con-in" class="fld" rows="2" placeholder="Ask about your business…"></textarea>' +
+    '<button id="con-go" class="btn primary" type="button">Send</button></div></div></aside>';
+}
+(function(){
+  var dockSync = jvDockSync;
+  jvDockSync = function(){
+    var side = dvSide();
+    document.body.classList.toggle('jv-side', side);
+    var dock = document.getElementById('jv-dock');
+    if (!side) {
+      if (dock && dock.getAttribute('data-mode') === 'side') { dock.innerHTML = ''; dock.setAttribute('data-mode', ''); }
+      dockSync();
+      // on the Overview with Jarvis hidden, the round button brings the panel back
+      var fab = document.getElementById('jv-fab');
+      if (fab && currentView() === 'overview' && DV.hidden && window.matchMedia('(min-width: 1280px)').matches)
+        fab.onclick = function(){ DV.hidden = false; try { localStorage.removeItem('td_dv_jarvis'); } catch (e) {} jvDockSync(); var b = document.getElementById('con-in'); if (b) b.focus(); };
+      return;
+    }
+    if (!dock) { dock = document.createElement('div'); dock.id = 'jv-dock'; document.body.appendChild(dock); }
+    if (dock.getAttribute('data-mode') === 'side' && dock.innerHTML) {
+      // keep what is being typed; refresh only the figures and the conversation list
+      var ctx = document.getElementById('dvj-ctx'); if (ctx) ctx.innerHTML = dvJarvisCtx();
+      dvJarvisWire();
+      return;
+    }
+    dock.setAttribute('data-mode', 'side');
+    dock.innerHTML = dvJarvisHTML();
+    var g = function(id){ return document.getElementById(id); };
+    g('con-go').onclick = function(){ consoleSend(); };
+    g('con-in').onkeydown = function(e){ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); consoleSend(); } };
+    g('dvj-hide').onclick = function(){
+      DV.hidden = true; try { localStorage.setItem('td_dv_jarvis', 'hidden'); } catch (e) {}
+      if (JV.conv) { JV.conv = false; jvStopAudio(); try { if (JV.rec) JV.rec.abort(); } catch (e) {} jvSet('idle', ''); }
+      JV.dock = false; jvDockSync();
+    };
+    wireConsoleMic(); jvShowOut(); dvJarvisWire();
+  };
+  function dvJarvisWire(){
+    document.querySelectorAll('[data-dvq]').forEach(function(b){ b.onclick = function(){
+      var box = document.getElementById('con-in'); if (!box) return;
+      box.value = b.getAttribute('data-dvq'); consoleSend();
+    }; });
+    document.querySelectorAll('[data-dvc]').forEach(function(b){ b.onclick = function(){ jvOpenConv(b.getAttribute('data-dvc')); }; });
+    var n = document.getElementById('dvj-new');
+    if (n) n.onclick = function(){ JV.convId = null; JV.hist = []; JV.pending = null; JV.extra = ''; jvShowOut(); jvDockSync(); var b = document.getElementById('con-in'); if (b) b.focus(); };
+  }
+  var t = null;
+  var wasNarrow = window.innerWidth < 640;
+  window.addEventListener('resize', function(){ clearTimeout(t); t = setTimeout(function(){
+    try {
+      var n = window.innerWidth < 640;
+      if (n !== wasNarrow && currentView() === 'overview' && DV.perf) { wasNarrow = n; renderShell(); }   // the chart's drawing size
+      else jvDockSync();
+    } catch (e) {}
+  }, 150); });
 })();
 
 boot();
