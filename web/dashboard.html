@@ -113,7 +113,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=64a61c8808">
+<link rel="stylesheet" href="/assets/td.css?v=215e354a90">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -9297,12 +9297,13 @@ function jvConvPanel(){
    panel: the same dock, the same stored conversations (db/75).
    ===================================================================== */
 var DV = { data: undefined, err: null, at: 0, perf: undefined, perfErr: null, perfKey: '', metric: null, days: 30,
-           start: '', end: '', custom: false, hidden: false };
+           start: '', end: '', custom: false, hidden: false,
+           sum: undefined, sumErr: null, sumKey: '', ins: undefined, insErr: null, insKey: '' };
 try { DV.hidden = localStorage.getItem('td_dv_jarvis') === 'hidden'; } catch (e) {}
 var DV_METRIC_NOTE = { sales: 'Delivered and fully paid orders, on the day they became a sale.',
   collected: 'Every payment received, on the day it was paid. Not the same as sales: it includes invoices and part payments.',
   orders: 'Orders on the day they were placed, cancelled ones included.', customers: 'Customers on the day they were added.',
-  leads: 'Leads on the day they arrived.' };
+  leads: 'Leads on the day they arrived.', appointments: 'Appointments on the day they were booked, cancelled ones included.' };
 function dvLoad(force){
   if (!S.me || !S.me.tenant_id) return;
   if (!force && (DV.loading || (DV.data !== undefined && Date.now() - DV.at < 60000))) return;
@@ -9314,9 +9315,28 @@ function dvLoad(force){
     if (currentView() === 'overview') renderShell();
   });
 }
+function dvRangeQ(){
+  return DV.custom && DV.start && DV.end ? 'start=' + DV.start + '&end=' + DV.end : 'days=' + DV.days;
+}
 function dvPerfQuery(){
-  var q = 'metric=' + encodeURIComponent(DV.metric || '') ;
-  return DV.custom && DV.start && DV.end ? q + '&start=' + DV.start + '&end=' + DV.end : q + '&days=' + DV.days;
+  return 'metric=' + encodeURIComponent(DV.metric || '') + '&' + dvRangeQ();
+}
+/* the KPI row (GET /dashboard/summary) and the highlights (GET /dashboard/insights):
+   each remembers what it asked for, so a slower old answer never replaces a newer one */
+function dvGet(slot, url, key, force, fail){
+  if (!force && DV[slot + 'Key'] === key) return;
+  DV[slot + 'Key'] = key; DV[slot] = undefined; DV[slot + 'Err'] = null;
+  api(url).then(function(r){
+    if (DV[slot + 'Key'] !== key) return;
+    if (r.ok) DV[slot] = r.data;
+    else { DV[slot] = null; DV[slot + 'Err'] = r.status === 0 ? 'The server could not be reached. Nothing was changed.' : ((r.data && r.data.detail) || fail); }
+    if (currentView() === 'overview') renderShell();
+  });
+}
+function dvSumLoad(force){ var q = dvRangeQ(); dvGet('sum', '/dashboard/summary?' + q, q, force, 'The key figures could not be loaded.'); }
+function dvInsLoad(force){
+  if (!DV.metric) return;
+  var q = dvPerfQuery(); dvGet('ins', '/dashboard/insights?' + q, q, force, 'The highlights could not be loaded.');
 }
 function dvPerfLoad(force){
   if (!DV.metric) return;
@@ -9338,6 +9358,12 @@ function dvCompact(n){
   if (a >= 1e4) return (n / 1e3).toFixed(0) + 'k';
   if (a >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
   return String(Math.round(n * 100) / 100);
+}
+var DV_GROUP = { day: 'Day', week: 'Week', month: 'Month' };
+/* a point's label: the day, the week it starts, or the month */
+function dvWhen(d, group, long){
+  if (group === 'month') { var x = new Date(d + 'T00:00:00'); return isNaN(x) ? esc(d) : x.toLocaleDateString(undefined, { month: long ? 'long' : 'short', year: 'numeric' }); }
+  return (group === 'week' && long ? 'Week of ' : '') + dvDay(d, long && group !== 'week');
 }
 function dvDay(d, long){
   var x = new Date(d + 'T00:00:00');
@@ -9453,11 +9479,11 @@ function dvChart(p){
   var ticks = Math.min(narrow ? 3 : 6, n), lab = '';
   for (var j = 0; j < ticks; j++) {
     var i = ticks === 1 ? 0 : Math.round(j * (n - 1) / (ticks - 1));
-    lab += '<text x="' + xs(i).toFixed(1) + '" y="' + (H - 8) + '" class="dv-ax" text-anchor="' + (j === 0 ? 'start' : j === ticks - 1 ? 'end' : 'middle') + '">' + esc(dvDay(cur[i].date)) + '</text>';
+    lab += '<text x="' + xs(i).toFixed(1) + '" y="' + (H - 8) + '" class="dv-ax" text-anchor="' + (j === 0 ? 'start' : j === ticks - 1 ? 'end' : 'middle') + '">' + esc(dvWhen(cur[i].date, p.group)) + '</text>';
   }
   var dots = n <= 31 ? cur.map(function(x, i){ return x.value ? '<circle cx="' + xs(i).toFixed(1) + '" cy="' + ys(x.value).toFixed(1) + '" r="3" class="dv-dot"/>' : ''; }).join('') : '';
   var sum = p.label + ' from ' + dvDay(p.start, true) + ' to ' + dvDay(p.end, true) + ': ' + (p.money ? 'PKR ' : '') + Number(p.total).toLocaleString() +
-    ', previous period ' + (p.money ? 'PKR ' : '') + Number(p.previous.total).toLocaleString() + '. The table below lists every day.';
+    ', previous period ' + (p.money ? 'PKR ' : '') + Number(p.previous.total).toLocaleString() + '. The table below lists every ' + (DV_GROUP[p.group] || 'Day').toLowerCase() + '.';
   return '<div class="dv-chart" id="dv-chart"><svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(sum) + '" tabindex="0">' + g + lab +
     '<path d="' + line(prev) + '" class="dv-prev"/><path d="' + line(cur) + '" class="dv-cur"/>' + dots +
     '<line id="dv-xh" class="dv-xh" x1="0" x2="0" y1="' + T + '" y2="' + (H - B) + '" visibility="hidden"/>' +
@@ -9481,12 +9507,13 @@ function dvPerf(d){
     var any = p.series.some(function(x){ return x.value; }) || p.previous.series.some(function(x){ return x.value; });
     body = tot + (!any ? '<div class="dv-empty"><strong>Nothing in this period</strong>No ' + esc(p.label.toLowerCase()) + ' between these dates. Try a longer period.</div>'
       : '<div class="dv-legend"><span><i class="dv-k cur"></i>This period</span><span><i class="dv-k prev"></i>The ' + esc(p.days) + ' days before</span></div>' + dvChart(p) +
-        '<details class="dv-table"><summary>Show as a table</summary><div class="tbl-wrap"><table><thead><tr><th>Day</th><th>' + esc(p.label) + '</th><th>Same day, period before</th></tr></thead><tbody>' +
-        p.series.map(function(x, i){ return '<tr><td>' + esc(dvDay(x.date, true)) + '</td><td>' + dvFmt(x.value, p.money) + '</td><td>' + dvFmt(p.previous.series[i].value, p.money) + '</td></tr>'; }).join('') +
+        '<details class="dv-table"><summary>Show as a table</summary><div class="tbl-wrap" tabindex="0" role="region" aria-label="' + esc(p.label) + ' table"><table><thead><tr><th>' + esc(DV_GROUP[p.group] || 'Day') + '</th><th>' + esc(p.label) + '</th><th>Same stretch, period before</th></tr></thead><tbody>' +
+        p.series.map(function(x, i){ return '<tr><td>' + esc(dvWhen(x.date, p.group, true)) + '</td><td>' + dvFmt(x.value, p.money) + '</td><td>' + dvFmt((p.previous.series[i] || {}).value, p.money) + '</td></tr>'; }).join('') +
         '</tbody></table></div></details>') +
-      '<p class="dv-foot">' + esc(DV_METRIC_NOTE[p.metric] || p.definition) + ' Days are in ' + esc(p.timezone) + ' time.</p>';
+      '<p class="dv-foot">' + esc(DV_METRIC_NOTE[p.metric] || p.definition) + ' ' + (p.group === 'day' ? 'One point a day' : p.group === 'week' ? 'One point a week (weeks start on Monday)' : 'One point a month') +
+        ', in ' + esc(p.timezone) + ' time.</p>';
   }
-  return dvSection('Business performance', head + body, '', 'dv-h-perf');
+  return dvSection('Performance over time', head + body, '', 'dv-h-perf');
 }
 function dvHeader(d){
   var id = bizIdentity(), name = id.setup ? 'your business' : id.name;
@@ -9495,12 +9522,137 @@ function dvHeader(d){
     return '<option value="' + o[0] + '"' + (!DV.custom && DV.days === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') +
     '<option value="custom"' + (DV.custom ? ' selected' : '') + '>Custom dates</option>';
   var today = d && d.as_of ? d.as_of.slice(0, 10) : '';
-  return '<div class="dv-head"><div class="dv-title"><h1>Business overview</h1><p class="sub">Here\'s what\'s happening across ' + esc(name) + ' today.' +
+  return '<div class="dv-head"><div class="dv-title"><h1>Dashboard</h1><p class="sub">Here\'s what\'s happening across ' + esc(name) + ' today.' +
     (t && !isNaN(t) ? ' <span class="dv-asof">Updated ' + esc(t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })) + '</span>' : '') + '</p></div>' +
-    '<div class="dv-tools"><label class="dv-lbl">Chart period <select class="fld" id="dv-range">' + opts + '</select></label>' +
+    '<div class="dv-tools"><label class="dv-lbl">Period <select class="fld" id="dv-range">' + opts + '</select></label>' +
     (DV.custom ? '<label class="dv-lbl">From <input class="fld" type="date" id="dv-start" value="' + esc(DV.start) + '" max="' + esc(today) + '"></label>' +
       '<label class="dv-lbl">To <input class="fld" type="date" id="dv-end" value="' + esc(DV.end) + '" max="' + esc(today) + '"></label>' : '') +
     '<button class="btn" id="dv-refresh" type="button"' + (DV.loading ? ' disabled' : '') + '>' + (DV.loading ? 'Refreshing…' : 'Refresh') + '</button></div></div>';
+}
+
+/* ---- the KPI row: each figure against the same number of days just before ---- */
+function dvSpark(v){
+  if (!v || v.length < 2 || !v.some(function(x){ return x; })) return '';
+  var max = Math.max.apply(null, v) || 1, n = v.length;
+  var pts = v.map(function(x, i){ return (i * 100 / (n - 1)).toFixed(1) + ',' + (26 - x / max * 24).toFixed(1); }).join(' ');
+  return '<svg class="dv-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" focusable="false"><polyline points="' + pts + '"/></svg>';
+}
+function dvChange(chg, prev, isMoney, days){
+  if (chg === null || chg === undefined) {
+    return prev === 0 ? '<span class="dv-card-note dv-kpi-cmp">Nothing in the ' + esc(days) + ' days before, so no comparison</span>' : '';
+  }
+  var up = chg >= 0;
+  return '<span class="dv-kpi-cmp"><span class="dv-pill ' + (up ? 'up' : 'down') + '"><span aria-hidden="true">' + (up ? '▲ ' : '▼ ') + '</span>' +
+    '<span class="sr-only">' + (up ? 'Up ' : 'Down ') + '</span>' + esc(Math.abs(chg)) + '%</span>' +
+    '<span class="dv-card-note">vs ' + dvFmt(prev, isMoney) + ' in the ' + esc(days) + ' days before</span></span>';
+}
+function dvKpis(){
+  var s = DV.sum;
+  if (s === undefined) return '<div class="dv-kpis" aria-busy="true">' + [0, 1, 2, 3].map(function(){ return '<div class="dv-kpi dv-kpi-skel"><span class="spin"></span></div>'; }).join('') +
+    '<span class="sr-only">Loading the key figures…</span></div>';
+  if (s === null) return '<div class="dv-empty err"><strong>The key figures could not be loaded</strong>' + esc(DV.sumErr || '') +
+    ' <button class="btn" id="dv-sum-retry" type="button">Try again</button></div>';
+  if (!s.kpis.length) return '<div class="dv-empty"><strong>No key figures for your role</strong>Your role does not include leads, customers, sales or payments.</div>';
+  return '<section aria-labelledby="dv-h-kpi"><h2 id="dv-h-kpi" class="sr-only">Key figures, ' + esc(dvDay(s.start, true)) + ' to ' + esc(dvDay(s.end, true)) + '</h2><div class="dv-kpis">' +
+    s.kpis.map(function(k){
+      var inner = '<span class="dv-card-label">' + esc(k.label) + '</span>' +
+        '<span class="dv-kpi-row"><span class="dv-card-value">' + dvFmt(k.value, k.money) + '</span>' + dvSpark(k.spark) + '</span>' +
+        dvChange(k.change_pct, k.previous, k.money, s.days) +
+        (k.note ? '<span class="dv-card-note">' + esc(k.note) + '</span>' : '');
+      return '<a class="dv-card dv-kpi" href="' + esc(k.href) + '" title="' + esc(k.definition || '') + '">' + inner + '</a>';
+    }).join('') + '</div></section>';
+}
+
+/* ---- monthly growth: the last 12 calendar months of the chart's figure ---- */
+function dvGrowth(){
+  var d = DV.ins, title = 'Monthly growth';
+  if (!DV.metric) return '';
+  if (d === undefined) return dvSection(title, '<div class="dv-skel" aria-busy="true"><span class="spin"></span>Loading the months…</div>', '', 'dv-h-growth');
+  if (d === null) return dvSection(title, '<div class="dv-empty err"><strong>The months could not be loaded</strong>' + esc(DV.insErr || '') +
+    ' <button class="btn" id="dv-ins-retry" type="button">Try again</button></div>', '', 'dv-h-growth');
+  var m = d.months || [], lc = d.last_month_change;
+  var head = '<div class="dv-perf-sum"><div><span class="dv-card-label">' + esc(d.label) + ', last complete month</span>';
+  if (lc) {
+    var up = lc.change_pct !== null && lc.change_pct >= 0;
+    head += '<span class="dv-card-value">' + dvFmt(lc.value, d.money) + '</span></div><div class="dv-chg">' +
+      (lc.change_pct === null ? '<span class="dv-card-note">Nothing the month before, so no comparison</span>'
+        : '<span class="dv-pill ' + (up ? 'up' : 'down') + '"><span aria-hidden="true">' + (up ? '▲ ' : '▼ ') + '</span><span class="sr-only">' + (up ? 'Up ' : 'Down ') + '</span>' + esc(Math.abs(lc.change_pct)) + '%</span>') +
+      '<span class="dv-card-note">' + esc(dvWhen(lc.month, 'month', true)) + ' vs the month before (' + dvFmt(lc.previous, d.money) + ')</span></div></div>';
+  } else {
+    head += '<span class="dv-card-value none">—</span></div><div class="dv-chg"><span class="dv-card-note">' + esc(d.months_note || 'Not enough months yet.') + '</span></div></div>';
+  }
+  if (!m.some(function(x){ return x.value; })) return dvSection(title, head + '<div class="dv-empty"><strong>No ' + esc(d.label.toLowerCase()) + ' in the last 12 months</strong>Months fill in as records arrive.</div>', '', 'dv-h-growth');
+  var narrow = window.innerWidth < 640, W = narrow ? 360 : 440, H = 220, L = 40, R = 6, T = 12, B = 28;
+  var max = Math.max.apply(null, m.map(function(x){ return x.value; })) || 1;
+  var step = Math.pow(10, Math.floor(Math.log10(max))), nice = Math.ceil(max / step) * step;
+  if (nice / step > 5) nice = Math.ceil(max / (step * 2)) * step * 2;
+  var slot = (W - L - R) / m.length, bw = Math.max(4, slot - 4), g = '';
+  for (var k = 0; k <= 4; k++) {
+    var y = (T + (H - T - B) * (1 - k / 4)).toFixed(1);
+    g += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '" class="dv-gl"/><text x="' + (L - 8) + '" y="' + y + '" class="dv-ax" text-anchor="end" dominant-baseline="middle">' + esc(dvCompact(nice * k / 4)) + '</text>';
+  }
+  var bars = m.map(function(x, i){
+    var h = (H - T - B) * x.value / nice, bx = L + i * slot + 2, by = H - B - h;
+    var lab = dvWhen(x.date, 'month', true) + (x.complete ? '' : ' (so far)') + ': ' + (d.money ? 'PKR ' : '') + Number(x.value).toLocaleString();
+    var r = Math.min(4, bw / 2, h);
+    var path = h > 0 ? 'M' + bx.toFixed(1) + ' ' + (H - B) + 'V' + (by + r).toFixed(1) + 'Q' + bx.toFixed(1) + ' ' + by.toFixed(1) + ' ' + (bx + r).toFixed(1) + ' ' + by.toFixed(1) +
+      'H' + (bx + bw - r).toFixed(1) + 'Q' + (bx + bw).toFixed(1) + ' ' + by.toFixed(1) + ' ' + (bx + bw).toFixed(1) + ' ' + (by + r).toFixed(1) + 'V' + (H - B) + 'Z' : '';
+    var show = !narrow || i % 2 === m.length % 2 || i === m.length - 1;
+    return '<g class="dv-mbar' + (x.complete ? '' : ' part') + '"><title>' + esc(lab) + '</title>' +
+      '<rect x="' + (L + i * slot) .toFixed(1) + '" y="' + T + '" width="' + slot.toFixed(1) + '" height="' + (H - T - B) + '" fill="transparent"/>' +
+      (path ? '<path d="' + path + '"/>' : '') +
+      (show ? '<text x="' + (bx + bw / 2).toFixed(1) + '" y="' + (H - 9) + '" class="dv-ax" text-anchor="middle">' + esc(new Date(x.date + 'T00:00:00').toLocaleDateString(undefined, { month: 'short' })) + '</text>' : '') + '</g>';
+  }).join('');
+  var sum = d.label + ' by month for the last 12 months. ' + (lc ? 'Last complete month ' + Number(lc.value).toLocaleString() + '.' : '') + ' The table below lists every month.';
+  var body = head + '<div class="dv-legend"><span><i class="dv-k cur"></i>Complete month</span><span><i class="dv-k part"></i>This month, so far</span></div>' +
+    '<div class="dv-chart"><svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(sum) + '">' + g + bars + '</svg></div>' +
+    '<details class="dv-table"><summary>Show as a table</summary><div class="tbl-wrap" tabindex="0" role="region" aria-label="Months table"><table><thead><tr><th>Month</th><th>' + esc(d.label) + '</th></tr></thead><tbody>' +
+    m.slice().reverse().map(function(x){ return '<tr><td>' + esc(dvWhen(x.date, 'month', true)) + (x.complete ? '' : ' (so far)') + '</td><td>' + dvFmt(x.value, d.money) + '</td></tr>'; }).join('') +
+    '</tbody></table></div></details><p class="dv-foot">Calendar months in your business\'s time. Growth compares the last two complete months.</p>';
+  return dvSection(title, body, '', 'dv-h-growth');
+}
+
+/* ---- highlights: what sells, best and slowest month, who comes back, where leads come from ---- */
+/* plain text (escaped later): "PKR 6,000" or "12 new leads" */
+function dvPlain(v, isMoney, unit){ return isMoney ? 'PKR ' + Number(v).toLocaleString() : Number(v).toLocaleString() + ' ' + unit; }
+function dvInsCard(label, value, note){
+  var has = value !== null && value !== undefined && value !== '';
+  return '<div class="dv-card dv-ins-card"><span class="dv-card-label">' + esc(label) + '</span>' +
+    '<span class="dv-card-value' + (has ? '' : ' none') + '">' + (has ? esc(value) : '—') + '</span>' +
+    '<span class="dv-card-note">' + esc(note || '') + '</span></div>';
+}
+function dvInsights(){
+  var d = DV.ins;
+  if (!DV.metric || d === undefined || d === null) return '';     // the growth panel shows loading and errors
+  var h = '', t = d.top;
+  if (t) {
+    var any = t.items.length, max = any ? t.items[0].value : 1;
+    h += '<div class="dv-card dv-top"><div class="dv-top-h"><span class="dv-card-label">' + (bizMode() === 'product' ? 'Top products' : 'Top services and products') + '</span>' +
+      '<span class="dv-asof">' + esc(t.label) + '</span></div>' +
+      (!any ? '<p class="dv-card-note">' + (t.by === 'billed' ? 'No bills in this period yet.' : 'No bookings in this period yet.') + '</p>'
+        : '<ol class="dv-top-list">' + t.items.map(function(x){
+            var share = t.total ? Math.round(100 * x.value / t.total) : null;
+            return '<li><span class="dv-top-name">' + esc(x.name || 'Unnamed') + '</span><span class="dv-top-val">' + dvFmt(x.value, t.money) +
+              (share !== null ? ' <span class="dv-asof">' + esc(share) + '%</span>' : '') + '</span>' +
+              '<span class="dv-top-bar" aria-hidden="true"><i style="width:' + Math.max(2, Math.round(100 * x.value / max)) + '%"></i></span></li>';
+          }).join('') + '</ol>') +
+      '<span class="dv-card-note">' + esc(t.definition) + '</span></div>';
+  }
+  var b = d.best_month, sl = d.slowest_month, lab = d.label.toLowerCase();
+  h += dvInsCard('Best month', b ? dvWhen(b.date, 'month', true) : null,
+    b ? dvPlain(b.value, d.money, lab) + ', the most of the last 12 complete months' : d.months_note);
+  h += dvInsCard('Slowest month', sl ? dvWhen(sl.date, 'month', true) : null,
+    sl ? dvPlain(sl.value, d.money, lab) + ', the least since records began' : d.months_note);
+  var c = d.customers;
+  if (c) h += dvInsCard('Returning customers', c.rate !== null ? c.rate + '%' : null,
+    c.rate !== null ? c.returning + ' of ' + c.served + ' customers served came back' : 'Shown from 5 customers served (' + c.served + ' so far)');
+  var src = d.sources;
+  if (src) {
+    var top = src[0], name = top ? ((typeof CRM_SRC !== 'undefined' && CRM_SRC[top.source]) || top.source) : null;
+    h += dvInsCard('Top lead source', name, top ? top.leads + ' of ' + src.reduce(function(a, x){ return a + x.leads; }, 0) + ' new leads in the period' +
+      (top.rate !== null ? ', ' + top.rate + '% won' : '') : 'No leads in this period');
+  }
+  return dvSection('Highlights', '<div class="dv-ins">' + h + '</div>', '<span class="dv-asof">' + esc(dvDay(d.start)) + ' – ' + esc(dvDay(d.end)) + '</span>', 'dv-h-ins');
 }
 (function(){
   var base = VIEWS.overview;
@@ -9521,9 +9673,12 @@ function dvHeader(d){
     // the chart's figure: the first this person may see, money first for the owner
     DV.avail = d.chart_metrics || [];
     if (!DV.metric || !DV.avail.some(function(a){ return a.key === DV.metric; }))
-      DV.metric = (['sales', 'collected', 'orders', 'leads', 'customers'].filter(function(k){ return DV.avail.some(function(a){ return a.key === k; }); })[0]) || null;
-    dvPerfLoad(false);
-    out += dvOrders(d) + dvSetup(d) + dvAi(d) + dvPerf(d) + dvFocus(d) + dvMonth(d);
+      DV.metric = (['sales', 'collected', 'orders', 'leads', 'customers', 'appointments'].filter(function(k){ return DV.avail.some(function(a){ return a.key === k; }); })[0]) || null;
+    dvPerfLoad(false); dvSumLoad(false); dvInsLoad(false);
+    // the reference layout: key figures, then the trend beside the monthly growth, then the
+    // highlights; everything the overview showed before follows, unchanged
+    out += dvKpis() + '<div class="dv-two">' + dvPerf(d) + dvGrowth() + '</div>' + dvInsights() +
+      dvFocus(d) + dvSetup(d) + dvOrders(d) + dvAi(d) + dvMonth(d);
     setTimeout(dvWire, 0);
     return '<div class="dv">' + out + '</div>';
   };
@@ -9531,32 +9686,36 @@ function dvHeader(d){
 function dvWire(){
   var g = function(id){ return document.getElementById(id); };
   if (g('dv-refresh')) g('dv-refresh').onclick = function(){
-    dvLoad(true); dvPerfLoad(true);
+    dvLoad(true); dvPerfLoad(true); dvSumLoad(true); dvInsLoad(true);
     if (typeof ordSummary === 'function') ordSummary(true);
     renderShell();
   };
   if (g('dv-range')) g('dv-range').onchange = function(){
     var v = g('dv-range').value;
     if (v === 'custom') { DV.custom = true; renderShell(); return; }
-    DV.custom = false; DV.days = Number(v); dvPerfLoad(false); renderShell();
+    DV.custom = false; DV.days = Number(v); dvPerfLoad(false); dvSumLoad(false); dvInsLoad(false); renderShell();
   };
   var dates = function(){
     var s = g('dv-start').value, e = g('dv-end').value;
     DV.start = s; DV.end = e;
-    if (s && e) { dvPerfLoad(false); renderShell(); }
+    if (s && e) { dvPerfLoad(false); dvSumLoad(false); dvInsLoad(false); renderShell(); }
   };
   if (g('dv-start')) g('dv-start').onchange = dates;
   if (g('dv-end')) g('dv-end').onchange = dates;
-  if (g('dv-metric')) g('dv-metric').onchange = function(){ DV.metric = g('dv-metric').value; dvPerfLoad(false); renderShell(); };
+  if (g('dv-metric')) g('dv-metric').onchange = function(){ DV.metric = g('dv-metric').value; dvPerfLoad(false); dvInsLoad(false); renderShell(); };
   if (g('dv-perf-retry')) g('dv-perf-retry').onclick = function(){ dvPerfLoad(true); renderShell(); };
+  if (g('dv-sum-retry')) g('dv-sum-retry').onclick = function(){ dvSumLoad(true); renderShell(); };
+  if (g('dv-ins-retry')) g('dv-ins-retry').onclick = function(){ dvInsLoad(true); renderShell(); };
   var hit = g('dv-hit'), svg = hit && hit.ownerSVGElement, p = DV.perf;
   if (hit && p) {
     var n = p.series.length, tip = g('dv-tip'), xh = g('dv-xh');
     var show = function(i){
       var vb = svg.viewBox.baseVal, L = 40, R = 10, x = L + (n === 1 ? (vb.width - L - R) / 2 : i * (vb.width - L - R) / (n - 1));
       xh.setAttribute('x1', x); xh.setAttribute('x2', x); xh.setAttribute('visibility', 'visible');
-      tip.innerHTML = '<b>' + esc(dvDay(p.series[i].date, true)) + '</b><span><i class="dv-k cur"></i>' + dvFmt(p.series[i].value, p.money) + '</span>' +
-        '<span><i class="dv-k prev"></i>' + esc(dvDay(p.previous.series[i].date)) + ': ' + dvFmt(p.previous.series[i].value, p.money) + '</span>';
+      var pt = p.series[i], pp = p.previous.series[i] || { date: '', value: 0 };
+      tip.innerHTML = '<b>' + esc(dvWhen(pt.date, p.group, true)) + (pt.days && p.group !== 'day' && pt.days < (p.group === 'week' ? 7 : 28) ? ' (' + esc(pt.days) + ' days in the period)' : '') + '</b>' +
+        '<span><i class="dv-k cur"></i>' + dvFmt(pt.value, p.money) + '</span>' +
+        '<span><i class="dv-k prev"></i>' + (p.group === 'day' ? esc(dvDay(pp.date)) : 'Same stretch before') + ': ' + dvFmt(pp.value, p.money) + '</span>';
       tip.hidden = false;
       var box = svg.getBoundingClientRect(), px = x / vb.width * box.width;
       tip.style.left = Math.max(0, Math.min(box.width - tip.offsetWidth, px - tip.offsetWidth / 2)) + 'px';
