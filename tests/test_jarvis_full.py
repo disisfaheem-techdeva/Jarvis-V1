@@ -113,6 +113,34 @@ def test_people_only_see_their_own_conversations(client, world, ai):
     assert TestClient(app).get("/console/conversations").status_code in (400, 401)
 
 
+def test_one_login_in_two_businesses_never_mixes_their_history(client, world, ai):
+    """A founder acting for business A, then for B: B shows none of A's conversations, cannot
+    write into them, and the prompt Jarvis builds for B carries nothing of A's."""
+    from app import jarvis_memory as jm
+    with tenant_session(None, "techdeva_admin") as cur:
+        cur.execute("SELECT id::text FROM users WHERE role = 'techdeva_admin' AND tenant_id IS NULL LIMIT 1")
+        row = cur.fetchone()
+    if not row:
+        pytest.skip("no founder login in this database")
+    fid, a, b = row["id"], world["a"], world["b"]
+    conv = jm.open_conversation(a, "techdeva_admin", fid, first_text="BBQ Family Box price")
+    jm.add_message(a, "techdeva_admin", conv, "user", "BBQ Family Box price")
+    try:
+        with tenant_session(b, "techdeva_admin") as cur:                       # acting for B: fenced to B
+            cur.execute("SELECT count(*) AS n FROM jarvis_conversations WHERE user_id = %s", (fid,))
+            assert cur.fetchone()["n"] == 0
+            cur.execute("SELECT count(*) AS n FROM products WHERE name = 'BBQ Family Box'")
+            assert cur.fetchone()["n"] == 0
+        with pytest.raises(Exception):
+            jm.open_conversation(b, "techdeva_admin", fid, conv_id=conv)
+        console._FACTS_CACHE.clear()
+        assert "BBQ Family Box" not in str(console._facts_for(b, "owner", world["people"]["b_owner"]))
+        assert "BBQ Family Box" in str(console._facts_for(a, "owner", world["people"]["owner"]))
+    finally:
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("DELETE FROM jarvis_conversations WHERE id = %s", (conv,))
+
+
 def test_a_failed_ai_call_is_said_and_kept(client, world, ai):
     h = world["h"]["owner"]
     ai["fail"] = True
@@ -225,3 +253,29 @@ def test_alerts_are_gone_and_reports_sit_under_business(client, world):
     assert re.search(r"name:'Business',[^\n]*ids:\[[^\]]*'reports'", mods)
     assert mods.count("'reports'") == 1
     assert roles.section_of("/portal/report") == "business" and roles.section_of("/alerts/checks") is None
+
+
+def test_a_post_stuck_while_publishing_becomes_failed_and_is_never_posted_twice(world, monkeypatch):
+    """The worker restarted after claiming a post: no answer from Meta was saved. After 15
+    minutes it is marked failed with what is known, so the owner can check and retry; the
+    platform is not called again by itself."""
+    called = []
+    monkeypatch.setattr(social, "_publish_facebook", lambda *a, **k: called.append(1) or {"ok": True, "id": "x"})
+    ids = []
+    with tenant_session(world["a"], "owner") as cur:
+        for mins in (20, 5):
+            cur.execute("INSERT INTO social_posts (tenant_id, platforms, caption, status, source, updated_at) "
+                        "VALUES (current_tenant(), ARRAY['facebook'], 'stuck test', 'publishing', 'jarvis', "
+                        "now() - make_interval(mins => %s)) RETURNING id::text", (mins,))
+            ids.append(cur.fetchone()["id"])
+    try:
+        social.publish_due()
+        with tenant_session(world["a"], "owner") as cur:
+            cur.execute("SELECT id::text, status, results FROM social_posts WHERE id = ANY(%s::uuid[])", (ids,))
+            got = {r["id"]: r for r in cur.fetchall()}
+        assert got[ids[0]]["status"] == "failed" and got[ids[0]]["results"]["error"] == social.STUCK_MSG
+        assert got[ids[1]]["status"] == "publishing"                                  # still within its time
+        assert called == []                                                           # nothing re-posted by itself
+    finally:
+        with tenant_session(world["a"], "owner") as cur:
+            cur.execute("DELETE FROM social_posts WHERE id = ANY(%s::uuid[])", (ids,))

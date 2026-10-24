@@ -350,6 +350,10 @@ def publish_post(tid, role, post_id, actor, claim_from, page_id=None):
     return {"post": row, "status": status, "results": results}
 
 
+STUCK_MSG = ("TechDeva did not get Facebook's answer for this post, so it may or may not have been posted. "
+             "Check your Page; if it is not there, approve it again.")
+
+
 def publish_due(limit=10):
     """Called by the worker's scheduler: post what the owner scheduled.
 
@@ -360,6 +364,18 @@ def publish_due(limit=10):
         cur.execute("SELECT id, tenant_id FROM social_posts WHERE status = 'scheduled' "
                     "AND scheduled_at <= now() ORDER BY scheduled_at LIMIT %s", (limit,))
         due = [(str(r["tenant_id"]), str(r["id"])) for r in cur.fetchall()]
+        # A post claimed for publishing whose answer from Meta never got saved (the worker
+        # restarted, or an error after the claim) would sit as "publishing" for ever. Posting
+        # it again could post twice, so it becomes "failed" with what is known; the owner
+        # checks the Page and, if it is not there, approves it again.
+        cur.execute("""UPDATE social_posts SET status = 'failed', updated_at = now(),
+                              results = COALESCE(results, '{}'::jsonb) || jsonb_build_object('error', %s::text)
+                        WHERE status = 'publishing' AND updated_at < now() - interval '15 minutes'
+                    RETURNING id, tenant_id""", (STUCK_MSG,))
+        for r in cur.fetchall():
+            record(cur, action="social.publish", resource="social_posts", resource_id=str(r["id"]),
+                   actor="scheduler", actor_type="system", status="error", detail={"stuck": True},
+                   error="no answer from Meta was saved", tenant_id=str(r["tenant_id"]))
     done = 0
     for tid, pid in due:
         try:
