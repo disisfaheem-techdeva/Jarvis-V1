@@ -55,6 +55,7 @@ services:
       HERMES_TIMEOUT: ${HERMES_TIMEOUT:-8}
       HERMES_RETRIES: ${HERMES_RETRIES:-2}
       META_APP_ID: ${META_APP_ID:-}
+      META_PUBLISH_MODE: ${META_PUBLISH_MODE:-stub}   # Autopilot Gallery: stub = test mode; set live in .env to post for real
       META_APP_SECRET: ${META_APP_SECRET:-}
       META_WEBHOOK_VERIFY_TOKEN: ${META_WEBHOOK_VERIFY_TOKEN:-}   # Social Inbox: Meta webhook check (app/social_agent.py)
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
@@ -153,6 +154,7 @@ services:
       META_AD_LIBRARY_TOKEN: ${META_AD_LIBRARY_TOKEN:-}
       # --- ad autopilot (growth planner): pauses and launches on its schedule ---
       META_APP_ID: ${META_APP_ID:-}
+      META_PUBLISH_MODE: ${META_PUBLISH_MODE:-stub}   # Autopilot Gallery: stub = test mode; set live in .env to post for real
       META_APP_SECRET: ${META_APP_SECRET:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_SECRET: ${GOOGLE_SECRET:-}
