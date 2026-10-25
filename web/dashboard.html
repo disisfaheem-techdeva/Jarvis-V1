@@ -1566,7 +1566,7 @@ function currentView(){
    each time any section's data arrives -- about once a second while a page
    loads. Now: at most one call a minute, only while the tab is visible, and
    every redraw paints the last answer from memory. */
-var INC = { html: '', at: 0, busy: false };
+var INC = { html: '', at: 0, busy: false, open: false, items: [] };
 var INC_EVERY_MS = 60000;
 function incidentBar(){
   var el = document.getElementById('incbar');
@@ -1583,21 +1583,45 @@ function incidentBar(){
 }
 document.addEventListener('visibilitychange', function(){ if (!document.hidden && S.me) incidentBar(); });
 setInterval(function(){ if (S.me) incidentBar(); }, INC_EVERY_MS);
+/* Alerts sit behind a bell in the top bar, not across every page: the count
+   shows on the bell and the list opens on click. INC.open survives redraws. */
 function incidentHTML(items){
-    if (!items.length) return '';
-    return items.slice(0, 3).map(function(i){
-      var critical = i.severity === 'critical';
-      return '<div style="margin:0 0 12px;padding:12px 14px;border-radius:10px;' +
-        'border:1px solid ' + (critical ? 'var(--danger)' : 'var(--warn)') + ';' +
-        'background:rgba(224,164,88,.08)">' +
-        '<strong style="color:' + (critical ? 'var(--danger)' : 'var(--warn)') + '">' +
-        esc(i.title) + '</strong>' +
-        (i.detail ? '<div class="sub" style="margin-top:4px">' + esc(i.detail) + '</div>' : '') +
-        '<div class="sub" style="margin-top:4px">Since ' +
-        esc(String(i.opened_at).slice(0, 16).replace('T', ' ')) +
-        (i.seen_count > 1 ? ' - seen ' + i.seen_count + ' times' : '') + '</div></div>';
-    }).join('');
+    INC.items = items;
+    if (!items.length) { INC.open = false; return ''; }
+    var critical = items.some(function(i){ return i.severity === 'critical'; });
+    var col = critical ? 'var(--danger)' : 'var(--warn)';
+    var btn = '<button class="btn" type="button" id="incbell-btn" aria-haspopup="true" aria-expanded="' + (INC.open ? 'true' : 'false') + '"' +
+      ' aria-label="Alerts: ' + items.length + '" title="Alerts" style="position:relative">&#128276;' +
+      '<span style="position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;' +
+      'background:' + col + ';color:#111;font-size:11px;font-weight:700;line-height:18px;text-align:center">' + items.length + '</span></button>';
+    if (!INC.open) return btn;
+    return btn + '<div role="dialog" aria-label="Alerts" style="position:absolute;right:0;top:calc(100% + 8px);z-index:60;' +
+      'width:min(380px,calc(100vw - 32px));max-height:70vh;overflow:auto;padding:12px;border-radius:12px;' +
+      'background:var(--panel);border:1px solid var(--line,rgba(255,255,255,.14));box-shadow:0 12px 32px rgba(0,0,0,.35)">' +
+      items.slice(0, 10).map(function(i){
+        var c = i.severity === 'critical' ? 'var(--danger)' : 'var(--warn)';
+        return '<div style="padding:10px 0;border-bottom:1px solid var(--line,rgba(255,255,255,.08))">' +
+          '<strong style="color:' + c + '">' + esc(i.title) + '</strong>' +
+          (i.detail ? '<div class="sub" style="margin-top:4px">' + esc(i.detail) + '</div>' : '') +
+          '<div class="sub" style="margin-top:4px">Since ' +
+          esc(String(i.opened_at).slice(0, 16).replace('T', ' ')) +
+          (i.seen_count > 1 ? ' - seen ' + i.seen_count + ' times' : '') + '</div></div>';
+      }).join('') + '</div>';
 }
+document.addEventListener('click', function(e){
+  var t = e.target, box = document.getElementById('incbar');
+  if (!box) return;
+  if (t.closest && t.closest('#incbell-btn')) INC.open = !INC.open;
+  else if (INC.open && !box.contains(t)) INC.open = false;
+  else return;
+  box.innerHTML = INC.html = incidentHTML(INC.items || []);
+});
+document.addEventListener('keydown', function(e){
+  if (e.key !== 'Escape' || !INC.open) return;
+  INC.open = false;
+  var box = document.getElementById('incbar');
+  if (box) box.innerHTML = INC.html = incidentHTML(INC.items || []);
+});
 
 /* ==== Beauty-parity sections ==========================================
    Daily Entry, WhatsApp Inbox, Marketing, Attendance, Calendar, Hermes AI,
@@ -3987,11 +4011,12 @@ function renderShell(){
           '<button class="burger" id="burger" aria-label="Menu">&#9776;</button>' +
           topbarLogoHTML() + '<div class="biz"><div class="biz-name">' + esc(id.name) + '</div>' +
           '<div class="biz-sub">' + esc(id.sub) + '</div></div>' +
+          '<div id="incbar" style="position:relative;margin-left:auto"></div>' +
           (window.TD ? TD.toggleHTML() : '') +
           '<button class="btn" id="chgpw" title="My account: name and password" aria-label="My account">👤</button>' +
           '<button class="btn" id="logout">Sign out</button>' +
         '</header>' +
-        '<main class="content"><div id="incbar"></div>' + body + '</main>' +
+        '<main class="content">' + body + '</main>' +
       '</div>' +
     '</div>';
 
