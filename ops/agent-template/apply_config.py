@@ -13,6 +13,9 @@ set, and each is read back afterwards; any mismatch exits non-zero.
   T3  display.tool_progress: off (no "using tool X" lines to customers).
       display.busy_input_mode: queue and busy_ack_enabled: false (no
       "Interrupting current task" or "/busy" tip sent to a customer).
+      display.long_running_notifications: false and agent.gateway_notify_interval: 0
+      (no "⏳ Working — 3 min — iteration 2/60 ..." heartbeat to a customer while the
+      model is slow; one reached a customer on 26 Oct 2026).
 """
 import sys
 import yaml
@@ -46,6 +49,8 @@ cfg["display"]["show_reasoning"] = False
 cfg["display"]["interim_assistant_messages"] = False
 cfg["display"]["busy_input_mode"] = "queue"
 cfg["display"]["busy_ack_enabled"] = False
+cfg["display"]["long_running_notifications"] = False
+cfg["agent"]["gateway_notify_interval"] = 0
 
 with open(PATH + ".tmp", "w", encoding="utf-8") as f:
     yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
@@ -67,6 +72,8 @@ if str(back["display"].get("tool_progress")) not in ("off", "False"):
     problems.append("display.tool_progress")
 if back["display"].get("busy_input_mode") != "queue" or back["display"].get("busy_ack_enabled") is not False:
     problems.append("display.busy")
+if back["display"].get("long_running_notifications") is not False or back["agent"].get("gateway_notify_interval") != 0:
+    problems.append("heartbeat")
 if problems:
     sys.exit("apply_config: not applied: " + ", ".join(problems))
 print("apply_config: model=%s/%s fallbacks=%s disabled_toolsets=%d tool_progress=%s" % (
