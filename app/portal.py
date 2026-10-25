@@ -30,6 +30,7 @@ import time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Header, Cookie, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 
 from .auth import (AuthError, SESSION_COOKIE, SESSION_TTL_SECONDS, auth_required,
@@ -193,6 +194,14 @@ def make_portal_router(P) -> APIRouter:
             security.record_attempt(key, ip, True, user)
         except Exception:          # noqa: BLE001
             pass
+        # right password, email not confirmed yet: no session until the 6-digit code
+        # (app/email_codes.py). A fresh code goes out when the resend limits allow.
+        from . import email_codes
+        if not email_codes.exempt(user["email"]) and not email_codes.is_verified(user["id"]):
+            sent = email_codes.send_code(dict(user))
+            return JSONResponse(status_code=403, content={
+                "detail": "email not verified", "verification_required": True,
+                "email": user["email"], "email_sent": sent["sent"], "retry_after": sent["wait"]})
         P.touch_login(user["id"])
         token = issue_token(tenant_id=user["tenant_id"], user_id=user["id"],
                             role=user["role"])
@@ -309,6 +318,9 @@ def make_portal_router(P) -> APIRouter:
             record(cur, action="auth.password_set", resource="users",
                    resource_id=str(user.get("id")), actor=str(user.get("id")),
                    status="ok", detail={}, tenant_id=user.get("tenant_id"))
+            # the link reached this inbox, so the email is proven (app/email_codes.py)
+            from .email_codes import mark_verified
+            mark_verified(cur, dict(user), "setup_link")
         return {"ok": True}
 
     # --------------------------------------------------- change own password

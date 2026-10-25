@@ -227,6 +227,22 @@
     <div class="msg" id="msg" role="alert"></div>
   </form>
 
+  <!-- after signup: confirm the email with the 6-digit code (app/email_codes.py) -->
+  <form id="vf" class="hidden td-glass td-rim rounded-[var(--p-radius-xl)] p-5 sm:p-8" novalidate>
+    <h2 class="font-display text-3xl font-semibold">Check your email</h2>
+    <p class="mt-3 text-[15px] text-fg-muted">Enter the 6-digit code sent to <strong id="v-email" class="text-fg"></strong>. It expires in 10 minutes.</p>
+    <div class="field mt-6 max-w-sm">
+      <label for="v-code">Verification code</label>
+      <input id="v-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="123456" aria-describedby="v-status">
+    </div>
+    <p class="text-sm text-fg-muted" id="v-status" aria-live="polite"></p>
+    <div class="msg" id="v-msg" role="alert"></div>
+    <div class="mt-6 flex flex-wrap gap-3">
+      <button class="td-btn td-btn--lg" id="v-go" type="submit">Confirm my email</button>
+      <button class="td-btn td-btn--lg td-btn--secondary" id="v-resend" type="button" disabled>Resend code</button>
+    </div>
+  </form>
+
   <div class="hidden rounded-[var(--p-radius-xl)] border border-success/30 bg-surface px-6 py-12 text-center" id="done" role="status">
     <h2 class="font-display text-3xl font-semibold text-success">✓ Your trial has started</h2>
     <p class="mx-auto mt-3 max-w-lg text-[15px] text-fg-muted">We're analysing your presence and your competitors right now.
@@ -310,11 +326,62 @@ document.getElementById('f').addEventListener('submit', async (e) => {
     if (!r.ok) throw new Error(errText(data, r.status));
     document.getElementById('f').style.display = 'none';
     document.getElementById('tid').textContent = data.tenant_id;
-    document.getElementById('done').style.display = 'block';
+    if (data.verification_required) showCodeStep(val('contact_email'), data.email_sent, data.email_message);
+    else document.getElementById('done').style.display = 'block';
   } catch (err) {
     msg.className = 'msg err';
     msg.textContent = err.message;
     btn.disabled = false; btn.textContent = 'Start my free trial';
+  }
+});
+// ---- the 6-digit code step ----
+let vEmail = '', vTimer = null;
+const vStatus = document.getElementById('v-status'), vMsg = document.getElementById('v-msg');
+const vResend = document.getElementById('v-resend'), vGo = document.getElementById('v-go');
+function vError(t){ vMsg.className = t ? 'msg err' : 'msg'; vMsg.textContent = t || ''; }
+function countdown(secs){
+  clearInterval(vTimer);
+  let left = Math.max(1, secs | 0);
+  vResend.disabled = true; vResend.textContent = 'Resend code (' + left + 's)';
+  vTimer = setInterval(() => {
+    left -= 1;
+    if (left > 0) { vResend.textContent = 'Resend code (' + left + 's)'; return; }
+    clearInterval(vTimer); vResend.disabled = false; vResend.textContent = 'Resend code';
+  }, 1000);
+}
+function showCodeStep(email, sent, why){
+  vEmail = email;
+  document.getElementById('v-email').textContent = email;
+  document.getElementById('vf').style.display = 'block';
+  vStatus.textContent = sent ? 'Code sent. Check your inbox, and the spam folder too.' : '';
+  vError(sent ? '' : (why || 'We could not send your code just now. Use "Resend code" in a minute.'));
+  countdown(60);
+  document.getElementById('v-code').focus();
+}
+vResend.addEventListener('click', async () => {
+  vError(''); vResend.disabled = true;
+  try {
+    const r = await fetch('/auth/resend-code', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email: vEmail})});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(errText(d, r.status));
+    vStatus.textContent = 'A new code is on its way to ' + vEmail + '. Only the newest code works.';
+    countdown(d.retry_after || 60);
+  } catch (err) { vError(err.message); vResend.disabled = false; }
+});
+document.getElementById('vf').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const code = document.getElementById('v-code').value.replace(/\D/g, '');
+  if (code.length !== 6) { vError('Enter all 6 digits of the code.'); document.getElementById('v-code').focus(); return; }
+  vError(''); vGo.disabled = true; vGo.textContent = 'Checking…';
+  try {
+    const r = await fetch('/auth/verify-email', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email: vEmail, code})});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(r.status === 400 ? 'That code is wrong or has expired. Check it, or use "Resend code".' : errText(d, r.status));
+    clearInterval(vTimer);
+    document.getElementById('vf').style.display = 'none';
+    document.getElementById('done').style.display = 'block';
+  } catch (err) {
+    vError(err.message); vGo.disabled = false; vGo.textContent = 'Confirm my email';
   }
 });
 </script>

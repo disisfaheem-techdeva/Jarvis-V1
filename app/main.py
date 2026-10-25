@@ -149,6 +149,8 @@ app.include_router(roles.make_roles_router())
 # Safer sign-in: lockout from login_attempts, email verification
 from .security import make_security_router
 app.include_router(make_security_router())
+from .email_codes import make_email_codes_router
+app.include_router(make_email_codes_router())
 # The business's AI agents: on/off switches, per-agent figures and memory
 from .agent_admin import make_agent_admin_router
 app.include_router(make_agent_admin_router())
@@ -698,16 +700,30 @@ def public_signup(body: SignupIn, request: Request):
                             WHERE tenants.id = %s AND c.slug = %s AND c.active""",
                         ((body.business_type_other or "").strip()[:80] or None if body.business_type == "other" else None,
                          tenant_id, body.business_type))
-    verify = None
+    verify, sent = None, False
     if pw_hash and body.contact_email:
-        # ask them to confirm the email straight away (app/security.py); never blocks the sign-up
-        from .security import send_verification
-        verify = send_verification({"email": body.contact_email.strip().lower(), "name": body.contact_name})
-    return {"signup_id": signup_id, "tenant_id": tenant_id,
+        # the first sign-in waits for the 6-digit code (app/email_codes.py). The account
+        # exists either way: if the email did not go, the person asks for another one.
+        from .email_codes import send_code
+        try:
+            user = P.find_user_by_email(body.contact_email)
+            out = send_code(dict(user)) if user else {"sent": False, "reason": "failed"}
+        except Exception as e:  # noqa: BLE001 - never lose a sign-up over the email
+            print("[signup] verification code not sent: %s" % type(e).__name__, flush=True)
+            out = {"sent": False, "reason": "failed"}
+        sent = bool(out["sent"])
+        verify = "code_sent" if sent else out["reason"]
+    resp = {"signup_id": signup_id, "tenant_id": tenant_id,
             "status": "trial_started", "verification": verify,
+            "verification_required": pw_hash is not None,
+            "email_sent": sent,
             "login_created": pw_hash is not None,
             "portal": "/portal",
             "message": "Analysis in progress — your report is being prepared."}
+    if pw_hash is not None and not sent:
+        resp["email_message"] = ("We could not send your verification code just now. "
+                                 "Use \"Resend code\" in a minute.")
+    return resp
 
 
 class DemoRequestIn(BaseModel):

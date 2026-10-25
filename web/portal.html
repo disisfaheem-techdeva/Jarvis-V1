@@ -137,6 +137,18 @@
       </div>
       <button class="td-btn td-btn--lg mt-2 w-full" id="lgo" type="submit">Sign in</button>
     </form>
+    <!-- right password, email not confirmed yet: the 6-digit code (app/email_codes.py) -->
+    <form id="vf" class="mt-6 flex-col gap-4" style="display:none" novalidate>
+      <p class="text-[15px] text-fg-muted">Enter the 6-digit code sent to <strong id="v-email" class="text-fg"></strong>. It expires in 10 minutes.</p>
+      <div class="td-field">
+        <label for="v-code">Verification code</label>
+        <input id="v-code" class="td-input" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="123456" aria-describedby="v-status">
+      </div>
+      <p class="text-sm text-fg-muted" id="v-status" aria-live="polite"></p>
+      <button class="td-btn td-btn--lg w-full" id="v-go" type="submit">Confirm and sign in</button>
+      <button class="td-btn td-btn--lg td-btn--secondary w-full" id="v-resend" type="button" disabled>Resend code</button>
+      <a class="text-sm font-medium text-accent-ink hover:underline" href="#" id="v-back">Use a different account</a>
+    </form>
     <p class="mt-6 text-sm text-fg-muted">No account yet? <a class="font-medium text-accent-ink hover:underline" href="/">Start a 7-day free trial →</a></p>
   </div>
 </div>
@@ -180,7 +192,12 @@ async function api(path, opts = {}) {
   if (TOKEN) h['Authorization'] = 'Bearer ' + TOKEN;
   const r = await fetch(path, Object.assign({credentials:'include'}, opts, {headers:h}));
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.detail || ('Request failed (' + r.status + ')'));
+  if (!r.ok) {
+    // Keep the status and body: the login needs data.verification_required.
+    const e = new Error(data.detail || ('Request failed (' + r.status + ')'));
+    e.status = r.status; e.data = data;
+    throw e;
+  }
   return data;
 }
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
@@ -205,9 +222,86 @@ document.getElementById('lf').addEventListener('submit', async e => {
     if (go) { location.replace(go); return; }
     show();
   } catch (ex) {
+    if (ex.status === 403 && ex.data && ex.data.verification_required) {
+      b.disabled = false; b.textContent = 'Sign in';
+      showCodeStep(document.getElementById('email').value.trim(), document.getElementById('pw').value, ex.data);
+      return;
+    }
     err.textContent = ex.message; err.style.display = 'block';
   }
   b.disabled = false; b.textContent = 'Sign in';
+});
+
+// ---- the 6-digit code step (app/email_codes.py) ----
+let vEmail = '', vPw = '', vTimer = null;
+const vf = document.getElementById('vf'), vStatus = document.getElementById('v-status');
+const vGo = document.getElementById('v-go'), vResend = document.getElementById('v-resend');
+function vError(t){
+  const err = document.getElementById('lerr');
+  err.textContent = t || ''; err.style.display = t ? 'block' : 'none';
+}
+function vCountdown(secs){
+  clearInterval(vTimer);
+  let left = Math.max(1, secs | 0);
+  vResend.disabled = true; vResend.textContent = 'Resend code (' + left + 's)';
+  vTimer = setInterval(() => {
+    left -= 1;
+    if (left > 0) { vResend.textContent = 'Resend code (' + left + 's)'; return; }
+    clearInterval(vTimer); vResend.disabled = false; vResend.textContent = 'Resend code';
+  }, 1000);
+}
+function showCodeStep(email, pw, info){
+  vEmail = email; vPw = pw;
+  document.getElementById('v-email').textContent = email;
+  document.getElementById('lf').style.display = 'none';
+  vf.style.display = 'flex';
+  const wait = (info && info.retry_after) || 0;
+  // Say only what actually happened: sent now, sent a moment ago, or not sent.
+  vError('');
+  if (info && info.email_sent) vStatus.textContent = 'Code sent. Check your inbox, and the spam folder too.';
+  else if (wait > 0) vStatus.textContent = 'A code was sent a moment ago. Use the newest one in your inbox.';
+  else { vStatus.textContent = ''; vError('We could not send a code just now. Use "Resend code" in a moment.'); }
+  vCountdown(wait > 0 ? wait : 5);
+  document.getElementById('v-code').focus();
+}
+vResend.addEventListener('click', async () => {
+  vError(''); vResend.disabled = true;
+  try {
+    const d = await api('/auth/resend-code', {method:'POST', body: JSON.stringify({email: vEmail})});
+    vStatus.textContent = 'A new code is on its way to ' + vEmail + '. Only the newest code works.';
+    vCountdown(d.retry_after || 60);
+  } catch (ex) { vError(ex.message); vResend.disabled = false; }
+});
+vf.addEventListener('submit', async e => {
+  e.preventDefault();
+  const code = document.getElementById('v-code').value.replace(/\D/g, '');
+  if (code.length !== 6) { vError('Enter all 6 digits of the code.'); document.getElementById('v-code').focus(); return; }
+  vError(''); vGo.disabled = true; vGo.textContent = 'Checking…';
+  try {
+    await api('/auth/verify-email', {method:'POST', body: JSON.stringify({email: vEmail, code})});
+  } catch (ex) {
+    vError(ex.status === 400 ? 'That code is wrong or has expired. Check it, or use "Resend code".' : ex.message);
+    vGo.disabled = false; vGo.textContent = 'Confirm and sign in';
+    return;
+  }
+  clearInterval(vTimer);
+  try {
+    const d = await api('/auth/login', {method:'POST', body: JSON.stringify({email: vEmail, password: vPw})});
+    vPw = '';
+    TOKEN = d.token; TENANT = d.tenant_id;
+    const go = landing(d.role);
+    if (go) { location.replace(go); return; }
+    show();
+  } catch (ex) {
+    vPw = '';
+    vf.style.display = 'none'; document.getElementById('lf').style.display = '';
+    vError('Email confirmed. Please sign in.');
+  }
+  vGo.disabled = false; vGo.textContent = 'Confirm and sign in';
+});
+document.getElementById('v-back').addEventListener('click', e => {
+  e.preventDefault(); clearInterval(vTimer); vPw = '';
+  vf.style.display = 'none'; document.getElementById('lf').style.display = ''; vError('');
 });
 
 document.getElementById('out').onclick = async () => {

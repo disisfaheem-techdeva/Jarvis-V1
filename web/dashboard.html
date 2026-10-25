@@ -4034,6 +4034,7 @@ function gate(msg){
     go.disabled = true; go.textContent = 'Signing in...'; err.textContent = '';
     api('/auth/login', {method:'POST', body:{email:em, password:pw}}).then(function(r){
       go.disabled = false; go.textContent = 'Sign in';
+      if (r.status === 403 && r.data && r.data.verification_required) { gateCode(em, pw, r.data); return; }
       if (!r.ok) {
         err.textContent = (r.data && (r.data.detail || r.data.message)) ||
           (r.status === 429 ? 'Too many attempts. Please wait and try again.' : 'Sign in failed.');
@@ -4046,6 +4047,72 @@ function gate(msg){
   ['em','pw'].forEach(function(i){
     document.getElementById(i).onkeydown = function(e){ if (e.key === 'Enter') submit(); };
   });
+}
+
+/* ---------- email-code step ----------
+   Right password, email not confirmed yet: /auth/login answered 403 with
+   verification_required (app/portal.py). Ask for the 6-digit code
+   (app/email_codes.py), then sign in with the same email and password. */
+function gateCode(em, pw, info){
+  var box = document.querySelector('.gate-box');
+  if (!box) { gate('Confirm your email to sign in.'); return; }
+  box.innerHTML =
+    '<div class="brand-mark" style="margin-bottom:16px">TECH<span>DEVA</span></div>' +
+    '<h1>Check your email</h1><p class="sub">Enter the 6-digit code sent to <strong>' + esc(em) + '</strong>. It expires in 10 minutes.</p>' +
+    '<div class="gate-err" id="gerr" role="alert"></div>' +
+    '<div class="field"><label for="vc">Verification code</label><input id="vc" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="123456" aria-describedby="vst"></div>' +
+    '<p class="sub" id="vst" aria-live="polite" style="margin:6px 0 12px"></p>' +
+    '<button class="btn primary" id="vgo" style="width:100%;padding:10px">Confirm and sign in</button>' +
+    '<button class="btn" id="vre" style="width:100%;padding:10px;margin-top:8px" disabled>Resend code</button>' +
+    '<div style="margin-top:14px;font-size:13px;text-align:center"><a href="#" id="vback" style="color:var(--accent-ink)">Use a different account</a></div>';
+  var err = document.getElementById('gerr'), st = document.getElementById('vst');
+  var go = document.getElementById('vgo'), re = document.getElementById('vre'), timer = null;
+  var wait = (info && info.retry_after) || 0;
+  /* Say only what actually happened: sent now, sent a moment ago, or not sent. */
+  if (info && info.email_sent) st.textContent = 'Code sent. Check your inbox, and the spam folder too.';
+  else if (wait > 0) st.textContent = 'A code was sent a moment ago. Use the newest one in your inbox.';
+  else err.textContent = 'We could not send a code just now. Use "Resend code" in a moment.';
+  function countdown(secs){
+    clearInterval(timer);
+    var left = Math.max(1, secs | 0);
+    re.disabled = true; re.textContent = 'Resend code (' + left + 's)';
+    timer = setInterval(function(){
+      left -= 1;
+      if (left > 0) { re.textContent = 'Resend code (' + left + 's)'; return; }
+      clearInterval(timer); re.disabled = false; re.textContent = 'Resend code';
+    }, 1000);
+  }
+  function verify(){
+    var code = document.getElementById('vc').value.replace(/\D/g, '');
+    if (code.length !== 6) { err.textContent = 'Enter all 6 digits of the code.'; document.getElementById('vc').focus(); return; }
+    go.disabled = true; go.textContent = 'Checking...'; err.textContent = '';
+    api('/auth/verify-email', {method:'POST', body:{email:em, code:code}}).then(function(r){
+      if (!r.ok) {
+        go.disabled = false; go.textContent = 'Confirm and sign in';
+        err.textContent = r.status === 400 ? 'That code is wrong or has expired. Check it, or use "Resend code".' :
+          ((r.data && r.data.detail) || 'Could not check the code. Please try again.');
+        return;
+      }
+      api('/auth/login', {method:'POST', body:{email:em, password:pw}}).then(function(l){
+        clearInterval(timer);
+        if (l.ok) { boot(); return; }
+        gate('Email confirmed. Please sign in.');
+      });
+    });
+  }
+  re.onclick = function(){
+    re.disabled = true; err.textContent = '';
+    api('/auth/resend-code', {method:'POST', body:{email:em}}).then(function(r){
+      if (!r.ok) { err.textContent = (r.data && r.data.detail) || 'Could not send a new code just now.'; re.disabled = false; return; }
+      st.textContent = 'A new code is on its way to ' + em + '. Only the newest code works.';
+      countdown((r.data && r.data.retry_after) || 60);
+    });
+  };
+  go.onclick = verify;
+  document.getElementById('vc').onkeydown = function(e){ if (e.key === 'Enter') verify(); };
+  document.getElementById('vback').onclick = function(e){ e.preventDefault(); clearInterval(timer); gate(); };
+  countdown(wait > 0 ? wait : 5);
+  document.getElementById('vc').focus();
 }
 
 /* ---------- boot ---------- */
