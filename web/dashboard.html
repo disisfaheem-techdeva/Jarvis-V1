@@ -1087,6 +1087,7 @@ function inp(id, ph, type, width){
   return '<input class="fld" id="' + id + '" type="' + (type || 'text') +
          '" placeholder="' + esc(ph) + '" style="flex:1;min-width:' + (width || 120) + 'px">';
 }
+var HMG = { draft: null, msg: '' };   // the Hermes page's full-guide box
 function val(id){ var e = document.getElementById(id); return e ? String(e.value).trim() : ''; }
 function numv(id){ var v = val(id); return v === '' ? null : Number(v); }
 function say(m){ var e = document.getElementById('actmsg'); if (e) e.textContent = m; }
@@ -1944,6 +1945,23 @@ VIEWS.hermes = function(){
     '<textarea id="hm_teach" rows="3" style="width:100%;padding:10px;border-radius:10px;font:inherit" ' +
     'placeholder="e.g. Hair PRP is 25,000 per session. Always ask the patient\'s name before quoting."></textarea>' +
     row() + '<button class="btn primary" id="hm_go">Teach</button><button class="btn" id="hm_sync">Re-send everything to the agent</button></div>' + actbar());
+  // the owner's full guide (db/79): kept exactly as written, sent with the business knowledge
+  var G = S.wa_guide;
+  if (!need('wa_guide', '/business-profile/guide')) out += panel('Full guide for your agent', loading('Loading your guide...'));
+  else if (G === null) out += panel('Full guide for your agent', errState('Your guide could not be loaded.'));
+  else {
+    if (HMG.draft === null) HMG.draft = G.text || '';
+    out += panel('Full guide for your agent', '<div>' +
+      '<p class="sub" style="margin-top:0;padding:0">Paste your whole instructions here, with example chats. They are kept exactly as written ' +
+      '(line breaks included) and sent to your agent. Saving replaces the previous guide. Your listed products and prices still decide ' +
+      'what the agent may offer.</p>' +
+      '<label class="crm-lbl">Guide<textarea class="fld" id="hm_guide" rows="14" maxlength="' + esc(G.max) + '" style="width:100%;font:inherit">' + esc(HMG.draft) + '</textarea></label>' +
+      '<p class="card-note" id="hm_gcount" style="margin:6px 0 0">' + esc(Array.from(HMG.draft).length.toLocaleString()) + ' / ' + esc(Number(G.max).toLocaleString()) + ' characters' +
+      (G.parts ? ' · saved guide: ' + esc(Number(G.chars).toLocaleString()) + ' characters' : ' · nothing saved yet') + '</p>' +
+      row() + '<button class="btn primary" id="hm_gsave">Save and send to the agent</button>' +
+      (G.parts ? '<button class="btn" id="hm_gdel">Remove the guide</button>' : '') + '</div>' +
+      '<div id="hm_gmsg" class="card-note" role="status" style="min-height:18px">' + esc(HMG.msg || '') + '</div></div>');
+  }
   out += panel('What your agent has been taught', L.length
     ? '<ul style="margin:0;padding-left:18px">' + L.map(function(l){ return '<li style="margin:6px 0">' + esc(l.lesson || l) + '</li>'; }).join('') + '</ul>' +
       '<div class="card-note" style="margin-top:8px">To remove one, open Jarvis.</div>'
@@ -1958,6 +1976,11 @@ VIEWS.hermes = function(){
     if (go) go.onclick = function(){
       var t = val('hm_teach');
       if (!t) { say('Write what the agent should know.'); return; }
+      if (t.length > 600 || t.indexOf('\n') !== -1) {
+        say('This box is for one short rule. For full instructions with examples, paste them in "Full guide for your agent" below.');
+        var gb = document.getElementById('hm_guide'); if (gb) gb.scrollIntoView({ block: 'center' });
+        return;
+      }
       go.disabled = true;
       act('/console', {method:'POST', body:{message: 'Teach my WhatsApp agent: ' + t}}, 'Taught.').then(function(r){
         go.disabled = false;
@@ -1965,8 +1988,43 @@ VIEWS.hermes = function(){
         if (r.ok) need('lessons', '/console/lessons', true);
       });
     };
+    var gb = document.getElementById('hm_guide'), gc = document.getElementById('hm_gcount');
+    if (gb) gb.oninput = function(){ HMG.draft = gb.value; if (gc) gc.firstChild.nodeValue = Array.from(gb.value).length.toLocaleString() + gc.firstChild.nodeValue.replace(/^[\d,]+/, ''); };
+    var gs = document.getElementById('hm_gsave');
+    if (gs) gs.onclick = function(){
+      gs.disabled = true; HMG.msg = 'Saving and sending to your agent...'; document.getElementById('hm_gmsg').textContent = HMG.msg;
+      api('/business-profile/guide', { method: 'PUT', body: { text: HMG.draft } }).then(function(r){
+        gs.disabled = false;
+        if (!r.ok) HMG.msg = (r.data && r.data.detail) || (r.status === 0 ? 'The server could not be reached. Nothing was changed.' : 'The guide was not saved.');
+        else {
+          var sy = r.data.sync || '';
+          HMG.msg = 'Saved (' + r.data.chars.toLocaleString() + ' characters). ' + (sy.indexOf('synced') === 0 ? 'Your agent has it now.' : sy === 'no_agent'
+            ? 'No WhatsApp agent is set up yet; it will get the guide once one is.' : sy === 'unchanged' ? 'Your agent already had it.'
+            : 'Saved here, but your agent could not be reached right now. Press "Re-send everything to the agent" in a minute.');
+          // show what was saved straight away, without reloading the box
+          S.wa_guide = { text: (HMG.draft || '').trim(), chars: r.data.chars, parts: r.data.parts, max: S.wa_guide.max };
+          HMG.draft = null;
+        }
+        renderShell();
+      });
+    };
+    var gd = document.getElementById('hm_gdel');
+    if (gd) gd.onclick = function(){
+      if (!window.confirm('Remove the full guide from your agent?')) return;
+      api('/business-profile/guide', { method: 'PUT', body: { text: '' } }).then(function(r){
+        HMG.msg = r.ok ? 'The guide was removed from your agent.' : ((r.data && r.data.detail) || 'The guide was not removed.');
+        if (r.ok) { S.wa_guide = { text: '', chars: 0, parts: 0, max: S.wa_guide.max }; HMG.draft = null; }
+        renderShell();
+      });
+    };
     var sy = document.getElementById('hm_sync');
-    if (sy) sy.onclick = function(){ act('/whatsapp/sync-lessons', {method:'POST'}, 'Your agent has everything it was taught.'); };
+    if (sy) sy.onclick = function(){
+      // the short lessons and the business knowledge (products, prices, the full guide) are two separate files on the agent
+      act('/whatsapp/sync-lessons', {method:'POST'}, 'Lessons sent...').then(function(r1){
+        if (!r1.ok) return;
+        act('/business-profile/sync', {method:'POST'}, 'Your agent has everything it was taught, and your full guide.');
+      });
+    };
   }, 0);
   return out;
 };

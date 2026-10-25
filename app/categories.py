@@ -77,6 +77,37 @@ def facts(cur, tid):
             "knowledge": knowledge}
 
 
+GUIDE_MAX = 20000          # the whole guide; the agent's knowledge block holds up to 60,000 characters
+GUIDE_PART = 2000          # business_knowledge.body is at most 2,000 characters per row
+
+
+def split_guide(text):
+    """The owner's guide in parts of at most GUIDE_PART characters, cut at a blank
+    line where possible, then at a line end, never inside a word when avoidable.
+    Joining the parts with "" gives back exactly the text."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    parts = []
+    while len(text) > GUIDE_PART:
+        cut = text.rfind("\n\n", 0, GUIDE_PART)
+        if cut < GUIDE_PART // 2:
+            cut = text.rfind("\n", 0, GUIDE_PART)
+        if cut < GUIDE_PART // 2:
+            cut = text.rfind(" ", 0, GUIDE_PART)
+        if cut < GUIDE_PART // 2:
+            cut = GUIDE_PART - 1
+        parts.append(text[:cut + 1])
+        text = text[cut + 1:]
+    if text:
+        parts.append(text)
+    return parts
+
+
+def guide_text(f):
+    """The guide's parts in order, joined back into the text the owner wrote."""
+    parts = sorted((x for x in f["knowledge"] if x["kind"] == "guide"), key=lambda x: x["title"])
+    return "".join(x["body"] for x in parts).strip()
+
+
 def _price(s):
     if s.get("price") is None:
         return "price on request"
@@ -164,6 +195,13 @@ def knowledge_block(f):
                 "Total: Rs <sum of the listed prices>",
                 "Then say the team will confirm the order and the delivery time. Never say the order is confirmed, "
                 "dispatched or paid: only the team does that."]
+    guide = guide_text(f)
+    if guide:
+        out += ["", "## The owner's guide: how to talk to customers",
+                "The owner wrote this in their own words. Follow it: its tone, its steps and its example "
+                "replies. The lists above still decide what is offered and at what price: if this guide names "
+                "an item, price, time or offer that is not listed above, the list wins.",
+                guide]
     out += ["", "## Greeting",
             "Say \"Welcome to %s\" (or any greeting) only in your FIRST reply in a chat. In every later "
             "reply, answer straight away: never start a reply with the welcome line again." % t["name"]]
@@ -348,6 +386,47 @@ def make_categories_router():
             record(cur, action="business.knowledge_remove", resource="business_knowledge", resource_id=kid,
                    actor=str(uid), actor_type="human", status="ok", detail={})
         return {"ok": True, "sync": sync_knowledge(tid)}
+
+    # ---- the owner's full guide for the WhatsApp agent (db/79): kept exactly as written
+    @router.get("/business-profile/guide")
+    def get_guide(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                  authorization: str | None = Header(None),
+                  td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        with tenant_session(tid, role) as cur:
+            cur.execute("""SELECT title, body, kind, updated_at FROM business_knowledge
+                            WHERE tenant_id = %s AND active AND kind = 'guide'""", (tid,))
+            rows = [dict(r) for r in cur.fetchall()]
+        text = guide_text({"knowledge": rows})
+        return {"text": text, "chars": len(text), "parts": len(rows), "max": GUIDE_MAX,
+                "updated_at": max((r["updated_at"] for r in rows), default=None)}
+
+    @router.put("/business-profile/guide")
+    def put_guide(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                  authorization: str | None = Header(None),
+                  td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Replace the guide with this text (empty removes it), then send it to the agent."""
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        _owner(role)
+        text = str(body.get("text") or "").replace("<!--", "").replace("-->", "").strip()
+        if len(text) > GUIDE_MAX:
+            raise HTTPException(400, "The guide is %s characters; it can be up to %s." % (
+                "{:,}".format(len(text)), "{:,}".format(GUIDE_MAX)))
+        if text and len(text) < 20:
+            raise HTTPException(400, "Write the full guide, or use the short box for a single rule.")
+        parts = split_guide(text) if text else []
+        with tenant_session(tid, role) as cur:
+            cur.execute("""UPDATE business_knowledge SET active = false, updated_at = now()
+                            WHERE tenant_id = %s AND kind = 'guide' AND active""", (tid,))
+            for i, part in enumerate(parts):
+                cur.execute("""INSERT INTO business_knowledge (tenant_id, kind, title, body, created_by)
+                               VALUES (%s, 'guide', %s, %s, %s)""",
+                            (tid, "Owner's guide, part %02d of %02d" % (i + 1, len(parts)), part,
+                             uid if uid and len(str(uid)) == 36 else None))
+            record(cur, action="business.guide_" + ("set" if parts else "remove"), resource="business_knowledge",
+                   resource_id=tid, actor=str(uid), actor_type="human", status="ok",
+                   detail={"chars": len(text), "parts": len(parts)})
+        return {"chars": len(text), "parts": len(parts), "sync": sync_knowledge(tid, force=True)}
 
     @router.post("/business-profile/sync")
     def sync_now(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
