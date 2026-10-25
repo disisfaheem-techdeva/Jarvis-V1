@@ -136,6 +136,9 @@ from .usage import CreditMeter
 app.add_middleware(CreditMeter)
 from .usage import make_usage_router
 app.include_router(make_usage_router())
+# API Manager: AI keys and which WhatsApp agent uses which (founder only)
+from .ai_keys import make_ai_keys_router
+app.include_router(make_ai_keys_router())
 from .autopilot import make_autopilot_router
 app.include_router(make_autopilot_router())
 from .social_agent import make_meta_webhook_router, make_social_inbox_router

@@ -173,7 +173,7 @@ const NAV = [
   ['MONEY', [
     ['revenue','My revenue'], ['clientmoney','Client business'], ['invoices','Invoices out']]],
   ['PLATFORM', [
-    ['health','Health'], ['incidents','Incidents'], ['aiusage','AI usage & API log']]]
+    ['health','Health'], ['incidents','Incidents'], ['aiusage','AI usage & API log'], ['apikeys','API Manager']]]
 ];
 const TITLES = {jarvis:['Jarvis','Pick a client, then say or type what to change for them.'],
   overview:['Overview','The whole business on one screen.'],
@@ -189,6 +189,7 @@ const TITLES = {jarvis:['Jarvis','Pick a client, then say or type what to change
   invoices:['Invoices out','Invoices TechDeva has issued to clients, and their status.'],
   health:['Health','Queues, workers and the AI chain.'],
   incidents:['Incidents','Anything the monitor has opened.'],
+  apikeys:['API Manager','AI keys, which WhatsApp agent runs on which key, and each agent\'s calls and limit hits. Keys are never shown, only their last 4 characters.'],
   aiusage:['AI usage & API log','AI credits each client used this month, and every AI call (who, which agent, model, time, result; never the text).']};
 
 async function api(path, opts){
@@ -309,6 +310,56 @@ function renderNav(){
   }).join('');
 }
 
+/* API Manager actions. Every change reloads the page's data from the server. */
+function wireApiKeys(){
+  const view = document.getElementById('view');
+  const msg = document.getElementById('apk-msg');
+  const reload = () => { D.apk = undefined; if (current() === 'apikeys') paint(); };
+  const say = (t, bad) => { if (msg) { msg.textContent = t; msg.style.color = bad ? 'var(--danger)' : ''; } };
+  const form = document.getElementById('apk-add');
+  if (form) form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const go = document.getElementById('apk-go'), keyEl = document.getElementById('apk-key');
+    go.disabled = true; go.textContent = 'Saving and testing...';
+    try {
+      const r = await api('/techdeva/api-keys', {method: 'POST', body: JSON.stringify({
+        provider: document.getElementById('apk-prov').value, label: document.getElementById('apk-label').value,
+        owner_note: document.getElementById('apk-note').value, key: keyEl.value})});
+      keyEl.value = '';
+      say(r.status === 'ok' ? 'Saved key …' + r.last4 + ' and it works.' : 'Saved key …' + r.last4 + ', but the test said: ' + (r.error || r.status), r.status !== 'ok');
+      setTimeout(reload, 1500);
+    } catch (ex) { say(ex.message, true); go.disabled = false; go.textContent = 'Save and test'; }
+  });
+  view.querySelectorAll('[data-apktest]').forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Testing...';
+    try { await api('/techdeva/api-keys/' + b.dataset.apktest + '/test', {method: 'POST'}); } catch (ex) { alert(ex.message); }
+    reload();
+  });
+  const toggle = (attr, off) => view.querySelectorAll('[data-' + attr + ']').forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try { await api('/techdeva/api-keys/' + b.dataset[attr], {method: 'PUT', body: JSON.stringify({disabled: off})}); } catch (ex) { alert(ex.message); }
+    reload();
+  });
+  toggle('apkoff', true); toggle('apkon', false);
+  view.querySelectorAll('[data-apkdel]').forEach(b => b.onclick = async () => {
+    if (!confirm('Delete the key "' + b.dataset.apkname + '"? It cannot be recovered.')) return;
+    b.disabled = true;
+    try { await api('/techdeva/api-keys/' + b.dataset.apkdel, {method: 'DELETE'}); } catch (ex) { alert(ex.message); }
+    reload();
+  });
+  view.querySelectorAll('[data-apkset]').forEach(b => b.onclick = async () => {
+    const agent = b.dataset.apkset, sel = view.querySelector('[data-apksel="' + agent + '"]');
+    b.disabled = true; b.textContent = 'Saving...';
+    try { await api('/techdeva/api-keys/assign/' + encodeURIComponent(agent), {method: 'PUT', body: JSON.stringify({key_id: sel.value || null})}); }
+    catch (ex) { alert(ex.message); }
+    reload();
+  });
+  /* While a choice is being applied, look again so "applying" turns into "applied". */
+  if (D.apk && (D.apk.agents || []).some(a => a.assignment && a.assignment.status === 'pending')) {
+    clearTimeout(window.__apkPoll); window.__apkPoll = setTimeout(reload, 20000);
+  }
+}
+
 function paint(){
   const v = current(), t = TITLES[v] || TITLES.overview;
   document.getElementById('vtitle').textContent = t[0];
@@ -322,6 +373,7 @@ function paint(){
   if (v === 'jarvis') wireJarvis();
   if (v === 'requests') wireRequests();
   if (v === 'aiusage') wireAiUsage();
+  if (v === 'apikeys') wireApiKeys();
 }
 
 /* ---- Jarvis voice helpers ----
@@ -525,6 +577,64 @@ function clientRows(rows){
 }
 
 const VIEWS = {
+  /* API Manager (app/ai_keys.py): AI keys, which WhatsApp agent runs on which,
+     and each agent's calls and rate-limit hits. A key is never shown, only its
+     last 4 characters; a choice is applied by ai-keys-sync.sh within a minute. */
+  apikeys(){
+    if (D.apk === undefined) { D.apk = null; api('/techdeva/api-keys').then(d => { D.apk = d; if (current() === 'apikeys') paint(); }).catch(e => { D.apk = {error: e.message}; if (current() === 'apikeys') paint(); }); }
+    const d = D.apk, nf = x => Number(x || 0).toLocaleString('en-US');
+    if (!d) return '<div class="empty">Reading the API keys...</div>';
+    if (d.error) return '<div class="empty">Could not read the API keys: ' + esc(d.error) + '</div>';
+    const keys = d.keys || [], agents = d.agents || [];
+    const sum = (list, part, f) => list.reduce((n, a) => n + ((a[part] || {})[f] || 0), 0);
+    const tag = s => '<span class="aiu-tag' + (s === 'ok' ? '' : (s === 'untested' || s === 'pending') ? ' warn' : ' bad') + '">' +
+      esc({ok: 'working', untested: 'not tested', rate_limited: 'limit reached', invalid: 'refused', error: 'error', disabled: 'off', pending: 'applying', applied: 'applied', failed: 'failed'}[s] || s) + '</span>';
+    const plat = d.platform_key_last4 ? '…' + esc(d.platform_key_last4) : 'none';
+    const usable = keys.filter(k => (d.agent_providers || []).indexOf(k.provider) >= 0 && k.status !== 'disabled' && k.status !== 'invalid');
+    const keyName = l4 => { const k = keys.find(x => x.last4 === l4); return k ? esc(k.label) + ' …' + esc(l4) : (l4 && l4 === d.platform_key_last4 ? 'Platform key …' + esc(l4) : (l4 ? '…' + esc(l4) : '—')); };
+    const state = a => { const s = a.assignment; if (!s) return '<span class="sub">platform default</span>';
+      return tag(s.status) + ' <span class="sub">' + esc(when(s.status === 'applied' ? s.applied_at : s.requested_at)) + (s.error ? ' · ' + esc(s.error) : '') + '</span>'; };
+    return (d.encryption ? '' : '<div class="empty" style="border-color:var(--danger)">Key storage is off: CREDENTIAL_ENCRYPTION_KEY is not set, so no key can be saved.</div>') +
+      '<div class="grid">' +
+        kpi('Keys saved', nf(keys.length), nf(keys.filter(k => k.status === 'ok').length) + ' working') +
+        kpi('WhatsApp agents', nf(agents.length), nf(agents.filter(a => a.live && a.live.running).length) + ' running') +
+        kpi('Model calls today', nf(sum(agents, 'today', 'ok')), 'answered by a model, all agents') +
+        kpi('Limit hits today', nf(sum(agents, 'today', 'rate_limited')), nf(sum(agents, 'today', 'overloaded')) + ' overloaded (503)', sum(agents, 'today', 'rate_limited') ? 'warn' : '') +
+        kpi('Platform key', plat, 'GEMINI_API_KEY in the server .env') + '</div>' +
+      '<section><h2>Add a key</h2><div class="card"><form id="apk-add" style="display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));align-items:end">' +
+        '<label class="sub">Provider<select id="apk-prov" class="fee" style="width:100%;text-align:left">' + (d.providers || ['gemini']).map(p => '<option value="' + esc(p) + '">' + esc(p === 'gemini' ? 'Google Gemini' : p) + '</option>').join('') + '</select></label>' +
+        '<label class="sub">Name<input id="apk-label" class="fee" style="width:100%;text-align:left" maxlength="80" placeholder="e.g. Ali - Google" required></label>' +
+        '<label class="sub">Note (optional)<input id="apk-note" class="fee" style="width:100%;text-align:left" maxlength="200" placeholder="whose account, which project"></label>' +
+        '<label class="sub">API key<input id="apk-key" class="fee" type="password" autocomplete="off" spellcheck="false" style="width:100%;text-align:left" required></label>' +
+        '<button class="primary" type="submit" id="apk-go">Save and test</button></form>' +
+        '<div class="sub" id="apk-msg" role="status" style="margin-top:8px">The key is encrypted on the server and never shown again, only its last 4 characters. Saving runs one free test (a model list, no quota used).</div></div></section>' +
+      '<section><h2>Keys</h2><div class="card" style="padding:6px 8px;overflow-x:auto">' +
+      tbl('<th>Name</th><th>Provider</th><th>Key</th><th>Status</th><th>Used by</th><th class="num">Calls 7d</th><th class="num">Limit hits 7d</th><th>Last test</th><th></th>',
+        keys.map(k => '<tr><td class="name">' + esc(k.label) + (k.owner_note ? '<div class="sub">' + esc(k.owner_note) + '</div>' : '') + '</td><td>' + esc(k.provider) + '</td><td>…' + esc(k.last4) + '</td>' +
+          '<td>' + tag(k.status) + (k.last_error ? '<div class="sub">' + esc(k.last_error) + '</div>' : '') + '</td>' +
+          '<td>' + (k.agents.length ? esc(k.agents.join(', ')) : '<span class="sub">no agent</span>') + '</td>' +
+          '<td class="num">' + nf(k.week.ok) + '</td><td class="num">' + nf(k.week.rate_limited) + '</td><td>' + esc(when(k.last_test_at)) + '</td>' +
+          '<td class="row"><button class="tiny" data-apktest="' + esc(k.id) + '">Test</button>' +
+          (k.status === 'disabled' ? '<button class="tiny" data-apkon="' + esc(k.id) + '">Turn on</button>' : '<button class="tiny" data-apkoff="' + esc(k.id) + '">Turn off</button>') +
+          '<button class="tiny" data-apkdel="' + esc(k.id) + '" data-apkname="' + esc(k.label) + '">Delete</button></td></tr>')) +
+      '</div></section>' +
+      '<section><h2>Which agent uses which key</h2><div class="card" style="padding:6px 8px;overflow-x:auto">' +
+      tbl('<th>Business</th><th>Agent</th><th>WhatsApp</th><th>Running on</th><th>Use this key</th><th>Change</th><th class="num">Calls today</th><th class="num">Limit hits today</th><th class="num">Calls 7d</th>',
+        agents.map(a => '<tr><td class="name">' + esc(a.business) + (a.is_test ? ' <span class="aiu-tag">test</span>' : '') + '</td><td>' + esc(a.agent_key) + (a.live && !a.live.running ? ' <span class="aiu-tag warn">stopped</span>' : '') + '</td>' +
+          '<td>' + esc(a.wa_status || '—') + '</td><td>' + keyName(a.live && a.live.live_last4) + '</td>' +
+          '<td><select class="fee" style="width:auto;text-align:left" data-apksel="' + esc(a.agent_key) + '" aria-label="Key for ' + esc(a.agent_key) + '">' +
+            '<option value="">Platform key ' + plat + '</option>' +
+            usable.map(k => '<option value="' + esc(k.id) + '"' + (a.assignment && a.assignment.key_id === k.id ? ' selected' : '') + '>' + esc(k.label) + ' …' + esc(k.last4) + '</option>').join('') +
+          '</select> <button class="tiny" data-apkset="' + esc(a.agent_key) + '">Apply</button></td>' +
+          '<td>' + state(a) + '</td>' +
+          '<td class="num">' + nf((a.today || {}).ok) + '</td><td class="num">' + nf((a.today || {}).rate_limited) + '</td><td class="num">' + nf((a.week || {}).ok) + '</td></tr>')) +
+      '<div class="sub" style="margin-top:6px">Apply restarts that one agent for a few seconds with the chosen key; WhatsApp stays connected. A stopped agent gets the key and stays stopped. Agents set up by hand (Irfan, clinic and salon workspace) are not listed.</div></div></section>' +
+      '<section><h2>Usage, last 7 days</h2><div class="card" style="padding:6px 8px;overflow-x:auto">' +
+      tbl('<th>Day</th><th>Agent</th><th>Model</th><th class="num">Answered</th><th class="num">Limit hits (429)</th><th class="num">Overloaded (503)</th><th class="num">Failed calls</th><th>Key</th>',
+        (d.usage || []).map(u => '<tr><td>' + esc(String(u.day).slice(0, 10)) + '</td><td>' + esc(u.agent_key) + '</td><td>' + esc(u.model || '(not tied to a model)') + '</td>' +
+          '<td class="num">' + nf(u.ok) + '</td><td class="num">' + nf(u.rate_limited) + '</td><td class="num">' + nf(u.overloaded) + '</td><td class="num">' + nf(u.failed) + '</td><td>' + keyName(u.key_last4) + '</td></tr>')) +
+      '<div class="sub" style="margin-top:6px">Counted from each agent\'s own log every 5 minutes; counts only, never a message. Google does not report how much quota is left: a rising "limit hits" number is the sign a key is used up for the day.</div></div></section>';
+  },
   aiusage(){
     if (D.aiu === undefined) { D.aiu = null; api('/techdeva/ai-usage').then(d => { D.aiu = d; if (current() === 'aiusage') paint(); }).catch(e => { D.aiu = {error: e.message}; if (current() === 'aiusage') paint(); }); }
     const u = D.aiu, nf = x => Number(x || 0).toLocaleString('en-US');
