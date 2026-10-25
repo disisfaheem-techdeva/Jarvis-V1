@@ -51,6 +51,10 @@ cfg["display"]["busy_input_mode"] = "queue"
 cfg["display"]["busy_ack_enabled"] = False
 cfg["display"]["long_running_notifications"] = False
 cfg["agent"]["gateway_notify_interval"] = 0
+# No speech-to-text engine is installed in the agent. With stt.enabled true the
+# gateway sends the CUSTOMER "install faster-whisper ... /restart the gateway"
+# setup text (seen 26 Oct 2026). Off: the agent itself asks them to type.
+cfg.setdefault("stt", {})["enabled"] = False
 
 with open(PATH + ".tmp", "w", encoding="utf-8") as f:
     yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
@@ -74,6 +78,8 @@ if back["display"].get("busy_input_mode") != "queue" or back["display"].get("bus
     problems.append("display.busy")
 if back["display"].get("long_running_notifications") is not False or back["agent"].get("gateway_notify_interval") != 0:
     problems.append("heartbeat")
+if (back.get("stt") or {}).get("enabled") is not False:
+    problems.append("stt")
 if problems:
     sys.exit("apply_config: not applied: " + ", ".join(problems))
 print("apply_config: model=%s/%s fallbacks=%s disabled_toolsets=%d tool_progress=%s" % (
