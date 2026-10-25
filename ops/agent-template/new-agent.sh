@@ -8,6 +8,7 @@
 #   T1 tool lockdown       agent.disabled_toolsets            (apply_config.py)
 #   T2 model chain         gemini-3.8-flash -> 2.5-flash-lite -> 3-flash-preview, no OpenRouter
 #   T3 no status leaks     gateway patched at IMAGE BUILD (patch_gateway.py) + display.tool_progress off
+#   T10 no error replies   a failed turn sends the customer nothing; the owner is alerted (patch_final_reply.py)
 #   T4 home channel        WHATSAPP_HOME_CHANNEL=<owner>@s.whatsapp.net + _NAME, per agent
 #   T5 voice rules         SOUL.md block (apply_soul.py)
 #   T6 pairing pickup      pairctl shares the agent's network (Send works) and marks a
@@ -64,17 +65,22 @@ GEMINI_API_KEY="$(envval GEMINI_API_KEY)"; INTERNAL="$(envval HERMES_INTERNAL_KE
 BASE_IMG=nousresearch/hermes-agent:latest
 BASE_ID=$(docker image inspect -f '{{.Id}}' "$BASE_IMG" 2>/dev/null | cut -c8-19) || true
 [ -n "$BASE_ID" ] || { docker pull "$BASE_IMG" >/dev/null; BASE_ID=$(docker image inspect -f '{{.Id}}' "$BASE_IMG" | cut -c8-19); }
-TPL_ID=$( (cd "$HERE" && cat patch_gateway.py patch_bridge.py apply_config.py apply_soul.py $(find soul -type f | sort); echo "bridge-deps-v2") | sha256sum | cut -c1-8)
+TPL_ID=$( (cd "$HERE" && cat patch_gateway.py patch_bridge.py apply_config.py apply_soul.py td_final_reply.py patch_final_reply.py $(find soul -type f | sort); echo "bridge-deps-v2") | sha256sum | cut -c1-8)
 IMG="techdeva/hermes-agent:$BASE_ID-td-$TPL_ID"
 if [ $REBUILD = 1 ] || ! docker image inspect "$IMG" >/dev/null 2>&1; then
   BASE_USER=$(docker image inspect -f '{{.Config.User}}' "$BASE_IMG")
-  BUILD=$(mktemp -d); cp "$HERE/patch_gateway.py" "$HERE/patch_bridge.py" "$HERE/apply_config.py" "$HERE/apply_soul.py" "$BUILD/"; cp -r "$HERE/soul" "$BUILD/"
+  BUILD=$(mktemp -d); cp "$HERE/patch_gateway.py" "$HERE/patch_bridge.py" "$HERE/apply_config.py" "$HERE/apply_soul.py" "$HERE/td_final_reply.py" "$HERE/patch_final_reply.py" "$BUILD/"; cp -r "$HERE/soul" "$BUILD/"
   {
     echo "FROM $BASE_IMG"
     echo "USER root"
     echo "COPY patch_gateway.py patch_bridge.py apply_config.py apply_soul.py /opt/techdeva/"
     echo "COPY soul /opt/techdeva/soul"
     echo "RUN python3 /opt/techdeva/patch_gateway.py /opt/hermes/gateway/run.py && grep -q '== \"whatsapp\"' /opt/hermes/gateway/run.py"
+    # T10: a failure reply ("Sorry, I encountered an error", raw Gemini quota
+    # errors...) never reaches a WhatsApp customer; the owner is alerted instead.
+    echo "COPY td_final_reply.py /opt/hermes/gateway/td_final_reply.py"
+    echo "COPY patch_final_reply.py /opt/techdeva/"
+    echo "RUN python3 /opt/hermes/gateway/td_final_reply.py && python3 /opt/techdeva/patch_final_reply.py /opt/hermes/gateway/platforms/base.py && grep -q 'TechDeva T10' /opt/hermes/gateway/platforms/base.py"
     # The WhatsApp bridge ships without its packages (node_modules was empty in
     # the upstream image, 2 Oct 2026): install them here so the pairing helper
     # and the gateway can both run it.
@@ -130,6 +136,7 @@ sleep 5
 fail=0
 ok() { echo "  PASS $1"; }; bad() { echo "  FAIL $1"; fail=1; }
 docker exec "$AGENT" grep -q '== "whatsapp"' /opt/hermes/gateway/run.py && ok "T3 gateway patch in the running image" || bad "T3 gateway patch missing"
+docker exec "$AGENT" grep -q 'TechDeva T10' /opt/hermes/gateway/platforms/base.py && ok "T10 failure replies go to the owner, not the customer" || bad "T10 final-reply guard missing"
 docker exec "$AGENT" python3 -c "import yaml,sys;c=yaml.safe_load(open('/opt/data/config.yaml'));print('  model:',c['model']['provider'],c['model']['default'],'| fallbacks:',[f['model'] for f in c['fallback_providers']],'| disabled_toolsets:',c['agent']['disabled_toolsets'],'| tool_progress:',c['display']['tool_progress'])"
 docker exec "$AGENT" python3 -c "import yaml;c=yaml.safe_load(open('/opt/data/config.yaml'));assert c['model']['provider']=='gemini' and 'openrouter' not in str(c['model']).lower() and all(f['provider']=='gemini' for f in c['fallback_providers']) and len(c['agent']['disabled_toolsets'])==10" && ok "T1/T2 config" || bad "T1/T2 config"
 [ "$(docker exec "$AGENT" printenv WHATSAPP_HOME_CHANNEL)" = "$PHONE@s.whatsapp.net" ] && ok "T4 home channel $PHONE@s.whatsapp.net ($(docker exec "$AGENT" printenv WHATSAPP_HOME_CHANNEL_NAME))" || bad "T4 home channel"
