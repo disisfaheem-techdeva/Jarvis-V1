@@ -488,6 +488,8 @@ def make_categories_router():
                 raise HTTPException(404, "No such business.")
             record(cur, action="business.type_set", resource="tenants", resource_id=tid, actor=str(uid),
                    actor_type="human", status="ok", detail={"type": slug, "other": other}, tenant_id=tid)
+        from .dashcustom import on_type_change          # Dashboard Customizer; no-op while off
+        on_type_change(tid, slug, str(uid or role))
         return {"business_type": slug, "sync": sync_knowledge(tid)}
 
     def _kn_body(body):

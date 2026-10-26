@@ -8202,6 +8202,8 @@ function bizMode(){
 function typeHidden(id){
   // Calls: only where TechDeva set up a phone line (or calls were taken); unknown until the profile loads
   if (id === 'calls' && typeof BP !== 'undefined' && BP.data && BP.data.phone_lines === 0) return true;
+  // a business that customized its dashboard decides itself what shows (Dashboard Customizer)
+  if (window.TD_DC && TD_DC.enabled && TD_DC.configured) return false;
   var m = bizMode();
   if (!m) return false;
   if (TYPE_HIDE[m].indexOf(id) !== -1) return true;
@@ -8300,7 +8302,7 @@ function typeHidden(id){
     });
     // anything the menu has that this map does not know yet goes to Administration
     list.forEach(function(x){ if (!placed[x.id]) out[out.length - 1].items.push(x); });
-    return out;
+    return window.tdDashOrder ? tdDashOrder(out) : out;    // Dashboard Customizer order (no-op while off)
   }
   function moduleFor(view){
     if (view === 'catalogue') view = 'services';
@@ -11443,6 +11445,234 @@ function galConfirmApprove(){
     }, 0);
     return out;
   };
+})();
+
+/* =====================================================================
+   Dashboard Customizer (27 Oct 2026; app/dashcustom.py). Additive and
+   behind DASHBOARD_CUSTOMIZER_ENABLED: while it is off, or for a business
+   that never customized (no dc_source), nothing here changes the screen.
+   The data is the same dashboard_prefs the console already uses:
+   hidden_sections hides pages (as before), nav_order / module_order order
+   the tabs and the modules. Administration > Customize Dashboard edits it;
+   Jarvis edits it through the same service (asked first).
+   ===================================================================== */
+(function(){
+  window.TD_DC = window.TD_DC || null;
+  var dcLoading = false;
+  function dcOn(){ return !!(window.TD_DC && TD_DC.enabled); }
+  function dcSet(){ return dcOn() && TD_DC.configured; }
+  function load(force){
+    if (dcLoading || (window.TD_DC && !force)) return;
+    dcLoading = true;
+    api('/dashboard-config').then(function(r){
+      dcLoading = false;
+      if (!r.ok || !r.data) { window.TD_DC = { enabled: false }; return; }
+      window.TD_DC = r.data;
+      if (dcOn()) {
+        // the page sits in Administration, owner only
+        var last = NAV[NAV.length - 1];
+        if (last && !last.items.some(function(it){ return it.id === 'customize'; }))
+          last.items.push({ id: 'customize', name: 'Customize Dashboard' });
+        OWNER_ONLY_NAV.customize = 1;
+        PREFS.hidden_sections = r.data.hidden;
+        PREFS.nav_order = r.data.nav_order;
+        PREFS.module_order = r.data.module_order;
+        renderShell();
+      }
+    });
+  }
+  window.tdDcLoad = load;
+
+  // sidebar order: modules by module_order, tabs by nav_order (unlisted keep their place)
+  window.tdDashOrder = function(groups){
+    if (!dcSet()) return groups;
+    var mo = TD_DC.module_order || [], no = TD_DC.nav_order || [];
+    function rank(list, k, i){ var j = list.indexOf(k); return j === -1 ? 1000 + i : j; }
+    var g = groups.map(function(x, i){ return { x: x, r: rank(mo, x.m.num, i) }; })
+      .sort(function(a, b){ return a.r - b.r; }).map(function(o){ return o.x; });
+    g.forEach(function(x){
+      x.items = x.items.map(function(it, i){ return { it: it, r: rank(no, it.id, i) }; })
+        .sort(function(a, b){ return a.r - b.r; }).map(function(o){ return o.it; });
+    });
+    return g;
+  };
+
+  // a page opened by its link while hidden: say so, never a blank or a 404
+  function hiddenHere(id){
+    if (!dcSet()) return false;
+    if (id === 'catalogue') id = 'services';
+    return (TD_DC.hidden || []).indexOf(id) !== -1 && (TD_DC.core || []).indexOf(id) === -1;
+  }
+  function hiddenScreen(id){
+    var name = id;
+    (TD_DC.modules || []).forEach(function(m){ (m.pages || []).forEach(function(p){ if (p.key === id) name = p.label; }); });
+    return '<h1>This page is hidden</h1>' + panel('Hidden from your dashboard',
+      '<div class="state"><strong>' + esc(name) + ' is turned off in Customize Dashboard.</strong>' +
+      'Nothing in it was deleted. ' + (isOwner() ? 'Turn it back on to see it in the menu again.' : 'Ask the business owner to turn it on.') + '</div>' +
+      (isOwner() ? '<div style="text-align:center;margin-top:10px"><a class="btn primary" href="#/customize">Open Customize Dashboard</a></div>' : ''));
+  }
+  function wrapViews(){
+    Object.keys(VIEWS).forEach(function(k){
+      var f = VIEWS[k];
+      if (k === 'customize' || !f || f.__tdDc) return;
+      var w = function(){ return hiddenHere(k) ? hiddenScreen(k) : f.apply(this, arguments); };
+      w.__tdDc = 1;
+      VIEWS[k] = w;
+    });
+  }
+
+  var baseRender = renderShell;
+  renderShell = function(){
+    if (S.me && !window.TD_DC) load();
+    wrapViews();
+    return baseRender.apply(this, arguments);
+  };
+
+  // ------------------------------------------------------------ the page
+  var CZ = { draft: null, dirty: false, msg: '', busy: false, drag: null };
+  function fresh(){
+    return { hidden: (TD_DC.hidden || []).slice(), nav_order: (TD_DC.nav_order || []).slice(),
+             module_order: (TD_DC.module_order || []).slice(), version: TD_DC.version };
+  }
+  function mods(){
+    var list = TD_DC.modules.map(function(m){ return { num: m.num, name: m.name, pages: m.pages.slice() }; });
+    var mo = CZ.draft.module_order, no = CZ.draft.nav_order;
+    function rank(arr, k, i){ var j = arr.indexOf(k); return j === -1 ? 1000 + i : j; }
+    list = list.map(function(m, i){ return { m: m, r: rank(mo, m.num, i) }; }).sort(function(a, b){ return a.r - b.r; }).map(function(o){ return o.m; });
+    list.forEach(function(m){
+      m.pages = m.pages.map(function(p, i){ return { p: p, r: rank(no, p.key, i) }; }).sort(function(a, b){ return a.r - b.r; }).map(function(o){ return o.p; });
+    });
+    return list;
+  }
+  function setOrderFrom(list){
+    CZ.draft.module_order = list.map(function(m){ return m.num; });
+    CZ.draft.nav_order = [];
+    list.forEach(function(m){ m.pages.forEach(function(p){ CZ.draft.nav_order.push(p.key); }); });
+    CZ.dirty = true;
+  }
+  function move(arr, from, to){ if (to < 0 || to >= arr.length) return; var x = arr.splice(from, 1)[0]; arr.splice(to, 0, x); }
+  var PRESET_NAMES = { clinic: 'Clinic', salon: 'Salon / spa', gym: 'Gym', academy: 'Academy / school',
+                       restaurant: 'Restaurant / café', shop: 'Shop & products', other: 'Other (everything)' };
+
+  VIEWS.customize = function(){
+    var out = '<h1>Customize Dashboard</h1><p class="sub">Choose which pages your team sees and in what order. Hiding a page never deletes anything.</p>';
+    if (!window.TD_DC) { load(); return out + panel('Customize Dashboard', loading('Loading...')); }
+    if (!dcOn()) return out + panel('Customize Dashboard', empty('Not switched on', 'TechDeva has not switched this on for your business yet.'));
+    if (!TD_DC.can_edit || !isOwner()) return out + panel('Customize Dashboard', empty('Owner only', 'Only the business owner can change the dashboard.'));
+    if (!CZ.draft) CZ.draft = fresh();
+    var list = mods(), hid = CZ.draft.hidden, ind = TD_DC.industry || 'other';
+    var shown = 0, total = 0;
+    list.forEach(function(m){ m.pages.forEach(function(p){ total++; if (hid.indexOf(p.key) === -1) shown++; }); });
+
+    out += '<div class="panel" style="padding:14px"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">' +
+      '<label class="card-note">Start from a layout <select class="fld" id="cz_preset" style="margin-left:6px">' +
+      Object.keys(PRESET_NAMES).map(function(k){ return '<option value="' + k + '"' + (k === ind ? ' selected' : '') + '>' + esc(PRESET_NAMES[k]) + (k === ind ? ' (your type)' : '') + '</option>'; }).join('') +
+      '</select></label><button class="btn" id="cz_apply">Use this layout</button>' +
+      '<button class="btn" id="cz_reset">Reset to ' + esc(PRESET_NAMES[ind] || ind) + ' defaults</button>' +
+      '<span class="card-note" style="margin-left:auto">' + shown + ' of ' + total + ' pages shown' +
+      (TD_DC.source ? ' · last change: ' + esc(TD_DC.source) : ' · not customized yet (everything shows)') + '</span></div></div>';
+
+    out += '<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,300px);gap:14px;align-items:start" class="cz-grid">';
+    // modules and their pages
+    out += '<div>' + list.map(function(m, mi){
+      return '<div class="panel cz-mod" draggable="true" data-czmod="' + mi + '" style="padding:12px;margin-bottom:10px">' +
+        '<div style="display:flex;align-items:center;gap:8px"><span title="Drag to move" style="cursor:grab">⠿</span><strong style="flex:1">' + esc(m.name) + '</strong>' +
+        '<button class="btn" data-czmup="' + mi + '" aria-label="Move ' + esc(m.name) + ' up">↑</button><button class="btn" data-czmdn="' + mi + '" aria-label="Move ' + esc(m.name) + ' down">↓</button></div>' +
+        m.pages.map(function(p, pi){
+          var on = hid.indexOf(p.key) === -1;
+          return '<div class="cz-page" draggable="true" data-czpage="' + mi + ':' + pi + '" style="display:flex;align-items:center;gap:8px;padding:6px 0 6px 18px;border-top:1px solid var(--line)">' +
+            '<span style="cursor:grab" title="Drag to move">⠿</span>' +
+            '<label style="flex:1;display:flex;align-items:center;gap:8px"><input type="checkbox" data-cztog="' + esc(p.key) + '"' + (on ? ' checked' : '') + (p.core ? ' disabled' : '') + '> ' +
+            esc(p.label) + (p.core ? ' <span class="card-note" title="Always shown">🔒 always on</span>' : '') + '</label>' +
+            '<button class="btn" data-czpup="' + mi + ':' + pi + '" aria-label="Move ' + esc(p.label) + ' up">↑</button><button class="btn" data-czpdn="' + mi + ':' + pi + '" aria-label="Move ' + esc(p.label) + ' down">↓</button></div>';
+        }).join('') + '</div>';
+    }).join('') + '</div>';
+    // live preview of the sidebar
+    out += '<div class="panel" style="padding:12px;position:sticky;top:80px"><div class="card-note" style="margin-bottom:6px">Preview</div>' +
+      list.map(function(m){
+        var vis = m.pages.filter(function(p){ return hid.indexOf(p.key) === -1; });
+        if (!vis.length) return '';
+        return '<div style="margin:6px 0"><strong>' + esc(m.name) + '</strong><div class="card-note">' + vis.map(function(p){ return esc(p.label); }).join(' · ') + '</div></div>';
+      }).join('') + '</div></div>';
+
+    out += '<div style="position:sticky;bottom:0;display:flex;gap:8px;align-items:center;padding:10px 0;background:var(--bg)">' +
+      '<button class="btn primary" id="cz_save"' + (CZ.dirty && !CZ.busy ? '' : ' disabled') + '>Save</button>' +
+      '<button class="btn" id="cz_cancel"' + (CZ.dirty ? '' : ' disabled') + '>Cancel</button>' +
+      '<span class="card-note" id="cz_msg" role="status">' + esc(CZ.msg || (CZ.dirty ? 'You have unsaved changes.' : '')) + '</span></div>' +
+      '<style>@media (max-width:760px){.cz-grid{grid-template-columns:1fr !important}}.cz-over{outline:2px dashed var(--accent,#8b5cf6)}</style>';
+
+    setTimeout(function(){
+      var q = function(s){ return document.querySelectorAll(s); };
+      var redraw = function(){ CZ.msg = ''; renderShell(); };
+      q('[data-cztog]').forEach(function(c){ c.onchange = function(){
+        var k = c.getAttribute('data-cztog'), i = CZ.draft.hidden.indexOf(k);
+        if (c.checked && i !== -1) CZ.draft.hidden.splice(i, 1);
+        if (!c.checked && i === -1) CZ.draft.hidden.push(k);
+        CZ.dirty = true; redraw();
+      }; });
+      q('[data-czmup],[data-czmdn]').forEach(function(b){ b.onclick = function(){
+        var up = b.hasAttribute('data-czmup'), i = +b.getAttribute(up ? 'data-czmup' : 'data-czmdn'), l = mods();
+        move(l, i, up ? i - 1 : i + 1); setOrderFrom(l); redraw();
+      }; });
+      q('[data-czpup],[data-czpdn]').forEach(function(b){ b.onclick = function(){
+        var up = b.hasAttribute('data-czpup'), v = b.getAttribute(up ? 'data-czpup' : 'data-czpdn').split(':'), l = mods();
+        move(l[+v[0]].pages, +v[1], up ? +v[1] - 1 : +v[1] + 1); setOrderFrom(l); redraw();
+      }; });
+      // drag and drop: modules among modules, pages within their module
+      q('[data-czmod]').forEach(function(el){
+        el.ondragstart = function(e){ if (e.target !== el) return; CZ.drag = { mod: +el.getAttribute('data-czmod') }; };
+        el.ondragover = function(e){ if (CZ.drag && CZ.drag.mod !== undefined) { e.preventDefault(); el.classList.add('cz-over'); } };
+        el.ondragleave = function(){ el.classList.remove('cz-over'); };
+        el.ondrop = function(e){ e.preventDefault(); el.classList.remove('cz-over');
+          if (!CZ.drag || CZ.drag.mod === undefined) return; var l = mods(); move(l, CZ.drag.mod, +el.getAttribute('data-czmod')); CZ.drag = null; setOrderFrom(l); redraw(); };
+      });
+      q('[data-czpage]').forEach(function(el){
+        el.ondragstart = function(e){ e.stopPropagation(); var v = el.getAttribute('data-czpage').split(':'); CZ.drag = { m: +v[0], p: +v[1] }; };
+        el.ondragover = function(e){ if (CZ.drag && CZ.drag.p !== undefined) { e.preventDefault(); e.stopPropagation(); el.classList.add('cz-over'); } };
+        el.ondragleave = function(){ el.classList.remove('cz-over'); };
+        el.ondrop = function(e){ e.preventDefault(); e.stopPropagation(); el.classList.remove('cz-over');
+          var v = el.getAttribute('data-czpage').split(':');
+          if (!CZ.drag || CZ.drag.p === undefined || CZ.drag.m !== +v[0]) { CZ.drag = null; return; }
+          var l = mods(); move(l[+v[0]].pages, CZ.drag.p, +v[1]); CZ.drag = null; setOrderFrom(l); redraw(); };
+      });
+      var ap = document.getElementById('cz_apply');
+      if (ap) ap.onclick = function(){
+        var k = document.getElementById('cz_preset').value;
+        CZ.draft.hidden = (TD_DC.presets[k] || []).slice(); CZ.draft.nav_order = []; CZ.draft.module_order = [];
+        CZ.dirty = true; CZ.msg = PRESET_NAMES[k] + ' layout chosen. Press Save to keep it.'; renderShell();
+      };
+      var rs = document.getElementById('cz_reset');
+      if (rs) rs.onclick = function(){
+        if (!confirm('Reset the dashboard to your business type\'s layout? Your own changes are replaced.')) return;
+        rs.disabled = true;
+        api('/dashboard-config/reset', { method: 'POST', body: {} }).then(function(r){
+          if (!r.ok) { CZ.msg = (r.data && r.data.detail) || 'Could not reset.'; renderShell(); return; }
+          window.TD_DC = Object.assign(TD_DC, r.data); CZ.draft = fresh(); CZ.dirty = false; CZ.msg = 'Reset done.';
+          PREFS.hidden_sections = r.data.hidden; PREFS.nav_order = r.data.nav_order; PREFS.module_order = r.data.module_order; renderShell();
+        });
+      };
+      var sv = document.getElementById('cz_save');
+      if (sv) sv.onclick = function(){
+        CZ.busy = true; sv.disabled = true;
+        api('/dashboard-config', { method: 'PUT', body: CZ.draft }).then(function(r){
+          CZ.busy = false;
+          if (!r.ok) { CZ.msg = (r.data && r.data.detail) || 'Not saved.'; renderShell(); return; }
+          window.TD_DC = Object.assign(TD_DC, r.data); CZ.draft = fresh(); CZ.dirty = false; CZ.msg = 'Saved.';
+          PREFS.hidden_sections = r.data.hidden; PREFS.nav_order = r.data.nav_order; PREFS.module_order = r.data.module_order; renderShell();
+        });
+      };
+      var cc = document.getElementById('cz_cancel');
+      if (cc) cc.onclick = function(){ CZ.draft = fresh(); CZ.dirty = false; CZ.msg = 'Changes dropped.'; renderShell(); };
+    }, 0);
+    return out;
+  };
+  // unsaved changes: warn before leaving the page or the tab
+  window.addEventListener('beforeunload', function(e){ if (CZ.dirty) { e.preventDefault(); e.returnValue = ''; } });
+  window.addEventListener('hashchange', function(e){
+    if (!CZ.dirty || location.hash === '#/customize') return;
+    if (confirm('You have unsaved dashboard changes. Leave without saving?')) { CZ.dirty = false; CZ.draft = null; }
+    else history.back();
+  });
 })();
 
 boot();

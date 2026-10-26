@@ -159,6 +159,9 @@ from .agent_admin import make_agent_admin_router
 app.include_router(make_agent_admin_router())
 # Storefront: orders, enquiries and messages from a tenant's own website (docs/STOREFRONT.md)
 app.include_router(make_storefront_router(P))
+# Dashboard Customizer (behind DASHBOARD_CUSTOMIZER_ENABLED): app/dashcustom.py
+from .dashcustom import make_dashcustom_router
+app.include_router(make_dashcustom_router())
 
 # The two client-facing pages. The API image is built from ./app, so web/ is
 # mounted in (see docker-compose.yml) rather than baked into the image; WEB_DIR
@@ -703,6 +706,10 @@ def public_signup(body: SignupIn, request: Request):
                             WHERE tenants.id = %s AND c.slug = %s AND c.active""",
                         ((body.business_type_other or "").strip()[:80] or None if body.business_type == "other" else None,
                          tenant_id, body.business_type))
+        # Dashboard Customizer: the industry's preset (no-op while the flag is off;
+        # never raises, so a failure leaves the full dashboard and signup goes on)
+        from .dashcustom import on_signup
+        on_signup(tenant_id, body.business_type)
     verify, sent = None, False
     if pw_hash and body.contact_email:
         # the first sign-in waits for the 6-digit code (app/email_codes.py). The account

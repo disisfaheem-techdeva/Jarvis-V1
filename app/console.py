@@ -281,6 +281,22 @@ def _clean_prefs(raw):
     return out
 
 
+def _dash_rule():
+    """Dashboard Customizer tools for the classifier, only while the flag is on."""
+    try:
+        from . import dashcustom as dc
+        if not dc.enabled():
+            return ""
+        return ("\n\nDashboard pages: to hide or show pages of the dashboard, put some first, or go back to "
+                "the business type's layout, answer kind \"action\" with action dashboard_hide or dashboard_show "
+                "(args: sections = array of page ids), dashboard_reorder (args: order = array of page ids, first "
+                "= top), or dashboard_reset (args: industry, optional: clinic, salon, gym, academy, restaurant, "
+                "shop, other). Page ids: " + ", ".join(sorted(dc.REGISTRY)) + ". Kind \"dashboard\" is then only "
+                "for colour, logo, home page and density.")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 # Appended to the classifier so the reply sounds right when spoken.
 LANG_RULE = ("\n\nLanguage: write \"reply\" in the same language and script the owner used "
              "(English, Urdu script, or Roman Urdu). Keep it short and natural to say aloud.")
@@ -833,6 +849,13 @@ def _do_action(tid, role, uid, action, args, founder, reply):
         # Said, not thrown: in a spoken conversation an error box is silence.
         return {"kind": "action", "action": action, "ok": False,
                 "reply": "I couldn't do that: %s" % _sentence(e)}
+    if action in getattr(ja, "DASH_OPS", {}):
+        # the screen updates the way a "dashboard" answer already does (PREFS)
+        with tenant_session(tid, role) as cur:
+            cur.execute("SELECT dashboard_prefs FROM tenant_config WHERE tenant_id = %s", (tid,))
+            r = cur.fetchone()
+        return {"kind": "dashboard", "action": action, "ok": True, "reply": "Done, the dashboard is updated.",
+                "changed": result.get("dashboard_config"), "prefs": (r or {}).get("dashboard_prefs") or {}}
     _forget_facts(tid)
     # The model writes its reply before anything runs, and sometimes as a
     # question ("Shall I book...?") although the booking is already made. A
@@ -926,7 +949,7 @@ def make_console_router():
         if attached:
             message += ("\n[The owner attached %d picture%s to this message, for the post or ad campaign they ask for.]"
                         % (len(attached), "" if len(attached) == 1 else "s"))
-        system = CLASSIFY + LANG_RULE + FACTS_RULE + (VOICE_RULE if voice else "")
+        system = CLASSIFY + _dash_rule() + LANG_RULE + FACTS_RULE + (VOICE_RULE if voice else "")
         t0 = time.time()
         try:
             # No retry here on purpose. A person is sitting in front of this
@@ -1017,6 +1040,17 @@ def make_console_router():
             if role not in ("owner", "techdeva_admin"):
                 raise HTTPException(403, "Only the business owner can change the dashboard.")
             prefs = _clean_prefs(out.get("prefs"))
+            # Dashboard Customizer on: hiding/showing pages is asked first, like its own tools
+            from . import dashcustom as _dc
+            if "hidden_sections" in prefs and _dc.enabled():
+                want = {"hidden": prefs.pop("hidden_sections")}
+                try:
+                    question = ja.describe(tid, role, "dashboard_set", want, founder)
+                except ja.ActionError as e:
+                    return {"kind": "question", "reply": _sentence(e)}
+                if not prefs:
+                    return {"kind": "confirm", "action": "dashboard_set", "summary": question, "reply": question,
+                            "confirm": ja.seal(tid, uid, role, "dashboard_set", want)}
             if not prefs:
                 return {"kind": "question", "reply":
                         "I could not tell which dashboard setting you meant. "

@@ -38,10 +38,14 @@ SECTIONS = ("overview", "leads", "customers", "appointments", "calendar", "daily
 # What needs a "yes" first.
 CONFIRM = {"add_expense", "cancel_appointment", "schedule_post", "publish_post",
            "record_order_payment", "cancel_order"}
+# Dashboard Customizer (app/dashcustom.py): always asked first, owner only
+DASH_OPS = {"dashboard_hide": "disable", "dashboard_show": "enable", "dashboard_reorder": "reorder",
+            "dashboard_reset": "reset", "dashboard_set": "set"}
+CONFIRM |= set(DASH_OPS)
 ACTIONS = {"navigate", "book_appointment", "reschedule_appointment", "cancel_appointment",
            "complete_appointment", "add_customer", "add_lead", "add_expense", "schedule_post",
            "publish_post", "update_order", "record_order_payment", "cancel_order", "write_campaign",
-           "add_followup", "complete_followup"}
+           "add_followup", "complete_followup"} | set(DASH_OPS)
 _HHMM = re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -185,6 +189,17 @@ def _money(v):
 # ------------------------------------------------------------ describe (for "shall I?")
 def describe(tid, role, action, args, founder=False):
     """Check the action can run and word the question. Raises ActionError."""
+    if action in DASH_OPS:
+        from . import dashcustom as dc
+        if role not in ("owner", "techdeva_admin"):
+            raise ActionError("only the business owner can change the dashboard")
+        if not dc.enabled():
+            raise ActionError("Customize Dashboard is not switched on")
+        try:
+            with tenant_session(tid, role) as cur:
+                return dc.plan_text(cur, tid, DASH_OPS[action], args)
+        except dc.DashError as e:
+            raise ActionError(str(e))
     if action == "schedule_post":
         if founder:
             raise ActionError("scheduling a post is the client's own decision, so they have to do it")
@@ -229,6 +244,10 @@ def run(tid, role, uid, action, args, founder=False):
     """Carry out one action. Returns (result dict for the dashboard, short fact
     for the reply). Raises ActionError with a speakable reason."""
     args = args if isinstance(args, dict) else {}
+    if action in DASH_OPS:
+        body = dict(args, op=DASH_OPS[action], via="jarvis")
+        out = _call(tid, role, uid, "POST", "/dashboard-config/change", body)
+        return {"dashboard_config": {"version": out.get("version"), "hidden": out.get("hidden")}}, None
     if action == "navigate":
         sec = str(args.get("section") or "").strip().lower()
         if sec not in SECTIONS:
