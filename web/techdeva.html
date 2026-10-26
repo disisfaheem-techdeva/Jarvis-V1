@@ -373,6 +373,19 @@ function wireApiKeys(){
   });
   const pay = document.getElementById('apk-paying');
   if (pay) pay.onchange = () => { D.apkPaying = pay.checked; paint(); };
+  /* Agent On/Off and auto-hold. */
+  view.querySelectorAll('[data-apkpower]').forEach(b => b.onclick = async () => {
+    const on = !!b.dataset.on, agent = b.dataset.apkpower;
+    if (!on && !confirm('Turn off ' + agent + '? It stops replying on WhatsApp until you turn it on (WhatsApp stays connected).')) return;
+    b.disabled = true;
+    try { await api('/techdeva/agent-power/' + encodeURIComponent(agent), {method: 'PUT', body: JSON.stringify({on: on})}); } catch (ex) { alert(ex.message); }
+    reload();
+  });
+  const ah = document.getElementById('apk-autohold');
+  if (ah) ah.onchange = async () => {
+    try { await api('/techdeva/ai-autohold', {method: 'PUT', body: JSON.stringify({on: ah.checked})}); } catch (ex) { alert(ex.message); }
+    reload();
+  };
   /* Phase 2: defaults by plan, and the test bench. */
   const defSave = document.getElementById('apk-def-save');
   if (defSave) defSave.onclick = async () => {
@@ -402,7 +415,7 @@ function wireApiKeys(){
   };
   view.querySelectorAll('[data-apkbshow]').forEach(b => b.onclick = () => { D.apkBenchOpen = D.apkBenchOpen === b.dataset.apkbshow ? null : b.dataset.apkbshow; paint(); });
   /* While a choice is being applied, look again so "applying" turns into "applied". */
-  if (D.apk && ((D.apk.agents || []).some(a => a.assignment && a.assignment.status === 'pending') || (D.apk.benches || []).some(b => b.status === 'pending' || b.status === 'running'))) {
+  if (D.apk && ((D.apk.agents || []).some(a => a.assignment && a.assignment.status === 'pending') || (D.apk.benches || []).some(b => b.status === 'pending' || b.status === 'running') || (D.apk.agents || []).some(a => a.power && a.power.status === 'pending'))) {
     clearTimeout(window.__apkPoll); window.__apkPoll = setTimeout(reload, 20000);
   }
 }
@@ -695,9 +708,15 @@ const VIEWS = {
       '<div class="sub" style="margin-top:6px">Change a model and press Tab to save it; agents on that key get the new model within a minute. Test key checks the key without using quota; Try a reply asks the model for one word and shows how long it took.</div></div></section>' +
       '<section><h2>Which agent uses which key</h2><div class="card" style="padding:6px 8px;overflow-x:auto">' +
       '<label class="sub" style="display:inline-flex;gap:6px;align-items:center;margin:4px 0 8px"><input type="checkbox" id="apk-paying"' + (payOnly ? ' checked' : '') + '> Paying clients only</label>' +
-      tbl('<th>Business</th><th>Plan</th><th>Agent</th><th>WhatsApp</th><th>Running on</th><th>Use this key</th><th>Change</th><th class="num">Calls today</th><th class="num">Limit hits today</th><th class="num">Calls 7d</th>',
+      '<label class="sub" style="display:inline-flex;gap:6px;align-items:center;margin:4px 0 8px 16px"><input type="checkbox" id="apk-autohold"' + (d.autohold ? ' checked' : '') + '> Auto-hold: pause an agent when its key runs out (back on when the quota resets)</label>' +
+      tbl('<th>Business</th><th>Plan</th><th>Agent</th><th>Hermes</th><th>WhatsApp</th><th>Running on</th><th>Use this key</th><th>Change</th><th class="num">Calls today</th><th class="num">Limit hits today</th><th class="num">Calls 7d</th>',
         agents.map(a => '<tr><td class="name">' + esc(a.business) + (a.is_test ? ' <span class="aiu-tag">test</span>' : '') + '</td><td>' + plan(a) + '</td>' +
           '<td>' + esc(a.agent_key) + (a.live && !a.live.running ? ' <span class="aiu-tag warn">stopped</span>' : '') + '</td>' +
+          '<td>' + (function(){ const p = a.power, off = p && p.want === 'off', pend = p && p.status === 'pending';
+              return '<span class="aiu-tag' + (off ? ' bad' : '') + '">' + (pend ? (off ? 'turning off' : 'turning on') : off ? (p.auto ? 'on hold' : 'off') : 'on') + '</span> ' +
+                '<button class="tiny" data-apkpower="' + esc(a.agent_key) + '" data-on="' + (off ? '1' : '') + '">' + (off ? 'Turn on' : 'Turn off') + '</button>' +
+                (off && p.auto && p.resume_at ? '<div class="sub">back on ' + esc(new Date(p.resume_at).toLocaleString()) + '</div>' : '') +
+                (p && p.reason && off ? '<div class="sub">' + esc(p.reason) + '</div>' : ''); })() + '</td>' +
           '<td>' + esc(a.wa_status || '—') + '</td><td>' + keyName(a.live && a.live.live_last4) + '</td>' +
           '<td><select class="fee" style="width:auto;max-width:260px;text-align:left" data-apksel="' + esc(a.agent_key) + '" aria-label="Key for ' + esc(a.agent_key) + '">' +
             '<option value="">Platform key ' + plat + ' (Gemini)</option>' +

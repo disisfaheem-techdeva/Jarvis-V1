@@ -77,6 +77,22 @@ while IFS=$'\t' read -r agent last4 provider base model value; do
 done <<< "$pending"
 unset pending value
 
+# ---- 1b. On/Off (founder console) and auto-hold resume: stop or start the agent's compose project
+power=$(pyx power-pending 2>/dev/null) || { log "could not read on/off requests"; power=""; }
+while IFS=$'\t' read -r agent want; do
+  [ -n "$agent" ] || continue
+  if protected "$agent"; then log "refuse on/off for $agent (protected)"; continue; fi
+  dir="/docker/hermes-$agent"
+  [ -f "$dir/docker-compose.yml" ] || { pyx power-applied "$agent" failed "no compose file" </dev/null; continue; }
+  if [ "$want" = "off" ]; then
+    (cd "$dir" && docker compose stop >/dev/null 2>&1 </dev/null) && r=ok || r=failed
+  else
+    (cd "$dir" && docker compose up -d >/dev/null 2>&1 </dev/null) && r=ok || r=failed
+  fi
+  pyx power-applied "$agent" "$r" </dev/null
+  log "agent $agent switched $want: $r"
+done <<< "$power"
+
 # ---- 2. live keys
 agents=""
 for d in /docker/hermes-*/; do
@@ -96,4 +112,7 @@ done | pyx live || log "could not report live keys"
 if [ $(( $(date +%-M) % 5 )) -eq 0 ]; then
   list=$(for d in /docker/hermes-*/; do a=$(basename "$d"); a=${a#hermes-}; protected "$a" || echo "$a"; done)
   python3 "$HERE/ai_usage_collect.py" $list | pyx usage || log "could not store usage"
+  # 4. auto-hold: an agent whose key keeps hitting its limit is put on hold until the quota resets
+  held=$(python3 "$HERE/ai_recent.py" $list | pyx autohold 2>/dev/null) || log "auto-hold check failed"
+  [ -n "${held:-}" ] && log "auto-hold: $held"
 fi

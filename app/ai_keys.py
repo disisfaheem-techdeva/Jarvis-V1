@@ -45,7 +45,8 @@ from .db import tenant_session
 # agents), the default model, and the URL Test uses to check the key when the
 # base URL's /models does not need one (OpenRouter lists models to anyone).
 PROVIDERS = {
-    "gemini": {"label": "Google Gemini", "base_url": None, "model": "gemini-2.5-flash-lite"},
+    # gemini-2.5-flash-lite is "no longer available to new users" (Google, 26 Oct 2026): new keys 404 on it
+    "gemini": {"label": "Google Gemini", "base_url": None, "model": "gemini-3.5-flash-lite"},
     "groq": {"label": "Groq", "base_url": "https://api.groq.com/openai/v1", "model": "llama-3.3-70b-versatile"},
     "openrouter": {"label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "model": None,
                    "auth_url": "https://openrouter.ai/api/v1/key"},
@@ -271,6 +272,92 @@ def _defaults(cur):
     return {"paying": d.get("ai_key_default_paying"), "trial": d.get("ai_key_default_trial")}
 
 
+# ---------------------------------------------------------------- On/Off and auto-hold
+# The founder switches an agent off/on (console), and an agent whose key keeps
+# hitting its limit with no answer is put on hold by the platform until the
+# key's quota resets (db/84 agent_power; applied by ai-keys-sync.sh).
+HOLD_HITS = 3                # refused calls in 15 minutes, with none answered
+
+
+def _autohold_on(cur):
+    cur.execute("SELECT value FROM platform_settings WHERE key = 'ai_autohold'")
+    r = cur.fetchone()
+    return bool(r and r["value"] == "1")
+
+
+def _quota_reset(provider):
+    """When a free daily quota comes back: Gemini resets at midnight Pacific time;
+    for any other provider try again in an hour."""
+    import datetime
+    from zoneinfo import ZoneInfo
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if provider != "gemini":
+        return now + datetime.timedelta(hours=1)
+    pt = now.astimezone(ZoneInfo("America/Los_Angeles"))
+    nxt = (pt + datetime.timedelta(days=1)).replace(hour=0, minute=10, second=0, microsecond=0)
+    return nxt.astimezone(datetime.timezone.utc)
+
+
+def _set_power(cur, agent, want, by, auto=False, reason=None, resume_at=None):
+    cur.execute("""INSERT INTO agent_power (agent_key, want, auto, reason, resume_at, status, requested_by, requested_at,
+                                            applied_at, error)
+                   VALUES (%s, %s, %s, %s, %s, 'pending', %s, now(), NULL, NULL)
+                   ON CONFLICT (agent_key) DO UPDATE SET want = EXCLUDED.want, auto = EXCLUDED.auto, reason = EXCLUDED.reason,
+                         resume_at = EXCLUDED.resume_at, status = 'pending', requested_by = EXCLUDED.requested_by,
+                         requested_at = now(), applied_at = NULL, error = NULL""",
+                (agent, want, auto, reason, resume_at, by))
+
+
+def autohold(rows):
+    """rows from ai_recent.py: put on hold every agent whose key keeps hitting its limit."""
+    out = []
+    with tenant_session(None, "techdeva_admin") as cur:
+        if not _autohold_on(cur):
+            return out
+        agents = {a["agent_key"]: a for a in _agents(cur)}
+        cur.execute("SELECT agent_key, want FROM agent_power")
+        power = {r["agent_key"]: r["want"] for r in cur.fetchall()}
+        cur.execute("SELECT last4, provider FROM ai_keys")
+        prov = {r["last4"]: r["provider"] for r in cur.fetchall()}
+        for r in rows:
+            agent = r.get("agent_key")
+            if agent not in agents or PROTECTED.match(agent or "") or power.get(agent) == "off":
+                continue
+            if r.get("limited", 0) < HOLD_HITS or r.get("ok", 0) > 0:
+                continue
+            provider = prov.get(r.get("live_last4"), "gemini")
+            until = _quota_reset(provider)
+            why = "AI key ...%s hit its limit %d times in 15 minutes with no answer" % (r.get("live_last4"), r.get("limited", 0))
+            _set_power(cur, agent, "off", "auto-hold", auto=True, reason=why, resume_at=until)
+            record(cur, action="techdeva.agent.autohold", resource="agent_power", resource_id=agent, actor="auto-hold",
+                   actor_type="system", status="ok", detail={"agent": agent, "why": why, "resume_at": until.isoformat()},
+                   tenant_id=None)
+            t = until.astimezone(__import__("zoneinfo").ZoneInfo("Asia/Karachi")).strftime("%d %b %H:%M")
+            _hold_incident(cur, None, "agent.on_hold", "%s on hold: AI limit reached" % agent,
+                           "%s. No replies are sent while it is on hold; it switches back on at %s (Pakistan time). "
+                           "Give it another key in API Manager and press On to bring it back sooner." % (why, t))
+            _hold_incident(cur, agents[agent]["tenant_id"], "agent.on_hold", "Your WhatsApp agent is paused",
+                           "Its AI service reached today's limit, so it is not replying for now (customers' messages "
+                           "stay in your WhatsApp). It starts again by itself at %s." % t)
+            out.append("%s on hold until %s" % (agent, until.isoformat()))
+    return out
+
+
+def _hold_incident(cur, tenant_id, kind, title, detail):
+    cur.execute("""UPDATE incidents SET last_seen_at = now(), seen_count = seen_count + 1, detail = %s
+                    WHERE tenant_id IS NOT DISTINCT FROM %s AND kind = %s AND title = %s AND status = 'open' RETURNING id""",
+                (detail, tenant_id, kind, title))
+    if not cur.fetchone():
+        cur.execute("INSERT INTO incidents (tenant_id, kind, severity, title, detail) VALUES (%s, %s, 'warn', %s, %s)",
+                    (tenant_id, kind, title, detail))
+
+
+def _resolve_hold_incidents(cur, agent, tenant_id):
+    cur.execute("""UPDATE incidents SET status = 'resolved', resolved_at = now()
+                    WHERE kind = 'agent.on_hold' AND status = 'open'
+                      AND ((tenant_id IS NULL AND title LIKE %s) OR tenant_id = %s)""", (agent + " on hold%", tenant_id))
+
+
 def make_ai_keys_router() -> APIRouter:
     router = APIRouter()
 
@@ -299,6 +386,9 @@ def make_ai_keys_router() -> APIRouter:
             for k in keys:
                 k["bench_passed"] = _passed_bench(cur, k["id"])
             platform_bench_passed = _passed_bench(cur, None)
+            cur.execute("SELECT * FROM agent_power")
+            power = {r["agent_key"]: dict(r) for r in cur.fetchall()}
+            autohold_on = _autohold_on(cur)
         by_last4 = {k["last4"]: k for k in keys}
         today, week = {}, {}
         for u in usage:
@@ -311,6 +401,7 @@ def make_ai_keys_router() -> APIRouter:
             k = a["agent_key"]
             a["assignment"] = assign.get(k)
             a["live"] = live.get(k)
+            a["power"] = power.get(k)
             a["today"] = today.get(k)
             a["week"] = week.get(k)
             l4 = (live.get(k) or {}).get("live_last4")
@@ -328,7 +419,7 @@ def make_ai_keys_router() -> APIRouter:
                               for k, v in PROVIDERS.items()],
                 "agent_providers": list(PROVIDERS), "encryption": crypto.enabled(),
                 "benches": benches, "defaults": defaults, "default_questions": DEFAULT_QUESTIONS,
-                "platform_bench_passed": platform_bench_passed}
+                "platform_bench_passed": platform_bench_passed, "autohold": autohold_on}
 
     @router.post("/techdeva/api-keys")
     def add(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
@@ -498,6 +589,37 @@ def make_ai_keys_router() -> APIRouter:
                            "provider": provider, "model": model}, tenant_id=None)
         return {"status": "pending", "key_last4": last4}
 
+    @router.put("/techdeva/agent-power/{agent_key}")
+    def power(agent_key: str, body: dict = Body(...), x_tenant_id: str | None = Header(None),
+              x_role: str | None = Header(None), authorization: str | None = Header(None),
+              td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Switch a WhatsApp agent off or on (applied within a minute)."""
+        uid = _admin(x_tenant_id, x_role, authorization, td_session)
+        if PROTECTED.match(agent_key):
+            raise HTTPException(403, "This agent is managed by hand and cannot be switched here.")
+        on = bool(body.get("on"))
+        with tenant_session(None, "techdeva_admin") as cur:
+            if agent_key not in {a["agent_key"] for a in _agents(cur)}:
+                raise HTTPException(404, "No such agent.")
+            _set_power(cur, agent_key, "on" if on else "off", str(uid) if uid else "founder",
+                       reason=None if on else "switched off by the founder")
+            record(cur, action="techdeva.agent.power", resource="agent_power", resource_id=agent_key,
+                   actor=str(uid) if uid else None, status="ok", detail={"agent": agent_key, "on": on}, tenant_id=None)
+        return {"agent": agent_key, "want": "on" if on else "off", "status": "pending"}
+
+    @router.put("/techdeva/ai-autohold")
+    def set_autohold(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                     authorization: str | None = Header(None),
+                     td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        uid = _admin(x_tenant_id, x_role, authorization, td_session)
+        on = bool(body.get("on"))
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("""INSERT INTO platform_settings (key, value) VALUES ('ai_autohold', %s)
+                           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""", ("1" if on else "0",))
+            record(cur, action="techdeva.agent.autohold_setting", resource="platform_settings", resource_id="ai_autohold",
+                   actor=str(uid) if uid else None, status="ok", detail={"on": on}, tenant_id=None)
+        return {"on": on}
+
     @router.post("/techdeva/ai-bench")
     def bench(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
               authorization: str | None = Header(None),
@@ -637,6 +759,38 @@ def _cli(argv):
             fields = (r["agent_key"], value[-4:], provider, base, model, value)
             if value and all("\t" not in f and "\n" not in f and f for f in fields):
                 sys.stdout.write("\t".join(fields) + "\n")
+        return 0
+    if cmd == "power-pending":
+        # agent \t on|off, for ai-keys-sync.sh; an auto hold whose time has come is switched back on first
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("""UPDATE agent_power SET want = 'on', status = 'pending', requested_by = 'auto-resume',
+                                  requested_at = now(), applied_at = NULL, error = NULL
+                            WHERE auto AND want = 'off' AND resume_at IS NOT NULL AND resume_at <= now()""")
+            cur.execute("SELECT agent_key, want FROM agent_power WHERE status = 'pending' ORDER BY requested_at")
+            for r in cur.fetchall():
+                if not PROTECTED.match(r["agent_key"]):
+                    sys.stdout.write("%s\t%s\n" % (r["agent_key"], r["want"]))
+        return 0
+    if cmd == "power-applied":
+        agent, result = argv[2], argv[3]
+        err = argv[4] if len(argv) > 4 else None
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("""UPDATE agent_power SET status = %s, applied_at = CASE WHEN %s THEN now() END, error = %s
+                            WHERE agent_key = %s RETURNING want""", ("applied" if result == "ok" else "failed",
+                                                                     result == "ok", err, agent))
+            r = cur.fetchone()
+            if r and r["want"] == "on" and result == "ok":
+                cur.execute("SELECT tenant_id FROM whatsapp_connections WHERE agent_key = %s LIMIT 1", (agent,))
+                w = cur.fetchone()
+                _resolve_hold_incidents(cur, agent, w["tenant_id"] if w else None)
+            record(cur, action="techdeva.agent.power_applied", resource="agent_power", resource_id=agent, actor="system",
+                   actor_type="system", status="ok" if result == "ok" else "error",
+                   detail={"agent": agent, "want": r["want"] if r else None}, error=err, tenant_id=None)
+        return 0
+    if cmd == "autohold":
+        rows = [json.loads(l) for l in sys.stdin if l.strip()]
+        for line in autohold(rows):
+            print(line)
         return 0
     if cmd == "bench-next":
         # one queued bench run, as a JSON line for model_bench.py (contains the key: pipe only)
