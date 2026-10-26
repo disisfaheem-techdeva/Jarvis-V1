@@ -538,4 +538,75 @@ def make_portal_router(P) -> APIRouter:
             raise HTTPException(409, out.get("reason", "could not reject"))
         return out
 
+    # ---- paused agent tasks (Needs Human > Paused agent tasks; Rafay, 26 Oct 2026)
+    # A task can sit at needs_human with nothing left to approve: its card was
+    # approved, it ran again and stopped again for a reason approval cannot fix
+    # (no Meta account, no campaign data, a lead with no message). The owner
+    # saw "3 tasks paused" and no button. Now: the list with the reason, and
+    # Close (the task ends as failed, never retried) or Try again (queued once
+    # more; the approval gate still applies, nothing skips it).
+    @router.get("/portal/paused-tasks")
+    def paused_tasks(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                     authorization: str | None = Header(None),
+                     td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        tid, role, uid = identity(x_tenant_id, x_role, authorization, td_session)
+        if not tid:
+            raise HTTPException(400, "tenant required")
+        with P._sess(tid) as cur:
+            cur.execute("""SELECT t.id, t.agent, t.type, t.result, t.created_at, t.updated_at,
+                                  (SELECT d.status::text FROM deliverables d WHERE d.task_id = t.id LIMIT 1) AS card
+                             FROM tasks t WHERE t.tenant_id = %s AND t.status = 'needs_human'
+                            ORDER BY t.created_at DESC LIMIT 100""", (tid,))
+            rows = [dict(r) for r in cur.fetchall()]
+        for r in rows:
+            res = r.pop("result") or {}
+            r["id"] = str(r["id"])
+            bits = [str(res.get(k)) for k in ("blocked", "reason", "detail", "error") if res.get(k)]
+            r["why"] = " / ".join(bits)[:300]
+        return {"tasks": rows}
+
+    def _paused(cur, tid, task_id):
+        cur.execute("SELECT id, agent, type FROM tasks WHERE id::text = %s AND tenant_id = %s AND status = 'needs_human' FOR UPDATE",
+                    (task_id, tid))
+        t = cur.fetchone()
+        if not t:
+            raise HTTPException(409, "That task is no longer paused.")
+        return t
+
+    @router.post("/portal/paused-tasks/{task_id}/close")
+    def close_paused(task_id: str, x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                     authorization: str | None = Header(None),
+                     td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        tid, role, uid = identity(x_tenant_id, x_role, authorization, td_session)
+        uid = _approver(tid, role, uid)
+        with P._sess(tid) as cur:
+            t = _paused(cur, tid, task_id)
+            cur.execute("""UPDATE tasks SET status = 'failed', updated_at = now(),
+                                  result = coalesce(result, '{}'::jsonb) || jsonb_build_object('closed_by_owner', %s::text)
+                            WHERE id = %s""", (str(uid), t["id"]))
+            cur.execute("""UPDATE deliverables SET status = 'rejected', decision_reason = 'closed by the owner',
+                                  approved_by = %s, updated_at = now()
+                            WHERE task_id = %s AND status IN ('awaiting_approval', 'draft')""", (uid, t["id"]))
+            record(cur, action="portal.task.closed", resource="tasks", resource_id=task_id, actor=str(uid),
+                   actor_type="human", status="ok", detail={"agent": t["agent"], "type": t["type"]}, error=None,
+                   tenant_id=tid)
+        return {"closed": True}
+
+    @router.post("/portal/paused-tasks/{task_id}/retry")
+    def retry_paused(task_id: str, x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                     authorization: str | None = Header(None),
+                     td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        tid, role, uid = identity(x_tenant_id, x_role, authorization, td_session)
+        uid = _approver(tid, role, uid)
+        with P._sess(tid) as cur:
+            t = _paused(cur, tid, task_id)
+            cur.execute("UPDATE tasks SET status = 'queued', attempts = 0, updated_at = now() WHERE id = %s", (t["id"],))
+            record(cur, action="portal.task.retry", resource="tasks", resource_id=task_id, actor=str(uid),
+                   actor_type="human", status="ok", detail={"agent": t["agent"], "type": t["type"]}, error=None,
+                   tenant_id=tid)
+        import json as _json
+        from .persistence import TASKS_Q
+        P.r.rpush(TASKS_Q, _json.dumps({"tenant_id": str(tid), "task_id": str(t["id"])}))
+        return {"queued": True}
+
     return router

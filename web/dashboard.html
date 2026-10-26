@@ -897,16 +897,46 @@ VIEWS.needshuman = function(){
     out += '</div>';
   }
 
+  /* Paused agent tasks: each with why it stopped, and Close / Try again
+     (POST /portal/paused-tasks/{id}/close|retry, owner only). */
   var n = S.summary && S.summary.work_by_status ? S.summary.work_by_status.needs_human : null;
   if (n) {
     out += '<h2>Paused agent tasks</h2>';
-    out += panel('Tasks held at needs_human',
-      '<div class="state"><strong>' + esc(n) + ' task' + (n === 1 ? '' : 's') + ' paused</strong>' +
-      'These are held by the orchestrator and are not actionable from here yet. Approving work is done ' +
-      'through the deliverables above, which is the approval path the platform already enforces.</div>');
+    if (!need('paused', '/portal/paused-tasks')) out += panel('Stopped tasks', loading('Loading...'));
+    else if (S.paused && (S.paused.tasks || []).length) {
+      var whyText = function(w){
+        w = String(w || '');
+        if (/meta_not_connected/.test(w)) return 'Facebook / Meta is not connected, so the ads cannot run.';
+        if (/no_performance_data|no campaign spend/.test(w)) return 'There is no campaign data yet to improve.';
+        if (/live execution integration not built/.test(w)) return 'Running ads automatically is not built yet; the plan is ready but nothing is launched.';
+        if (/empty message/.test(w)) return 'The lead had no message to answer.';
+        if (/40[12]|credits|API key/i.test(w)) return 'The AI service refused the request (key or credits).';
+        return w || 'Stopped for a person to decide.';
+      };
+      var who = {ads: 'Ads', optimizer: 'Ad optimizer', hermes: 'WhatsApp agent', content: 'Content'};
+      out += '<div class="panel"><div class="panel-head"><div class="panel-title">Stopped tasks</div><span class="pill attn">' + S.paused.tasks.length + '</span></div>' +
+        S.paused.tasks.map(function(t){
+          return '<div style="padding:14px 16px;border-bottom:1px solid var(--line)">' +
+            '<div style="font-weight:600">' + esc((who[t.agent] || t.agent) + ': ' + String(t.type || '').replace(/_/g, ' ')) + '</div>' +
+            '<div class="card-note" style="margin:4px 0 8px">' + esc(whyText(t.why)) + ' · since ' + esc(String(t.created_at).slice(0, 10)) +
+            (t.card === 'approved' ? ' · you already approved it' : '') + '</div>' +
+            (owner ? '<button class="btn" data-ptclose="' + esc(t.id) + '">Close</button> <button class="btn" data-ptretry="' + esc(t.id) + '">Try again</button>'
+                   : '<span class="card-note">Only the account owner can close or retry.</span>') + '</div>';
+        }).join('') +
+        '<div class="card-note" style="padding:10px 16px">Close ends the task for good; it is not tried again. Try again runs it once more, which helps only after the cause above is fixed.</div></div>';
+    }
   }
 
   setTimeout(function(){
+    Array.prototype.forEach.call(document.querySelectorAll('[data-ptclose],[data-ptretry]'), function(b){
+      b.onclick = function(){
+        var close = b.hasAttribute('data-ptclose'), id = b.getAttribute(close ? 'data-ptclose' : 'data-ptretry');
+        if (close && !confirm('Close this task? It will not be tried again.')) return;
+        b.disabled = true;
+        act('/portal/paused-tasks/' + id + '/' + (close ? 'close' : 'retry'), {method: 'POST', body: {}}, close ? 'Closed.' : 'Queued again.')
+          .then(function(r){ if (r.ok) { need('paused', '/portal/paused-tasks', true); api('/portal/summary').then(function(x){ if (x.ok) { S.summary = x.data; renderShell(); } }); } else b.disabled = false; });
+      };
+    });
     Array.prototype.forEach.call(document.querySelectorAll('.dact'), function(b){
       b.onclick = function(){
         var id = b.getAttribute('data-id'), what = b.getAttribute('data-do');
