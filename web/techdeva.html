@@ -373,8 +373,36 @@ function wireApiKeys(){
   });
   const pay = document.getElementById('apk-paying');
   if (pay) pay.onchange = () => { D.apkPaying = pay.checked; paint(); };
+  /* Phase 2: defaults by plan, and the test bench. */
+  const defSave = document.getElementById('apk-def-save');
+  if (defSave) defSave.onclick = async () => {
+    defSave.disabled = true;
+    try { await api('/techdeva/ai-key-defaults', {method: 'PUT', body: JSON.stringify({paying: document.getElementById('apk-def-paying').value, trial: document.getElementById('apk-def-trial').value})}); }
+    catch (ex) { alert(ex.message); }
+    reload();
+  };
+  view.querySelectorAll('[data-apkdefapply]').forEach(b => b.onclick = async () => {
+    const g = b.dataset.apkdefapply;
+    if (!confirm('Move every ' + g + ' agent to its saved default key now? Each restarts for a few seconds.')) return;
+    b.disabled = true;
+    try { const r = await api('/techdeva/ai-key-defaults/apply', {method: 'POST', body: JSON.stringify({group: g})});
+          alert(r.agents.length ? r.agents.length + ' agent(s) will switch within a minute: ' + r.agents.join(', ') : 'Every ' + g + ' agent is already on that key.'); }
+    catch (ex) { alert(ex.message); }
+    reload();
+  });
+  const bq = document.getElementById('apk-b-q');
+  if (bq) bq.oninput = () => { D.apkBenchQ = bq.value.split('\n'); };
+  const bgo = document.getElementById('apk-b-go');
+  if (bgo) bgo.onclick = async () => {
+    const qs = (bq.value || '').split('\n').map(x => x.trim()).filter(Boolean);
+    bgo.disabled = true; bgo.textContent = 'Queued...';
+    try { await api('/techdeva/ai-bench', {method: 'POST', body: JSON.stringify({agent_key: document.getElementById('apk-b-agent').value, key_id: document.getElementById('apk-b-key').value || null, questions: qs})}); }
+    catch (ex) { alert(ex.message); }
+    reload();
+  };
+  view.querySelectorAll('[data-apkbshow]').forEach(b => b.onclick = () => { D.apkBenchOpen = D.apkBenchOpen === b.dataset.apkbshow ? null : b.dataset.apkbshow; paint(); });
   /* While a choice is being applied, look again so "applying" turns into "applied". */
-  if (D.apk && (D.apk.agents || []).some(a => a.assignment && a.assignment.status === 'pending')) {
+  if (D.apk && ((D.apk.agents || []).some(a => a.assignment && a.assignment.status === 'pending') || (D.apk.benches || []).some(b => b.status === 'pending' || b.status === 'running'))) {
     clearTimeout(window.__apkPoll); window.__apkPoll = setTimeout(reload, 20000);
   }
 }
@@ -679,6 +707,37 @@ const VIEWS = {
           '<td class="num">' + nf((a.today || {}).ok) + '</td><td class="num">' + nf((a.today || {}).rate_limited) + '</td><td class="num">' + nf((a.week || {}).ok) + '</td></tr>')) +
       (keys.length && !usable.length ? '<div class="sub" style="margin-top:6px;color:var(--warn)">No key can be given to an agent yet: a non-Gemini key needs a model (Keys table) and must not be off or refused.</div>' : '') +
       '<div class="sub" style="margin-top:6px">Apply restarts that one agent for a few seconds with the chosen key and model; WhatsApp stays connected. With a non-Gemini key the agent still falls back to the free Gemini key if that provider fails. A stopped agent gets the key and stays stopped. Agents set up by hand (Irfan, clinic and salon workspace) are not listed.</div></div></section>' +
+      '<section><h2>Default key by plan</h2><div class="card">' + (function(){
+        const df = d.defaults || {}, opt = sel => '<option value="">Platform key ' + plat + ' (Gemini)</option>' +
+          usable.map(k => '<option value="' + esc(k.id) + '"' + (sel === k.id ? ' selected' : '') + '>' + esc(k.label) + ' · ' + esc(pname(k.provider)) + (k.model ? ' · ' + esc(k.model) : '') + ' …' + esc(k.last4) + (k.bench_passed ? ' (tested)' : '') + '</option>').join('');
+        const passed = id => id ? !!(keys.find(k => k.id === id) || {}).bench_passed : !!d.platform_bench_passed;
+        const line = (g, label) => '<div class="row" style="gap:8px;align-items:center;margin:6px 0"><span style="min-width:150px">' + label + '</span>' +
+          '<select class="fee" style="width:auto;max-width:320px;text-align:left" id="apk-def-' + g + '">' + opt(df[g] || '') + '</select>' +
+          '<button class="tiny" data-apkdefapply="' + g + '"' + (passed(df[g]) ? '' : ' disabled title="Run the test bench with this key first"') + '>Apply to every ' + g + ' agent</button>' +
+          '<span class="sub">' + (passed(df[g]) ? 'passed the test bench' : 'not passed the test bench yet') + '</span></div>';
+        return line('paying', 'Paying clients') + line('trial', 'Trial clients') +
+          '<button class="tiny primary" id="apk-def-save">Save defaults</button>' +
+          '<div class="sub" style="margin-top:6px">Apply moves every agent of that group to its saved key (each restarts for a few seconds). The key must fully pass the test bench first, so one bad key cannot stop every agent at once.</div>';
+      })() + '</div></section>' +
+      '<section><h2>Test bench</h2><div class="card">' + (function(){
+        const ag = d.agents || [], bs = d.benches || [];
+        const keyLabel = id => { if (!id) return 'Platform key ' + plat; const k = keys.find(x => x.id === id); return k ? esc(k.label) + ' …' + esc(k.last4) : 'deleted key'; };
+        return '<div class="sub" style="margin-bottom:8px">Runs these customer questions through a copy of the agent (its knowledge and lessons; nothing goes on WhatsApp) with the chosen key. Each question uses one request of that key. Results come in a minute or two.</div>' +
+          '<div class="row" style="gap:8px;flex-wrap:wrap"><select class="fee" style="width:auto;text-align:left" id="apk-b-agent">' + ag.map(a => '<option value="' + esc(a.agent_key) + '">' + esc(a.business) + ' (' + esc(a.agent_key) + ')</option>').join('') + '</select>' +
+          '<select class="fee" style="width:auto;max-width:320px;text-align:left" id="apk-b-key"><option value="">Platform key ' + plat + ' (Gemini)</option>' + usable.map(k => '<option value="' + esc(k.id) + '">' + esc(k.label) + ' · ' + esc(pname(k.provider)) + (k.model ? ' · ' + esc(k.model) : '') + '</option>').join('') + '</select>' +
+          '<button class="tiny primary" id="apk-b-go">Run test</button></div>' +
+          '<textarea class="fee" id="apk-b-q" rows="5" style="width:100%;text-align:left;margin-top:8px;font:inherit">' + esc((D.apkBenchQ || d.default_questions || []).join('\n')) + '</textarea>' +
+          '<div class="sub">One question per line, up to 8.</div>' +
+          (bs.length ? tbl('<th>When</th><th>Agent</th><th>Key</th><th>Model</th><th>Result</th><th></th>', bs.map(b =>
+            '<tr><td>' + esc(when(b.requested_at)) + '</td><td>' + esc(b.agent_key) + '</td><td>' + keyLabel(b.key_id) + '</td><td>' + esc(b.model || '') + '</td>' +
+            '<td>' + (b.status === 'done' ? '<span class="aiu-tag' + (b.passed === b.total ? '' : ' bad') + '">' + esc(b.passed) + ' / ' + esc(b.total) + ' passed</span>'
+                     : b.status === 'failed' ? '<span class="aiu-tag bad">failed</span> <span class="sub">' + esc(b.error || '') + '</span>'
+                     : '<span class="aiu-tag warn">' + esc(b.status === 'running' ? 'running' : 'waiting') + '</span>') + '</td>' +
+            '<td>' + ((b.results || []).length ? '<button class="tiny" data-apkbshow="' + esc(b.id) + '">' + (D.apkBenchOpen === b.id ? 'Hide' : 'Answers') + '</button>' : '') + '</td></tr>' +
+            (D.apkBenchOpen === b.id ? '<tr><td colspan="6">' + (b.results || []).map(r => '<div style="padding:8px 0;border-bottom:1px solid var(--line)"><div><b>Q:</b> ' + esc(r.q) + '</div>' +
+              '<div style="white-space:pre-wrap"><b>A:</b> ' + esc(r.a || '—') + '</div><div class="sub">' + esc(Math.round((r.ms || 0) / 100) / 10) + ' s · ' +
+              (r.ok ? 'passed' : '<span style="color:var(--danger)">' + esc(r.error || 'failed') + '</span>') + '</div></div>').join('') + '</td></tr>' : ''))) : '');
+      })() + '</div></section>' +
       '<section><h2>Usage, last 7 days</h2><div class="card" style="padding:6px 8px;overflow-x:auto">' +
       tbl('<th>Day</th><th>Agent</th><th>Model</th><th class="num">Answered</th><th class="num">Limit hits (429)</th><th class="num">Overloaded (503)</th><th class="num">Failed calls</th><th>Key</th>',
         (d.usage || []).map(u => '<tr><td>' + esc(String(u.day).slice(0, 10)) + '</td><td>' + esc(u.agent_key) + '</td><td>' + esc(u.model || '(not tied to a model)') + '</td>' +

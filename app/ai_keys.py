@@ -239,6 +239,38 @@ def _agents(cur):
     return out
 
 
+# ---------------------------------------------------------------- test bench + defaults by plan
+# Phase 2 of the Hermes training framework. The bench runs customer questions
+# through a COPY of an agent with a chosen key (ops/agent-template/model_bench.py,
+# cron); defaults say which key paying and trial businesses' agents should use.
+DEFAULT_QUESTIONS = [
+    "Assalam o alaikum, aap ke packages ya services kya hain aur price kitni hai?",
+    "Hi, what do you offer and where are you located?",
+    "کیا آپ کل صبح کھلے ہیں؟",
+    "Mujhe booking karni hai, kya process hai?",
+    "Kya aap free mein kaam karte hain?",
+]
+BENCH_MAX_Q = 8
+DEFAULT_KEYS = ("ai_key_default_paying", "ai_key_default_trial")
+
+
+def _usable(row):
+    return row["status"] not in ("disabled", "invalid") and (row["provider"] == "gemini" or (row["model"] and row["base_url"]))
+
+
+def _passed_bench(cur, key_id):
+    """A key may be the default for many agents only after a full pass on the bench in the last 7 days."""
+    cur.execute("""SELECT 1 FROM ai_model_tests WHERE key_id IS NOT DISTINCT FROM %s AND status = 'done'
+                      AND passed = total AND total > 0 AND finished_at > now() - interval '7 days' LIMIT 1""", (key_id,))
+    return cur.fetchone() is not None
+
+
+def _defaults(cur):
+    cur.execute("SELECT key, value FROM platform_settings WHERE key = ANY(%s)", (list(DEFAULT_KEYS),))
+    d = {r["key"]: (r["value"] or None) for r in cur.fetchall()}
+    return {"paying": d.get("ai_key_default_paying"), "trial": d.get("ai_key_default_trial")}
+
+
 def make_ai_keys_router() -> APIRouter:
     router = APIRouter()
 
@@ -260,6 +292,13 @@ def make_ai_keys_router() -> APIRouter:
                                   (day = current_date) AS is_today
                              FROM ai_agent_usage WHERE day > current_date - 7 ORDER BY day DESC, agent_key, model""")
             usage = [dict(r) for r in cur.fetchall()]
+            cur.execute("""SELECT id, agent_key, key_id, model, status, passed, total, results, error, requested_at, finished_at
+                             FROM ai_model_tests ORDER BY requested_at DESC LIMIT 30""")
+            benches = [dict(r) for r in cur.fetchall()]
+            defaults = _defaults(cur)
+            for k in keys:
+                k["bench_passed"] = _passed_bench(cur, k["id"])
+            platform_bench_passed = _passed_bench(cur, None)
         by_last4 = {k["last4"]: k for k in keys}
         today, week = {}, {}
         for u in usage:
@@ -287,7 +326,9 @@ def make_ai_keys_router() -> APIRouter:
         return {"keys": keys, "agents": agents, "usage": usage, "platform_key_last4": plat,
                 "providers": [{"key": k, "label": v["label"], "base_url": v["base_url"], "model": v["model"]}
                               for k, v in PROVIDERS.items()],
-                "agent_providers": list(PROVIDERS), "encryption": crypto.enabled()}
+                "agent_providers": list(PROVIDERS), "encryption": crypto.enabled(),
+                "benches": benches, "defaults": defaults, "default_questions": DEFAULT_QUESTIONS,
+                "platform_bench_passed": platform_bench_passed}
 
     @router.post("/techdeva/api-keys")
     def add(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
@@ -457,6 +498,107 @@ def make_ai_keys_router() -> APIRouter:
                            "provider": provider, "model": model}, tenant_id=None)
         return {"status": "pending", "key_last4": last4}
 
+    @router.post("/techdeva/ai-bench")
+    def bench(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+              authorization: str | None = Header(None),
+              td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Queue a bench run: these questions, through a copy of this agent, on this key
+        (key_id null = the platform key). Uses one request of the key's quota per question."""
+        uid = _admin(x_tenant_id, x_role, authorization, td_session)
+        agent_key = str(body.get("agent_key") or "")
+        key_id = body.get("key_id") or None
+        qs = [" ".join(str(q).split()) for q in (body.get("questions") or DEFAULT_QUESTIONS)]
+        qs = [q for q in qs if q][:BENCH_MAX_Q]
+        if not qs or any(len(q) > 300 for q in qs):
+            raise HTTPException(400, "Give 1 to %d questions of up to 300 characters." % BENCH_MAX_Q)
+        if PROTECTED.match(agent_key):
+            raise HTTPException(403, "This agent is managed by hand and cannot be tested here.")
+        with tenant_session(None, "techdeva_admin") as cur:
+            if agent_key not in {a["agent_key"] for a in _agents(cur)}:
+                raise HTTPException(404, "No such agent.")
+            model = None
+            if key_id:
+                row = _get(cur, key_id)
+                if not _usable(row):
+                    raise HTTPException(409, "That key cannot run an agent (off, refused, or no model chosen).")
+                model = row["model"] if row["provider"] != "gemini" else "(agent's Gemini chain)"
+            cur.execute("SELECT 1 FROM ai_model_tests WHERE agent_key = %s AND status IN ('pending','running')", (agent_key,))
+            if cur.fetchone():
+                raise HTTPException(409, "A test for this agent is already waiting or running.")
+            cur.execute("""INSERT INTO ai_model_tests (agent_key, key_id, model, questions, total, requested_by)
+                           VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+                        (agent_key, key_id, model or "(platform Gemini key)", json.dumps(qs), len(qs), str(uid) if uid else None))
+            tid = str(cur.fetchone()["id"])
+            record(cur, action="techdeva.ai_key.bench", resource="ai_model_tests", resource_id=tid,
+                   actor=str(uid) if uid else None, status="ok",
+                   detail={"agent": agent_key, "key_id": key_id, "questions": len(qs)}, tenant_id=None)
+        return {"id": tid, "status": "pending"}
+
+    @router.put("/techdeva/ai-key-defaults")
+    def set_defaults(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                     authorization: str | None = Header(None),
+                     td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Which key paying and trial businesses' agents should run on ("" = the platform key)."""
+        uid = _admin(x_tenant_id, x_role, authorization, td_session)
+        with tenant_session(None, "techdeva_admin") as cur:
+            out = {}
+            for group, setting in (("paying", "ai_key_default_paying"), ("trial", "ai_key_default_trial")):
+                if group not in body:
+                    continue
+                kid = body.get(group) or ""
+                if kid:
+                    row = _get(cur, kid)
+                    if not _usable(row):
+                        raise HTTPException(409, "%s cannot run an agent (off, refused, or no model chosen)." % row["label"])
+                cur.execute("""INSERT INTO platform_settings (key, value) VALUES (%s, %s)
+                               ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""", (setting, kid))
+                out[group] = kid or None
+            record(cur, action="techdeva.ai_key.defaults", resource="platform_settings", resource_id="ai_key_default",
+                   actor=str(uid) if uid else None, status="ok", detail=out, tenant_id=None)
+        return {"ok": True, "defaults": out}
+
+    @router.post("/techdeva/ai-key-defaults/apply")
+    def apply_defaults(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                       authorization: str | None = Header(None),
+                       td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Put every paying (or trial) business's agent on its group's default key.
+        A key that has not fully passed the bench in the last 7 days is refused:
+        one bad key must not take every agent of a group down at once."""
+        uid = _admin(x_tenant_id, x_role, authorization, td_session)
+        group = str(body.get("group") or "")
+        if group not in ("paying", "trial"):
+            raise HTTPException(400, "Choose paying or trial.")
+        with tenant_session(None, "techdeva_admin") as cur:
+            kid = _defaults(cur)[group]
+            if kid:
+                row = _get(cur, kid)
+                if not _usable(row):
+                    raise HTTPException(409, "The %s default key cannot run an agent now." % group)
+            if not _passed_bench(cur, kid):
+                raise HTTPException(409, "Run the test bench with this key first (all answers must pass, within 7 days). "
+                                         "Then apply it to every %s agent." % group)
+            cur.execute("SELECT agent_key, key_id, status FROM ai_key_assignments")
+            cur_assign = {r["agent_key"]: r for r in cur.fetchall()}
+            moved = []
+            for a in _agents(cur):
+                if a["paying"] != (group == "paying"):
+                    continue
+                c = cur_assign.get(a["agent_key"])
+                if c and str(c["key_id"] or "") == str(kid or "") and c["status"] in ("pending", "applied"):
+                    continue
+                if not c and not kid:
+                    continue                                    # already on the platform key
+                cur.execute("""INSERT INTO ai_key_assignments (agent_key, key_id, status, requested_by, requested_at, applied_at, error)
+                               VALUES (%s, %s, 'pending', %s, now(), NULL, NULL)
+                               ON CONFLICT (agent_key) DO UPDATE SET key_id = EXCLUDED.key_id, status = 'pending',
+                                     requested_by = EXCLUDED.requested_by, requested_at = now(), applied_at = NULL, error = NULL""",
+                            (a["agent_key"], kid, str(uid) if uid else None))
+                moved.append(a["agent_key"])
+            record(cur, action="techdeva.ai_key.apply_defaults", resource="ai_key_assignments", resource_id=group,
+                   actor=str(uid) if uid else None, status="ok", detail={"group": group, "key_id": kid, "agents": moved},
+                   tenant_id=None)
+        return {"group": group, "agents": moved}
+
     return router
 
 
@@ -495,6 +637,41 @@ def _cli(argv):
             fields = (r["agent_key"], value[-4:], provider, base, model, value)
             if value and all("\t" not in f and "\n" not in f and f for f in fields):
                 sys.stdout.write("\t".join(fields) + "\n")
+        return 0
+    if cmd == "bench-next":
+        # one queued bench run, as a JSON line for model_bench.py (contains the key: pipe only)
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("""UPDATE ai_model_tests SET status = 'failed', error = 'stopped (took too long)', finished_at = now()
+                            WHERE status = 'running' AND requested_at < now() - interval '45 minutes'""")
+            cur.execute("""SELECT t.id, t.agent_key, t.questions, k.provider, k.base_url, k.model, k.secret, k.status AS kstatus
+                             FROM ai_model_tests t LEFT JOIN ai_keys k ON k.id = t.key_id
+                            WHERE t.status = 'pending' ORDER BY t.requested_at LIMIT 1 FOR UPDATE OF t SKIP LOCKED""")
+            r = cur.fetchone()
+            if not r:
+                return 0
+            r = dict(r)
+            cur.execute("UPDATE ai_model_tests SET status = 'running' WHERE id = %s", (r["id"],))
+        if PROTECTED.match(r["agent_key"]):
+            return 0
+        if r["provider"] is None:
+            job = {"provider": "gemini", "base_url": None, "model": None,
+                   "key": (os.environ.get("GEMINI_API_KEY") or "").strip().strip("'\"")}
+        else:
+            job = {"provider": r["provider"], "base_url": r["base_url"],
+                   "model": r["model"] if r["provider"] != "gemini" else None, "key": _open(r)}
+        job.update({"id": str(r["id"]), "agent_key": r["agent_key"], "questions": r["questions"]})
+        sys.stdout.write(json.dumps(job) + "\n")
+        return 0
+    if cmd == "bench-done":
+        tid = argv[2]
+        data = json.loads(sys.stdin.read() or "{}")
+        results = data.get("results") or []
+        passed = sum(1 for x in results if x.get("ok"))
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("""UPDATE ai_model_tests SET status = %s, results = %s, passed = %s, total = %s, error = %s,
+                                  finished_at = now() WHERE id = %s""",
+                        ("failed" if data.get("error") else "done", json.dumps(results), passed, len(results) or None,
+                         (data.get("error") or None) and str(data["error"])[:500], tid))
         return 0
     if cmd == "applied":
         agent, result = argv[2], argv[3]
