@@ -10,6 +10,7 @@ integrations.credentials['pages'].
 """
 import base64
 import binascii
+import datetime as _dt
 import json
 import os
 import re
@@ -239,9 +240,9 @@ def _publish_facebook(page, caption, images):
 
 
 IG_DAILY_DEFAULT = 5
-IG_RESTRICTED = ("Instagram has restricted this account for now (it saw too much activity). Open the Instagram "
-                 "app > notifications or Help > Support requests and press Request review, or wait a few days. "
-                 "Facebook posts still go out.")
+IG_RESTRICTED = ("Instagram is blocking posts with captions from apps on this account for now (posting by hand "
+                 "in the Instagram app still works). TechDeva pauses Instagram for a while so the block is not made "
+                 "longer. Facebook posts still go out.")
 
 
 def ig_daily_limit() -> int:
@@ -264,8 +265,51 @@ def ig_posted_today(cur) -> int:
     return int((cur.fetchone() or {}).get("n") or 0)
 
 
+PKT = _dt.timezone(_dt.timedelta(hours=5))   # Asia/Karachi, as LOCAL_OFFSET
+
+
+def _ig_block_hours() -> int:
+    try:
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("SELECT value FROM platform_settings WHERE key = 'ig_block_hours'")
+            r = cur.fetchone()
+        return max(1, int((r or {}).get("value") or 48))
+    except Exception:  # noqa: BLE001
+        return 48
+
+
+def ig_mark_blocked(tid) -> None:
+    """Instagram answered 2207051: pause this business's Instagram posting for a while."""
+    try:
+        with tenant_session(tid, "owner") as cur:
+            cur.execute("""INSERT INTO tenant_config (tenant_id, marketing)
+                           VALUES (current_tenant(), jsonb_build_object('ig_blocked_at', to_jsonb(now()),
+                                   'ig_blocked_until', to_jsonb(now() + make_interval(hours => %s))))
+                           ON CONFLICT (tenant_id) DO UPDATE SET marketing = COALESCE(tenant_config.marketing, '{}'::jsonb)
+                               || EXCLUDED.marketing""", (_ig_block_hours(),))
+            record(cur, action="social.instagram_paused", resource="tenant_config", resource_id=str(tid),
+                   actor="system", actor_type="system", status="ok", detail={"hours": _ig_block_hours()},
+                   error="Instagram 2207051", tenant_id=tid)
+    except Exception as e:  # noqa: BLE001
+        print("[social] could not pause Instagram for %s: %s" % (tid, e), flush=True)
+
+
+def ig_blocked_until(tid):
+    """When this business's Instagram pause ends (a datetime), or None."""
+    with tenant_session(tid, "owner") as cur:
+        cur.execute("""SELECT (marketing ->> 'ig_blocked_until')::timestamptz AS u FROM tenant_config
+                        WHERE tenant_id = current_tenant() AND (marketing ->> 'ig_blocked_until')::timestamptz > now()""")
+        r = cur.fetchone()
+    return (r or {}).get("u")
+
+
 def ig_over_limit(tid) -> str | None:
     """The reason Instagram must wait, or None."""
+    until = ig_blocked_until(tid)
+    if until:
+        return ("Instagram is blocking posts with captions from apps on this account (code 2207051), so TechDeva "
+                "waits until %s before trying again: each try makes the block longer. Posting by hand in the "
+                "Instagram app still works. Facebook posts still go out." % until.astimezone(PKT).strftime("%d %b %H:%M"))
     limit = ig_daily_limit()
     with tenant_session(tid, "owner") as cur:
         n = ig_posted_today(cur)
@@ -380,6 +424,8 @@ def publish_post(tid, role, post_id, actor, claim_from, page_id=None):
             wait = ig_over_limit(tid)
             results["instagram"] = {"ok": False, "error": wait} if wait else _publish_instagram(page, post["caption"], images)
     if (results.get("instagram") or {}).get("error"):
+        if "2207051" in str(results["instagram"]["error"]):
+            ig_mark_blocked(tid)
         results["instagram"]["error"] = ig_explain(results["instagram"]["error"])
     oks = [r["ok"] for r in results.values()]
     status = "published" if all(oks) else ("partial" if any(oks) else "failed")

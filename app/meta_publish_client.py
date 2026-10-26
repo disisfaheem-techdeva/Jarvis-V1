@@ -66,6 +66,9 @@ def _classify(status: int, body: dict) -> GraphError:
     msg = e.get("error_user_msg") or e.get("message") or "Meta answered %s" % status
     tag = "/".join(str(x) for x in (code, e.get("error_subcode")) if x)
     text = (msg + (" (code %s)" % tag if tag else ""))[:300]
+    if str(e.get("error_subcode")) == "2207051":
+        # Instagram blocks this account's posts from apps: retrying makes it longer
+        return GraphError("restricted", text)
     if status == 401 or code in AUTH_CODES or e.get("type") == "OAuthException" and code in (None, 190):
         return GraphError("auth", text)
     if status >= 500 or status == 429 or code in TRANSIENT_CODES or e.get("is_transient"):

@@ -109,13 +109,14 @@ def publish_one(tid, post_id) -> dict:
     if not post:
         return {"status": "skipped", "reason": "not due, not approved, already taken or already published", "events": []}
     if post["platform"] == "instagram" and meta.mode() == "live":
-        from ..social import ig_over_limit
+        from ..social import ig_blocked_until, ig_over_limit
         wait = ig_over_limit(tid)
         if wait:
+            until = ig_blocked_until(tid)
             with tenant_session(tid, "owner") as cur:
                 cur.execute("""UPDATE scheduled_posts SET status = 'approved', attempts = GREATEST(attempts - 1, 0),
-                                      last_error = %s, retry_after = now() + interval '3 hours', updated_at = now()
-                                WHERE id = %s""", (wait, post["id"]))
+                                      last_error = %s, retry_after = COALESCE(%s, now() + interval '3 hours'),
+                                      updated_at = now() WHERE id = %s""", (wait, until, post["id"]))
             return {"status": "waiting", "error": wait, "events": []}
     if post["platform"] in ("facebook", "instagram") and meta.mode() == "live" and not camp["page"]:
         outcome = meta.Outcome(False, kind="auth", message="No connected Facebook Page for this campaign.")
@@ -132,6 +133,15 @@ def publish_one(tid, post_id) -> dict:
                 "external_post_id": outcome.external_id, "service_tag": post["service_tag"],
                 "test_mode": outcome.external_id.startswith("stub:")}})
             status = "published"
+        elif outcome.kind == "restricted":
+            # Instagram 2207051: the business's Instagram pauses; this post waits for the end of the pause
+            from ..social import IG_RESTRICTED, ig_blocked_until, ig_mark_blocked
+            ig_mark_blocked(tid)
+            cur.execute("""UPDATE scheduled_posts SET status = 'approved', attempts = GREATEST(attempts - 1, 0),
+                                  last_error = %s, retry_after = COALESCE(%s, now() + interval '48 hours'),
+                                  updated_at = now() WHERE id = %s""",
+                        (IG_RESTRICTED + " (" + outcome.message[:120] + ")", ig_blocked_until(tid), post["id"]))
+            status = "waiting"
         elif outcome.kind == "transient" and post["attempts"] < MAX_ATTEMPTS:
             wait = BACKOFF_MIN[min(post["attempts"], len(BACKOFF_MIN)) - 1]
             cur.execute("""UPDATE scheduled_posts SET status = 'approved', last_error = %s,
