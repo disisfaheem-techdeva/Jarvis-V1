@@ -622,6 +622,26 @@ def auto_balance():
             record(cur, action="techdeva.ai_key.auto_assign", resource="ai_key_assignments", resource_id=ak,
                    actor="automatic", actor_type="system", status="ok", detail={"agent": ak, "key": label}, tenant_id=None)
             out.append("%s -> %s" % (ak, label))
+        # even out: when one tested key carries 2+ agents more than another, move one
+        # agent per run (each move restarts it, so never all at once)
+        if len(load) > 1 and max(load.values()) - min(load.values()) >= 2:
+            busy, idle = max(load, key=load.get), min(load, key=load.get)
+            cur.execute("""SELECT a.agent_key FROM ai_key_assignments a
+                            WHERE a.key_id = %s AND a.status = 'applied'
+                              AND NOT EXISTS (SELECT 1 FROM ai_key_switches s WHERE s.agent_key = a.agent_key
+                                                AND s.at > now() - interval '30 minutes')
+                              AND a.requested_at < now() - interval '10 minutes'
+                            ORDER BY a.applied_at DESC LIMIT 1""", (busy,))
+            r = cur.fetchone()
+            if r and r["agent_key"] in {a["agent_key"] for a in agents}:
+                cur.execute("""UPDATE ai_key_assignments SET key_id = %s, model = NULL, status = 'pending',
+                                      requested_by = 'automatic', requested_at = now(), applied_at = NULL, error = NULL
+                                WHERE agent_key = %s""", (idle, r["agent_key"]))
+                label = next(k["label"] for k in ready if str(k["id"]) == idle)
+                record(cur, action="techdeva.ai_key.auto_assign", resource="ai_key_assignments",
+                       resource_id=r["agent_key"], actor="automatic", actor_type="system", status="ok",
+                       detail={"agent": r["agent_key"], "key": label, "why": "even out the keys"}, tenant_id=None)
+                out.append("%s -> %s (even out)" % (r["agent_key"], label))
     return out
 
 
