@@ -20,6 +20,7 @@ import collections
 import datetime
 import glob
 import json
+import os
 import re
 import sys
 
@@ -30,9 +31,11 @@ HTTP = re.compile(r"^(\d{4}-\d\d-\d\d) .*(?:Streaming failed before delivery|Tit
 
 
 def last4(agent):
+    # an agent switched to another provider by the API Manager runs on TD_AI_KEY
+    var = "TD_AI_KEY=" if os.path.exists("/docker/hermes-%s/ai-key-gemini-model.json" % agent) else "GEMINI_API_KEY="
     try:
         for line in open("/docker/hermes-%s/agent.env" % agent, encoding="utf-8"):
-            if line.startswith("GEMINI_API_KEY="):
+            if line.startswith(var):
                 v = line.split("=", 1)[1].strip().strip("'\"")
                 return v[-4:] if v else None
     except OSError:

@@ -27,6 +27,7 @@ it is time to buy a second server (SERVER_ALERT_AT, default 8).
 """
 import datetime as _dt
 import json
+import re
 import time
 
 from fastapi import APIRouter, Body, Cookie, Header, HTTPException
@@ -141,6 +142,60 @@ def delete_business(tid, by="retention"):
                    actor_type="system", status="ok", detail={"business": c["name"], "rows": sum(counts.values()),
                                                            "agents": keys}, error=None, tenant_id=home["value"])
     print("[retention] deleted %s (%s rows, agents %s)" % (tid, sum(counts.values()), keys), flush=True)
+    return row
+
+
+FOUNDER_KEEP_AGENTS = re.compile(r"^(irfan$|clinic$|salon$|hermes-workspace|workspace|.*ofsd|instant-grill)")
+
+
+def founder_delete(tid, confirm, by):
+    """The founder's Delete in the console (Rafay, 26 Oct 2026): delete one
+    business now, whatever its trial dates, the same way the retention run
+    does (every row, its sign-up, then its WhatsApp agents through the
+    provisioning job). Refused for a paying (active) business, TechDeva's own,
+    a hand-built or workspace agent's business and Instant Grill; `confirm`
+    must be the business name. Returns the deletion record."""
+    with tenant_session(None, "techdeva_admin") as cur:
+        cur.execute("SELECT id, name, status::text AS status, trial_ends_at FROM tenants WHERE id::text = %s FOR UPDATE",
+                    (str(tid),))
+        t = cur.fetchone()
+        if not t:
+            raise HTTPException(404, "That business is not there.")
+        name = t["name"] or ""
+        if (confirm or "").strip().lower() != name.strip().lower():
+            raise HTTPException(400, "Type the business name exactly to delete it.")
+        cur.execute("SELECT value FROM platform_settings WHERE key = 'home_tenant_id'")
+        home = cur.fetchone()
+        home = home["value"] if home else None
+        if str(t["id"]) == home:
+            raise HTTPException(403, "This is TechDeva's own business; it cannot be deleted.")
+        if t["status"] == "active":
+            raise HTTPException(409, "%s is a paying client (active). A paying client is not deleted from here." % name)
+        cur.execute("SELECT DISTINCT agent_key FROM whatsapp_connections WHERE tenant_id = %s AND agent_key IS NOT NULL "
+                    "UNION SELECT DISTINCT agent_key FROM agent_requests WHERE tenant_id = %s AND agent_key IS NOT NULL",
+                    (str(tid), str(tid)))
+        keys = sorted({r["agent_key"] for r in cur.fetchall() if r["agent_key"]})
+        if re.search(r"instant\s*-?\s*grill", name, re.I) or any(FOUNDER_KEEP_AGENTS.match(k) for k in keys):
+            raise HTTPException(403, "%s has an agent that is managed by hand; it is not deleted from here." % name)
+        counts = _counts(cur, str(tid))
+        cur.execute("DELETE FROM signups WHERE tenant_id = %s", (str(tid),))
+        if cur.rowcount:
+            counts["signups"] = cur.rowcount
+        cur.execute("DELETE FROM tenants WHERE id = %s", (str(tid),))
+        if keys:
+            cur.execute("DELETE FROM ai_key_assignments WHERE agent_key = ANY(%s)", (keys,))
+            cur.execute("DELETE FROM ai_agent_live WHERE agent_key = ANY(%s)", (keys,))
+        cur.execute("""INSERT INTO tenant_deletions (tenant_id, business_name, trial_ended_at, rows_deleted, agent_keys,
+                                                     agents_removed_at)
+                       VALUES (%s, %s, %s, %s::jsonb, %s, CASE WHEN %s THEN now() END) RETURNING *""",
+                    (str(tid), name, t["trial_ends_at"], json.dumps(counts), keys, not keys))
+        row = dict(cur.fetchone())
+        if home:
+            record(cur, action="founder.client.deleted", resource="tenants", resource_id=str(tid), actor=str(by or "founder"),
+                   actor_type="human", status="ok", detail={"business": name, "status": t["status"],
+                                                            "rows": sum(counts.values()), "agents": keys},
+                   error=None, tenant_id=home)
+    print("[retention] founder deleted %s (%s rows, agents %s)" % (tid, sum(counts.values()), keys), flush=True)
     return row
 
 
@@ -280,6 +335,16 @@ def make_retention_router():
                    actor=str(uid or "founder"), actor_type="human", status="ok",
                    detail={"server_alert_at": at}, error=None)
         return {"ok": True, "server_alert_at": at}
+
+    @router.delete("/techdeva/clients/{tenant_id}")
+    def founder_delete_route(tenant_id: str, body: dict = Body(...), x_tenant_id: str | None = Header(None),
+                             x_role: str | None = Header(None), authorization: str | None = Header(None),
+                             td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Delete a business now (founder console > Clients > Delete). Cannot be undone."""
+        uid = _admin(x_tenant_id, x_role, authorization, td_session)
+        row = founder_delete(tenant_id, str(body.get("confirm") or ""), uid)
+        return {"ok": True, "business": row["business_name"], "rows": sum((row["rows_deleted"] or {}).values()),
+                "agents": row["agent_keys"]}
 
     # ---- the server's provisioning job removes deleted businesses' agents
     @router.get("/techdeva/retention/agent-removals")

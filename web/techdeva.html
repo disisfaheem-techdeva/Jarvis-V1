@@ -189,7 +189,7 @@ const TITLES = {jarvis:['Jarvis','Pick a client, then say or type what to change
   invoices:['Invoices out','Invoices TechDeva has issued to clients, and their status.'],
   health:['Health','Queues, workers and the AI chain.'],
   incidents:['Incidents','Anything the monitor has opened.'],
-  apikeys:['API Manager','AI keys, which WhatsApp agent runs on which key, and each agent\'s calls and limit hits. Keys are never shown, only their last 4 characters.'],
+  apikeys:['API Manager','AI keys for any provider, which WhatsApp agent runs on which key and model, and each agent\'s calls and limit hits. Keys are never shown, only their last 4 characters.'],
   aiusage:['AI usage & API log','AI credits each client used this month, and every AI call (who, which agent, model, time, result; never the text).']};
 
 async function api(path, opts){
@@ -316,6 +316,15 @@ function wireApiKeys(){
   const msg = document.getElementById('apk-msg');
   const reload = () => { D.apk = undefined; if (current() === 'apikeys') paint(); };
   const say = (t, bad) => { if (msg) { msg.textContent = t; msg.style.color = bad ? 'var(--danger)' : ''; } };
+  const provs = (D.apk && D.apk.providers) || [];
+  const prov = document.getElementById('apk-prov');
+  if (prov) prov.onchange = () => {
+    const p = provs.find(x => x.key === prov.value) || {};
+    document.getElementById('apk-base-wrap').style.display = prov.value === 'custom' ? '' : 'none';
+    document.getElementById('apk-model').placeholder = p.model || (prov.value === 'gemini' ? '' : 'model name');
+  };
+  const detail = r => { const t = r.detail || {}; return [t.http ? 'HTTP ' + t.http : '', t.ms != null ? t.ms + ' ms' : '',
+    t.models != null ? t.models + ' models' : '', t.reply != null ? 'replied "' + t.reply + '"' : ''].filter(Boolean).join(' · '); };
   const form = document.getElementById('apk-add');
   if (form) form.addEventListener('submit', async e => {
     e.preventDefault();
@@ -323,18 +332,26 @@ function wireApiKeys(){
     go.disabled = true; go.textContent = 'Saving and testing...';
     try {
       const r = await api('/techdeva/api-keys', {method: 'POST', body: JSON.stringify({
-        provider: document.getElementById('apk-prov').value, label: document.getElementById('apk-label').value,
-        owner_note: document.getElementById('apk-note').value, key: keyEl.value})});
+        provider: prov.value, label: document.getElementById('apk-label').value,
+        owner_note: document.getElementById('apk-note').value, base_url: document.getElementById('apk-base').value,
+        model: document.getElementById('apk-model').value, key: keyEl.value})});
       keyEl.value = '';
-      say(r.status === 'ok' ? 'Saved key …' + r.last4 + ' and it works.' : 'Saved key …' + r.last4 + ', but the test said: ' + (r.error || r.status), r.status !== 'ok');
-      setTimeout(reload, 1500);
+      say(r.status === 'ok' ? 'Saved key …' + r.last4 + ' and it works (' + detail(r) + ').' : 'Saved key …' + r.last4 + ', but the test said: ' + (r.error || r.status) + (detail(r) ? ' (' + detail(r) + ')' : ''), r.status !== 'ok');
+      setTimeout(reload, 2500);
     } catch (ex) { say(ex.message, true); go.disabled = false; go.textContent = 'Save and test'; }
   });
-  view.querySelectorAll('[data-apktest]').forEach(b => b.onclick = async () => {
-    b.disabled = true; b.textContent = 'Testing...';
-    try { await api('/techdeva/api-keys/' + b.dataset.apktest + '/test', {method: 'POST'}); } catch (ex) { alert(ex.message); }
+  const run = (attr, path, busy) => view.querySelectorAll('[data-' + attr + ']').forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = busy;
+    try { await api('/techdeva/api-keys/' + b.dataset[attr] + path, {method: 'POST'}); } catch (ex) { alert(ex.message); }
     reload();
   });
+  run('apktest', '/test', 'Testing...'); run('apktry', '/try', 'Asking...');
+  view.querySelectorAll('[data-apkmodel]').forEach(i => i.addEventListener('change', async () => {
+    try { const r = await api('/techdeva/api-keys/' + i.dataset.apkmodel, {method: 'PUT', body: JSON.stringify({model: i.value.trim()})});
+          if (r.reapply && r.reapply.length) alert('Saved. ' + r.reapply.join(', ') + ' will switch to this model within a minute.'); }
+    catch (ex) { alert(ex.message); }
+    reload();
+  }));
   const toggle = (attr, off) => view.querySelectorAll('[data-' + attr + ']').forEach(b => b.onclick = async () => {
     b.disabled = true;
     try { await api('/techdeva/api-keys/' + b.dataset[attr], {method: 'PUT', body: JSON.stringify({disabled: off})}); } catch (ex) { alert(ex.message); }
@@ -354,6 +371,8 @@ function wireApiKeys(){
     catch (ex) { alert(ex.message); }
     reload();
   });
+  const pay = document.getElementById('apk-paying');
+  if (pay) pay.onchange = () => { D.apkPaying = pay.checked; paint(); };
   /* While a choice is being applied, look again so "applying" turns into "applied". */
   if (D.apk && (D.apk.agents || []).some(a => a.assignment && a.assignment.status === 'pending')) {
     clearTimeout(window.__apkPoll); window.__apkPoll = setTimeout(reload, 20000);
@@ -553,7 +572,9 @@ function clientRows(rows){
   return rows.map(c => {
     const paidThis = Number(c.paid_this_month)||0, fee = Number(c.monthly_fee)||0;
     const owes = fee > 0 && paidThis <= 0 && c.status === 'active';
-    return '<tr><td><div class="name">' + esc(c.name || 'Unnamed') + '</div>' +
+    const canDel = c.status !== 'active';
+    return '<tr><td>' + (canDel ? '<label style="float:left;margin:2px 8px 0 0"><input type="checkbox" data-csel="' + esc(c.id) + '" data-cname="' + esc(c.name || '') + '" aria-label="Select ' + esc(c.name || 'business') + '"></label>' : '') +
+      '<div class="name">' + esc(c.name || 'Unnamed') + '</div>' +
       '<div class="k-note">' + esc(c.industry || '') + '</div>' +
       '<div class="k-note">' + (c.subdomain ? '<a href="https://' + esc(c.subdomain) + '.techdeva.net/login" target="_blank" style="color:var(--gold)">' + esc(c.subdomain) + '.techdeva.net</a> ' : '') +
       '<a href="#" data-sub="' + esc(c.id) + '" data-cur="' + esc(c.subdomain || '') + '" style="color:var(--muted)">' + (c.subdomain ? 'change' : 'give it an address') + '</a></div></td>' +
@@ -570,70 +591,99 @@ function clientRows(rows){
       '<td><div class="row"><button class="tiny" data-pay="' + esc(c.id) + '">Payment</button>' +
       (c.status === 'trial' || c.status === 'paused' ? '<button class="tiny" data-trial="' + esc(c.id) + '">+7 days trial</button>' : '') +
       (c.status !== 'active' ? '<button class="tiny" data-activate="' + esc(c.id) + '">Mark paying</button>' : '') +
-      '<button class="tiny" data-hide="' + esc(c.id) + '">Hide</button></div>' +
+      '<button class="tiny" data-hide="' + esc(c.id) + '">Hide</button>' +
+      (canDel ? '<button class="tiny" data-cdel="' + esc(c.id) + '" data-cname="' + esc(c.name || '') + '" style="color:var(--danger)">Delete</button>' : '') + '</div>' +
       '<div class="pay" id="pay-' + esc(c.id) + '"><input placeholder="Amount" data-amt="' + esc(c.id) +
       '"><button class="tiny primary" data-save="' + esc(c.id) + '">Record</button></div></td></tr>';
   });
 }
 
 const VIEWS = {
-  /* API Manager (app/ai_keys.py): AI keys, which WhatsApp agent runs on which,
-     and each agent's calls and rate-limit hits. A key is never shown, only its
-     last 4 characters; a choice is applied by ai-keys-sync.sh within a minute. */
+  /* API Manager (app/ai_keys.py): AI keys for any provider (Gemini, Groq,
+     OpenRouter, ..., or a custom OpenAI-compatible one), which WhatsApp agent
+     runs on which key and model, and each agent's calls and rate-limit hits.
+     A key is never shown, only its last 4 characters; a choice is applied by
+     ai-keys-sync.sh within a minute. */
   apikeys(){
     if (D.apk === undefined) { D.apk = null; api('/techdeva/api-keys').then(d => { D.apk = d; if (current() === 'apikeys') paint(); }).catch(e => { D.apk = {error: e.message}; if (current() === 'apikeys') paint(); }); }
     const d = D.apk, nf = x => Number(x || 0).toLocaleString('en-US');
     if (!d) return '<div class="empty">Reading the API keys...</div>';
     if (d.error) return '<div class="empty">Could not read the API keys: ' + esc(d.error) + '</div>';
-    const keys = d.keys || [], agents = d.agents || [];
+    const keys = d.keys || [], provs = d.providers || [], payOnly = !!D.apkPaying;
+    const agents = (d.agents || []).filter(a => !payOnly || a.paying);
+    const pname = p => { const x = provs.find(v => v.key === p); return x ? x.label : p; };
     const sum = (list, part, f) => list.reduce((n, a) => n + ((a[part] || {})[f] || 0), 0);
-    const tag = s => '<span class="aiu-tag' + (s === 'ok' ? '' : (s === 'untested' || s === 'pending') ? ' warn' : ' bad') + '">' +
+    const tag = s => '<span class="aiu-tag' + (s === 'ok' || s === 'applied' ? '' : (s === 'untested' || s === 'pending') ? ' warn' : ' bad') + '">' +
       esc({ok: 'working', untested: 'not tested', rate_limited: 'limit reached', invalid: 'refused', error: 'error', disabled: 'off', pending: 'applying', applied: 'applied', failed: 'failed'}[s] || s) + '</span>';
     const plat = d.platform_key_last4 ? '…' + esc(d.platform_key_last4) : 'none';
-    const usable = keys.filter(k => (d.agent_providers || []).indexOf(k.provider) >= 0 && k.status !== 'disabled' && k.status !== 'invalid');
-    const keyName = l4 => { const k = keys.find(x => x.last4 === l4); return k ? esc(k.label) + ' …' + esc(l4) : (l4 && l4 === d.platform_key_last4 ? 'Platform key …' + esc(l4) : (l4 ? '…' + esc(l4) : '—')); };
+    const usable = keys.filter(k => k.status !== 'disabled' && k.status !== 'invalid' && (k.provider === 'gemini' || (k.model && k.base_url)));
+    const keyName = l4 => { const k = keys.find(x => x.last4 === l4); return k ? esc(k.label) + ' <span class="sub">' + esc(pname(k.provider)) + (k.model ? ' · ' + esc(k.model) : '') + ' …' + esc(l4) + '</span>' : (l4 && l4 === d.platform_key_last4 ? 'Platform key …' + esc(l4) : (l4 ? '…' + esc(l4) : '—')); };
     const state = a => { const s = a.assignment; if (!s) return '<span class="sub">platform default</span>';
       return tag(s.status) + ' <span class="sub">' + esc(when(s.status === 'applied' ? s.applied_at : s.requested_at)) + (s.error ? ' · ' + esc(s.error) : '') + '</span>'; };
+    const result = k => { const t = k.test_detail; if (!t) return '<span class="sub">not tested yet</span>';
+      const head = t.http ? 'HTTP ' + t.http : 'no answer';
+      const bits = t.kind === 'reply'
+        ? [head, nf(t.ms) + ' ms', t.reply != null ? 'replied "' + esc(t.reply) + '"' : '', t.model ? esc(t.model) : '']
+        : [head, nf(t.ms) + ' ms', t.models != null ? nf(t.models) + ' models' : '',
+           t.model_listed === true ? 'model listed' : t.model_listed === false ? '<b style="color:var(--danger)">model not listed</b>' : ''];
+      return '<div class="sub">' + (t.kind === 'reply' ? 'Reply test: ' : 'Key test: ') + bits.filter(Boolean).join(' · ') + '</div>' +
+        '<div class="sub">' + esc(when(k.last_test_at)) + '</div>'; };
+    const plan = a => '<span class="aiu-tag' + (a.paying ? '' : ' warn') + '">' + esc(a.paying ? 'paying' : a.tenant_status) + '</span>' +
+      (a.plan_name ? ' <span class="sub">' + esc(a.plan_name) + (a.monthly_fee ? ' · ' + nf(a.monthly_fee) : '') + '</span>' : '');
+    const provOpts = provs.map(p => '<option value="' + esc(p.key) + '">' + esc(p.label) + '</option>').join('');
     return (d.encryption ? '' : '<div class="empty" style="border-color:var(--danger)">Key storage is off: CREDENTIAL_ENCRYPTION_KEY is not set, so no key can be saved.</div>') +
       '<div class="grid">' +
         kpi('Keys saved', nf(keys.length), nf(keys.filter(k => k.status === 'ok').length) + ' working') +
-        kpi('WhatsApp agents', nf(agents.length), nf(agents.filter(a => a.live && a.live.running).length) + ' running') +
-        kpi('Model calls today', nf(sum(agents, 'today', 'ok')), 'answered by a model, all agents') +
-        kpi('Limit hits today', nf(sum(agents, 'today', 'rate_limited')), nf(sum(agents, 'today', 'overloaded')) + ' overloaded (503)', sum(agents, 'today', 'rate_limited') ? 'warn' : '') +
+        kpi('WhatsApp agents', nf((d.agents || []).length), nf((d.agents || []).filter(a => a.paying).length) + ' of paying clients') +
+        kpi('Model calls today', nf(sum(d.agents || [], 'today', 'ok')), 'answered by a model, all agents') +
+        kpi('Limit hits today', nf(sum(d.agents || [], 'today', 'rate_limited')), nf(sum(d.agents || [], 'today', 'overloaded')) + ' overloaded (503)', sum(d.agents || [], 'today', 'rate_limited') ? 'warn' : '') +
         kpi('Platform key', plat, 'GEMINI_API_KEY in the server .env') + '</div>' +
       '<section><h2>Add a key</h2><div class="card"><form id="apk-add" style="display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));align-items:end">' +
-        '<label class="sub">Provider<select id="apk-prov" class="fee" style="width:100%;text-align:left">' + (d.providers || ['gemini']).map(p => '<option value="' + esc(p) + '">' + esc(p === 'gemini' ? 'Google Gemini' : p) + '</option>').join('') + '</select></label>' +
+        '<label class="sub">Provider<select id="apk-prov" class="fee" style="width:100%;text-align:left">' + provOpts + '</select></label>' +
         '<label class="sub">Name<input id="apk-label" class="fee" style="width:100%;text-align:left" maxlength="80" placeholder="e.g. Ali - Google" required></label>' +
-        '<label class="sub">Note (optional)<input id="apk-note" class="fee" style="width:100%;text-align:left" maxlength="200" placeholder="whose account, which project"></label>' +
+        '<label class="sub">Note (optional)<input id="apk-note" class="fee" style="width:100%;text-align:left" maxlength="200" placeholder="whose account, paid or free"></label>' +
+        '<label class="sub" id="apk-base-wrap" style="display:none">Base URL<input id="apk-base" class="fee" style="width:100%;text-align:left" maxlength="300" placeholder="https://api.example.com/v1" spellcheck="false"></label>' +
+        '<label class="sub">Model<input id="apk-model" class="fee" style="width:100%;text-align:left" maxlength="120" spellcheck="false" placeholder="' + esc((provs[0] || {}).model || '') + '"></label>' +
         '<label class="sub">API key<input id="apk-key" class="fee" type="password" autocomplete="off" spellcheck="false" style="width:100%;text-align:left" required></label>' +
         '<button class="primary" type="submit" id="apk-go">Save and test</button></form>' +
-        '<div class="sub" id="apk-msg" role="status" style="margin-top:8px">The key is encrypted on the server and never shown again, only its last 4 characters. Saving runs one free test (a model list, no quota used).</div></div></section>' +
+        '<div class="sub" id="apk-msg" role="status" style="margin-top:8px">The key is encrypted on the server and never shown again, only its last 4 characters. Saving runs one free test (the provider\'s model list, no quota used). ' +
+        'Custom: any OpenAI-compatible provider; give its base URL (the part before /chat/completions). Empty model = the provider\'s usual one.</div></div></section>' +
       '<section><h2>Keys</h2><div class="card" style="padding:6px 8px;overflow-x:auto">' +
-      tbl('<th>Name</th><th>Provider</th><th>Key</th><th>Status</th><th>Used by</th><th class="num">Calls 7d</th><th class="num">Limit hits 7d</th><th>Last test</th><th></th>',
-        keys.map(k => '<tr><td class="name">' + esc(k.label) + (k.owner_note ? '<div class="sub">' + esc(k.owner_note) + '</div>' : '') + '</td><td>' + esc(k.provider) + '</td><td>…' + esc(k.last4) + '</td>' +
+      tbl('<th>Name</th><th>Provider</th><th>Model</th><th>Key</th><th>Status</th><th>Last test result</th><th>Agents</th><th class="num">Calls 7d</th><th class="num">Limit hits 7d</th><th></th>',
+        keys.map(k => '<tr><td class="name">' + esc(k.label) + (k.owner_note ? '<div class="sub">' + esc(k.owner_note) + '</div>' : '') + '</td>' +
+          '<td>' + esc(pname(k.provider)) + (k.provider === 'custom' && k.base_url ? '<div class="sub">' + esc(k.base_url) + '</div>' : '') + '</td>' +
+          '<td><input class="fee" style="width:190px;text-align:left" list="apk-ml-' + esc(k.id) + '" data-apkmodel="' + esc(k.id) + '" value="' + esc(k.model || '') + '" placeholder="' + (k.provider === 'gemini' ? 'agent\'s own Gemini chain' : 'choose a model') + '" aria-label="Model for ' + esc(k.label) + '" spellcheck="false">' +
+            '<datalist id="apk-ml-' + esc(k.id) + '">' + (((k.test_detail || {}).sample) || []).map(m => '<option value="' + esc(m) + '">').join('') + '</datalist></td>' +
+          '<td>…' + esc(k.last4) + '</td>' +
           '<td>' + tag(k.status) + (k.last_error ? '<div class="sub">' + esc(k.last_error) + '</div>' : '') + '</td>' +
-          '<td>' + (k.agents.length ? esc(k.agents.join(', ')) : '<span class="sub">no agent</span>') + '</td>' +
-          '<td class="num">' + nf(k.week.ok) + '</td><td class="num">' + nf(k.week.rate_limited) + '</td><td>' + esc(when(k.last_test_at)) + '</td>' +
-          '<td class="row"><button class="tiny" data-apktest="' + esc(k.id) + '">Test</button>' +
+          '<td>' + result(k) + '</td>' +
+          '<td>' + (k.agents.length ? esc(k.agents.join(', ')) : '<span class="sub">running on none</span>') +
+            (k.assigned.filter(x => k.agents.indexOf(x) < 0).length ? '<div class="sub">applying to ' + esc(k.assigned.filter(x => k.agents.indexOf(x) < 0).join(', ')) + '</div>' : '') + '</td>' +
+          '<td class="num">' + nf(k.week.ok) + '</td><td class="num">' + nf(k.week.rate_limited) + '</td>' +
+          '<td class="row"><button class="tiny" data-apktest="' + esc(k.id) + '" title="Model list only, no quota used">Test key</button>' +
+          '<button class="tiny" data-apktry="' + esc(k.id) + '" title="One short reply from the model (uses one request)">Try a reply</button>' +
           (k.status === 'disabled' ? '<button class="tiny" data-apkon="' + esc(k.id) + '">Turn on</button>' : '<button class="tiny" data-apkoff="' + esc(k.id) + '">Turn off</button>') +
           '<button class="tiny" data-apkdel="' + esc(k.id) + '" data-apkname="' + esc(k.label) + '">Delete</button></td></tr>')) +
-      '</div></section>' +
+      '<div class="sub" style="margin-top:6px">Change a model and press Tab to save it; agents on that key get the new model within a minute. Test key checks the key without using quota; Try a reply asks the model for one word and shows how long it took.</div></div></section>' +
       '<section><h2>Which agent uses which key</h2><div class="card" style="padding:6px 8px;overflow-x:auto">' +
-      tbl('<th>Business</th><th>Agent</th><th>WhatsApp</th><th>Running on</th><th>Use this key</th><th>Change</th><th class="num">Calls today</th><th class="num">Limit hits today</th><th class="num">Calls 7d</th>',
-        agents.map(a => '<tr><td class="name">' + esc(a.business) + (a.is_test ? ' <span class="aiu-tag">test</span>' : '') + '</td><td>' + esc(a.agent_key) + (a.live && !a.live.running ? ' <span class="aiu-tag warn">stopped</span>' : '') + '</td>' +
+      '<label class="sub" style="display:inline-flex;gap:6px;align-items:center;margin:4px 0 8px"><input type="checkbox" id="apk-paying"' + (payOnly ? ' checked' : '') + '> Paying clients only</label>' +
+      tbl('<th>Business</th><th>Plan</th><th>Agent</th><th>WhatsApp</th><th>Running on</th><th>Use this key</th><th>Change</th><th class="num">Calls today</th><th class="num">Limit hits today</th><th class="num">Calls 7d</th>',
+        agents.map(a => '<tr><td class="name">' + esc(a.business) + (a.is_test ? ' <span class="aiu-tag">test</span>' : '') + '</td><td>' + plan(a) + '</td>' +
+          '<td>' + esc(a.agent_key) + (a.live && !a.live.running ? ' <span class="aiu-tag warn">stopped</span>' : '') + '</td>' +
           '<td>' + esc(a.wa_status || '—') + '</td><td>' + keyName(a.live && a.live.live_last4) + '</td>' +
-          '<td><select class="fee" style="width:auto;text-align:left" data-apksel="' + esc(a.agent_key) + '" aria-label="Key for ' + esc(a.agent_key) + '">' +
-            '<option value="">Platform key ' + plat + '</option>' +
-            usable.map(k => '<option value="' + esc(k.id) + '"' + (a.assignment && a.assignment.key_id === k.id ? ' selected' : '') + '>' + esc(k.label) + ' …' + esc(k.last4) + '</option>').join('') +
+          '<td><select class="fee" style="width:auto;max-width:260px;text-align:left" data-apksel="' + esc(a.agent_key) + '" aria-label="Key for ' + esc(a.agent_key) + '">' +
+            '<option value="">Platform key ' + plat + ' (Gemini)</option>' +
+            usable.map(k => '<option value="' + esc(k.id) + '"' + (a.assignment && a.assignment.key_id === k.id ? ' selected' : '') + '>' + esc(k.label) + ' · ' + esc(pname(k.provider)) + (k.model ? ' · ' + esc(k.model) : '') + ' …' + esc(k.last4) + '</option>').join('') +
           '</select> <button class="tiny" data-apkset="' + esc(a.agent_key) + '">Apply</button></td>' +
           '<td>' + state(a) + '</td>' +
           '<td class="num">' + nf((a.today || {}).ok) + '</td><td class="num">' + nf((a.today || {}).rate_limited) + '</td><td class="num">' + nf((a.week || {}).ok) + '</td></tr>')) +
-      '<div class="sub" style="margin-top:6px">Apply restarts that one agent for a few seconds with the chosen key; WhatsApp stays connected. A stopped agent gets the key and stays stopped. Agents set up by hand (Irfan, clinic and salon workspace) are not listed.</div></div></section>' +
+      (keys.length && !usable.length ? '<div class="sub" style="margin-top:6px;color:var(--warn)">No key can be given to an agent yet: a non-Gemini key needs a model (Keys table) and must not be off or refused.</div>' : '') +
+      '<div class="sub" style="margin-top:6px">Apply restarts that one agent for a few seconds with the chosen key and model; WhatsApp stays connected. With a non-Gemini key the agent still falls back to the free Gemini key if that provider fails. A stopped agent gets the key and stays stopped. Agents set up by hand (Irfan, clinic and salon workspace) are not listed.</div></div></section>' +
       '<section><h2>Usage, last 7 days</h2><div class="card" style="padding:6px 8px;overflow-x:auto">' +
       tbl('<th>Day</th><th>Agent</th><th>Model</th><th class="num">Answered</th><th class="num">Limit hits (429)</th><th class="num">Overloaded (503)</th><th class="num">Failed calls</th><th>Key</th>',
         (d.usage || []).map(u => '<tr><td>' + esc(String(u.day).slice(0, 10)) + '</td><td>' + esc(u.agent_key) + '</td><td>' + esc(u.model || '(not tied to a model)') + '</td>' +
           '<td class="num">' + nf(u.ok) + '</td><td class="num">' + nf(u.rate_limited) + '</td><td class="num">' + nf(u.overloaded) + '</td><td class="num">' + nf(u.failed) + '</td><td>' + keyName(u.key_last4) + '</td></tr>')) +
-      '<div class="sub" style="margin-top:6px">Counted from each agent\'s own log every 5 minutes; counts only, never a message. Google does not report how much quota is left: a rising "limit hits" number is the sign a key is used up for the day.</div></div></section>';
+      '<div class="sub" style="margin-top:6px">Counted from each agent\'s own log every 5 minutes; counts only, never a message. Providers do not report how much quota is left: a rising "limit hits" number is the sign a key is used up for the day.</div></div></section>';
   },
   aiusage(){
     if (D.aiu === undefined) { D.aiu = null; api('/techdeva/ai-usage').then(d => { D.aiu = d; if (current() === 'aiusage') paint(); }).catch(e => { D.aiu = {error: e.message}; if (current() === 'aiusage') paint(); }); }
@@ -728,13 +778,16 @@ const VIEWS = {
       kpi('Paying', b.paying, 'have a monthly fee set') +
       kpi('On trial', b.trials, 'not yet converted') +
       kpi('Hidden', b.hidden_test_tenants, 'marked test, never deleted') + '</div>' +
-      '<section><div class="card" style="padding:6px 8px">' +
+      '<section><div class="row" style="margin:0 0 8px;gap:8px;align-items:center"><button class="tiny" id="cl-selall">Select all not paying</button>' +
+        '<button class="tiny" id="cl-delsel" style="color:var(--danger)" disabled>Delete selected</button><span class="sub" id="cl-delmsg" role="status"></span></div>' +
+      '<div class="card" style="padding:6px 8px">' +
         tbl('<th>Business</th><th>Status</th><th>Plan &amp; WhatsApp</th><th class="num">Fee</th><th class="num">Paid this month</th>' +
             '<th class="num">Paid all time</th><th>Last paid</th><th class="num">Leads</th>' +
             '<th class="num">AI 7d</th><th class="num">Waiting</th><th>Activity</th><th></th>',
             clientRows(b.clients)) + '</div>' +
       '<div class="sub" style="margin-top:8px">Pick a plan and the fee becomes the plan price (type a different fee after, for a discount). ' +
-      'Type a fee and press Tab to save it. Hide removes a client from this book without deleting anything.</div></section>' +
+      'Type a fee and press Tab to save it. Hide removes a client from this book without deleting anything. ' +
+      'Delete removes the business for good: its logins, customers, bookings, invoices and its WhatsApp agent. It cannot be undone. Paying clients (active) and TechDeva\'s own cannot be deleted.</div></section>' +
       '<section><h2>Plans</h2><div class="card plans-card" style="padding:6px 8px;overflow-x:auto">' +
       tbl('<th>Plan</th><th class="num">PKR / month</th><th class="num">USD / month</th><th class="num">WhatsApp numbers</th><th class="num">Chats / month</th>' +
           '<th class="num">AI credits / month</th><th class="num">Tasks at once</th><th>Shown</th><th></th>',
@@ -988,6 +1041,42 @@ function wireClients(){
     try { await api('/techdeva/clients/' + b.getAttribute('data-activate') + '/activate', {method:'POST'}); load(); }
     catch (e) { alert(e.message); }
   });
+  /* Delete for good (app/retention.py founder_delete): the server checks again
+     that the business is not paying, not TechDeva's own and not hand-managed. */
+  const delOne = (id, name) => api('/techdeva/clients/' + id, {method: 'DELETE', body: JSON.stringify({confirm: name})});
+  el.querySelectorAll('[data-cdel]').forEach(b => b.onclick = async () => {
+    const name = b.getAttribute('data-cname');
+    const typed = prompt('Delete "' + name + '" for good? Its logins, customers, bookings, invoices and WhatsApp agent are all deleted and cannot be brought back.\n\nType the business name to confirm:');
+    if (typed === null) return;
+    if (typed.trim().toLowerCase() !== name.trim().toLowerCase()) { alert('The name did not match. Nothing was deleted.'); return; }
+    b.disabled = true; b.textContent = 'Deleting...';
+    try { const r = await delOne(b.getAttribute('data-cdel'), name); alert('Deleted ' + r.business + ' (' + r.rows + ' records' + (r.agents.length ? ', agent removed within a few minutes' : '') + ').'); }
+    catch (e) { alert(e.message); }
+    load();
+  });
+  const sels = () => [...el.querySelectorAll('[data-csel]:checked')];
+  const delSel = document.getElementById('cl-delsel'), delMsg = document.getElementById('cl-delmsg');
+  const count = () => { if (delSel) { const n = sels().length; delSel.disabled = !n; delSel.textContent = n ? 'Delete selected (' + n + ')' : 'Delete selected'; } };
+  el.querySelectorAll('[data-csel]').forEach(c => c.onchange = count);
+  const all = document.getElementById('cl-selall');
+  if (all) all.onclick = () => { const box = [...el.querySelectorAll('[data-csel]')], on = box.some(c => !c.checked); box.forEach(c => { c.checked = on; }); count(); };
+  if (delSel) delSel.onclick = async () => {
+    const list = sels(); if (!list.length) return;
+    const typed = prompt('Delete ' + list.length + ' businesses for good? Their logins, customers, bookings, invoices and WhatsApp agents are all deleted and cannot be brought back.\n\n' +
+      list.slice(0, 15).map(c => '- ' + c.getAttribute('data-cname')).join('\n') + (list.length > 15 ? '\n... and ' + (list.length - 15) + ' more' : '') +
+      '\n\nType DELETE ' + list.length + ' to confirm:');
+    if (typed === null) return;
+    if (typed.trim().toUpperCase() !== 'DELETE ' + list.length) { alert('That did not match. Nothing was deleted.'); return; }
+    delSel.disabled = true;
+    let ok = 0; const bad = [];
+    for (const c of list) {
+      if (delMsg) delMsg.textContent = 'Deleting ' + (ok + bad.length + 1) + ' of ' + list.length + '...';
+      try { await delOne(c.getAttribute('data-csel'), c.getAttribute('data-cname')); ok++; }
+      catch (e) { bad.push(c.getAttribute('data-cname') + ': ' + e.message); }
+    }
+    alert('Deleted ' + ok + ' of ' + list.length + '.' + (bad.length ? '\n\nNot deleted:\n' + bad.join('\n') : ''));
+    load();
+  };
   el.querySelectorAll('[data-hide]').forEach(b => b.onclick = async () => {
     if (!confirm('Hide this client from the book? Nothing is deleted.')) return;
     try { await api('/techdeva/clients/' + b.getAttribute('data-hide') + '/hide',

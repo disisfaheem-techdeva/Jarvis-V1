@@ -4,8 +4,10 @@
 #   * * * * * /opt/techdeva-platform/techdeva-platform/ops/agent-template/ai-keys-sync.sh >> /var/log/techdeva-ai-keys.log 2>&1
 #
 # 1. Apply: for each agent the founder gave another key, write that key into
-#    /docker/hermes-<key>/agent.env (GEMINI_API_KEY only; a dated copy of the
-#    old file is kept) and re-create that agent's compose project (agent +
+#    /docker/hermes-<key>/agent.env (GEMINI_API_KEY for a Gemini key; TD_AI_KEY
+#    plus a custom:tdkey model in the agent's config.yaml, via ai_key_config.py,
+#    for any other provider; dated copies of both old files are kept) and
+#    re-create that agent's compose project (agent +
 #    pairctl together, so pairctl joins the new agent's network). A stopped
 #    agent (e.g. paused for its trial) gets the key but stays stopped.
 # 2. Live: report the last 4 characters of the key each agent really runs with.
@@ -26,18 +28,39 @@ protected() { case "$1" in irfan|hermes-workspace*|workspace*|*ofsd*) return 0;;
 
 # ---- 1. apply pending choices
 pending=$(pyx pending 2>/dev/null) || { log "could not read pending keys from the api"; pending=""; }
-while IFS=$'\t' read -r agent last4 value; do
+while IFS=$'\t' read -r agent last4 provider base model value; do
   [ -n "$agent" ] || continue
   if protected "$agent"; then log "refuse $agent (protected)"; continue; fi
   dir="/docker/hermes-$agent"
   if [ ! -f "$dir/agent.env" ] || [ ! -f "$dir/docker-compose.yml" ]; then
     pyx applied "$agent" failed "" "no agent.env / compose file in $dir" </dev/null; log "fail $agent: no template files"; continue
   fi
-  cp -a "$dir/agent.env" "$dir/agent.env.bak-apikeys-$(date +%Y%m%d_%H%M%S)"
+  vol=$(docker volume inspect -f '{{.Mountpoint}}' "hermes-$agent-data" 2>/dev/null)
+  cfg="$vol/config.yaml"; saved="$dir/ai-key-gemini-model.json"
+  if [ -z "$vol" ] || [ ! -f "$cfg" ]; then
+    pyx applied "$agent" failed "" "no config.yaml for this agent" </dev/null; log "fail $agent: no config.yaml"; continue
+  fi
+  ts=$(date +%Y%m%d_%H%M%S)
+  cp -a "$dir/agent.env" "$dir/agent.env.bak-apikeys-$ts"
+  cp -a "$cfg" "$dir/config.yaml.bak-apikeys-$ts"
   tmp=$(mktemp "$dir/.agent.env.XXXXXX")
-  grep -v '^GEMINI_API_KEY=' "$dir/agent.env" > "$tmp"
-  printf 'GEMINI_API_KEY=%s\n' "$value" >> "$tmp"
+  if [ "$provider" = "gemini" ]; then
+    # Gemini: the key is GEMINI_API_KEY; the agent's own Gemini model chain comes back
+    grep -v -e '^GEMINI_API_KEY=' -e '^TD_AI_KEY=' "$dir/agent.env" > "$tmp"
+    printf 'GEMINI_API_KEY=%s\n' "$value" >> "$tmp"
+    cfgout=$(python3 "$HERE/ai_key_config.py" "$cfg" "$saved" gemini 2>&1)
+  else
+    # any other provider: TD_AI_KEY + config.yaml custom:tdkey; GEMINI_API_KEY stays for the fallback
+    grep -v '^TD_AI_KEY=' "$dir/agent.env" > "$tmp"
+    printf 'TD_AI_KEY=%s\n' "$value" >> "$tmp"
+    cfgout=$(python3 "$HERE/ai_key_config.py" "$cfg" "$saved" custom "$base" "$model" 2>&1)
+  fi
+  if [ $? -ne 0 ]; then
+    rm -f "$tmp"
+    pyx applied "$agent" failed "" "config.yaml not changed: ${cfgout: -200}" </dev/null; log "fail $agent: $cfgout"; continue
+  fi
   chmod 600 "$tmp"; mv "$tmp" "$dir/agent.env"
+  log "$agent: $provider ${model#-} ($cfgout)"
   if [ "$(docker inspect -f '{{.State.Running}}' "hermes-agent-$agent" 2>/dev/null)" = "true" ]; then
     if ! (cd "$dir" && docker compose up -d --force-recreate >/dev/null 2>&1 </dev/null); then
       pyx applied "$agent" failed "" "re-create failed; previous agent.env kept as .bak" </dev/null
@@ -62,7 +85,9 @@ for d in /docker/hermes-*/; do
   [ -f "$d/agent.env" ] || continue
   docker inspect "hermes-agent-$a" >/dev/null 2>&1 || continue
   agents="$agents $a"
-  k=$(grep -E '^GEMINI_API_KEY=' "$d/agent.env" | tail -1 | cut -d= -f2- | tr -d "'\"")
+  # an agent switched to another provider (saved Gemini chain present) runs on TD_AI_KEY
+  var=GEMINI_API_KEY; [ -f "$d/ai-key-gemini-model.json" ] && var=TD_AI_KEY
+  k=$(grep -E "^$var=" "$d/agent.env" | tail -1 | cut -d= -f2- | tr -d "'\"")
   r=$([ "$(docker inspect -f '{{.State.Running}}' "hermes-agent-$a")" = "true" ] && echo 1 || echo 0)
   printf '%s\t%s\t%s\n' "$a" "${k: -4}" "$r"
 done | pyx live || log "could not report live keys"
