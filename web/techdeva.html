@@ -167,7 +167,7 @@
 let TOKEN = null, D = {};
 const NAV = [
   ['RUNNING THE BUSINESS', [
-    ['jarvis','Jarvis'], ['overview','Overview'], ['requests','Requests'], ['clients','Clients'], ['connections','Connections'], ['pipeline','Pipeline & trials']]],
+    ['jarvis','Jarvis'], ['hermes','Hermes'], ['overview','Overview'], ['requests','Requests'], ['clients','Clients'], ['connections','Connections'], ['pipeline','Pipeline & trials']]],
   ['WHAT THE AI DELIVERS', [
     ['bookings','Bookings'], ['workforce','AI workforce'], ['approvals','Waiting on you']]],
   ['MONEY', [
@@ -176,6 +176,7 @@ const NAV = [
     ['health','Health'], ['incidents','Incidents'], ['aiusage','AI usage & API log'], ['apikeys','API Manager']]]
 ];
 const TITLES = {jarvis:['Jarvis','Pick a client, then say or type what to change for them.'],
+  hermes:['Hermes','Every business\'s WhatsApp agent: which are connected and answering, and switch any of them off or on.'],
   overview:['Overview','The whole business on one screen.'],
   clients:['Clients','Everyone onboard, what they pay, and what they are getting.'],
   connections:['Connections','Which clients have connected WhatsApp, Facebook, Instagram and Google. Clients connect these themselves in their dashboard.'],
@@ -437,6 +438,22 @@ function wireApiKeys(){
   }
 }
 
+function wireHermes(){
+  const view = document.getElementById('view');
+  const reload = () => { D.apk = undefined; if (current() === 'hermes') paint(); };
+  view.querySelectorAll('[data-hmpower]').forEach(b => b.onclick = async () => {
+    const on = !!b.dataset.on, agent = b.dataset.hmpower;
+    if (!on && !confirm('Turn off the WhatsApp agent of ' + b.dataset.name + '? It stops replying until you turn it on again.')) return;
+    b.disabled = true; b.textContent = on ? 'Turning on...' : 'Turning off...';
+    try { await api('/techdeva/agent-power/' + encodeURIComponent(agent), {method: 'PUT', body: JSON.stringify({on: on})}); } catch (ex) { alert(ex.message); }
+    reload();
+  });
+  /* While a switch is being applied, look again so "turning off" becomes "off". */
+  if (D.apk && (D.apk.agents || []).some(a => a.power && a.power.status === 'pending')) {
+    clearTimeout(window.__hmPoll); window.__hmPoll = setTimeout(reload, 15000);
+  }
+}
+
 function paint(){
   const v = current(), t = TITLES[v] || TITLES.overview;
   document.getElementById('vtitle').textContent = t[0];
@@ -451,6 +468,7 @@ function paint(){
   if (v === 'requests') wireRequests();
   if (v === 'aiusage') wireAiUsage();
   if (v === 'apikeys') wireApiKeys();
+  if (v === 'hermes') wireHermes();
 }
 
 /* ---- Jarvis voice helpers ----
@@ -657,6 +675,46 @@ function clientRows(rows){
 }
 
 const VIEWS = {
+  /* Hermes: every business's WhatsApp agent, connected ones first, each with
+     On/Off (PUT /techdeva/agent-power, applied by ai-keys-sync.sh within a minute).
+     Same data as API Manager (GET /techdeva/api-keys). */
+  hermes(){
+    if (D.apk === undefined) { D.apk = null; api('/techdeva/api-keys').then(d => { D.apk = d; if (['hermes','apikeys'].indexOf(current()) >= 0) paint(); }).catch(e => { D.apk = {error: e.message}; if (['hermes','apikeys'].indexOf(current()) >= 0) paint(); }); }
+    const d = D.apk, nf = x => Number(x || 0).toLocaleString('en-US');
+    if (!d) return '<div class="empty">Reading the agents...</div>';
+    if (d.error) return '<div class="empty">Could not read the agents: ' + esc(d.error) + '</div>';
+    const all = d.agents || [], keys = d.keys || [];
+    const isOff = a => a.power && a.power.want === 'off';
+    const connected = all.filter(a => a.wa_status === 'connected'), rest = all.filter(a => a.wa_status !== 'connected');
+    const keyName = l4 => { const k = keys.find(x => x.last4 === l4); return k ? esc(k.label) : (l4 && l4 === d.platform_key_last4 ? 'Platform key' : (l4 ? '…' + esc(l4) : '—')); };
+    const state = a => {
+      const p = a.power, pend = p && p.status === 'pending', running = a.live && a.live.running;
+      if (pend) return '<span class="aiu-tag warn">' + (isOff(a) ? 'turning off' : 'turning on') + '</span>';
+      if (isOff(a)) return '<span class="aiu-tag bad">' + (p.auto ? 'on hold' : 'off') + '</span>' +
+        (p.auto && p.resume_at ? '<div class="sub">back on ' + esc(new Date(p.resume_at).toLocaleString()) + '</div>' : '') +
+        (p.reason ? '<div class="sub">' + esc(p.reason) + '</div>' : '');
+      return running ? '<span class="aiu-tag">on</span>' : '<span class="aiu-tag warn">stopped</span>';
+    };
+    const row = a => '<tr><td class="name">' + esc(a.business) + (a.is_test ? ' <span class="aiu-tag">test</span>' : '') +
+        '<div class="sub">' + esc(a.agent_key) + '</div></td>' +
+      '<td><span class="aiu-tag' + (a.paying ? '' : ' warn') + '">' + esc(a.paying ? 'paying' : a.tenant_status) + '</span>' + (a.plan_name ? ' <span class="sub">' + esc(a.plan_name) + '</span>' : '') + '</td>' +
+      '<td>' + esc(a.wa_status === 'connected' ? 'connected' : (a.wa_status || '—').replace(/_/g, ' ')) + '</td>' +
+      '<td>' + state(a) + '</td>' +
+      '<td>' + keyName(a.live && a.live.live_last4) + '</td>' +
+      '<td class="num">' + nf((a.today || {}).ok) + '</td><td class="num">' + nf((a.today || {}).rate_limited) + '</td>' +
+      '<td><button class="' + (isOff(a) ? 'tiny primary' : 'tiny') + '" data-hmpower="' + esc(a.agent_key) + '" data-on="' + (isOff(a) ? '1' : '') + '" data-name="' + esc(a.business) + '">' + (isOff(a) ? 'Turn on' : 'Turn off') + '</button></td></tr>';
+    const head = '<th>Business</th><th>Plan</th><th>WhatsApp</th><th>Hermes</th><th>Running on key</th><th class="num">Answers today</th><th class="num">Limit hits today</th><th></th>';
+    return '<div class="grid">' +
+        kpi('Connected to WhatsApp', nf(connected.length), nf(all.length) + ' agents in all') +
+        kpi('Answering now', nf(connected.filter(a => !isOff(a) && a.live && a.live.running).length), 'connected, on and running') +
+        kpi('Off or on hold', nf(all.filter(isOff).length), nf(all.filter(a => isOff(a) && a.power.auto).length) + ' on hold for an AI limit', all.some(isOff) ? 'warn' : '') +
+        kpi('Answers today', nf(all.reduce((n, a) => n + ((a.today || {}).ok || 0), 0)), nf(all.reduce((n, a) => n + ((a.today || {}).rate_limited || 0), 0)) + ' limit hits') + '</div>' +
+      '<section><h2>Connected agents</h2><div class="card" style="padding:6px 8px;overflow-x:auto">' + tbl(head, connected.map(row)) +
+        '<div class="sub" style="margin-top:6px">Turn off stops that agent within a minute: it does not reply on WhatsApp until you turn it on again (WhatsApp stays connected, messages stay on the phone). ' +
+        '"On hold" means the platform paused it because its AI key ran out; it comes back by itself, or press Turn on after giving it another key in API Manager.</div></div></section>' +
+      (rest.length ? '<section><h2>Not connected to WhatsApp</h2><div class="card" style="padding:6px 8px;overflow-x:auto">' + tbl(head, rest.map(row)) + '</div></section>' : '') +
+      '<div class="sub">Agents set up by hand (Irfan, clinic and salon workspace) are not switched from here. Keys and models: <a href="#/apikeys" style="color:var(--gold)">API Manager</a>.</div>';
+  },
   /* API Manager (app/ai_keys.py): AI keys for any provider (Gemini, Groq,
      OpenRouter, ..., or a custom OpenAI-compatible one), which WhatsApp agent
      runs on which key and model, and each agent's calls and rate-limit hits.
