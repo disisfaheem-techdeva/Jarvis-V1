@@ -705,7 +705,8 @@ def _pcm_to_wav(pcm: bytes, rate: int) -> bytes:
 def _tts(text: str, urdu: bool) -> bytes:
     import os
     from .ai import base_url
-    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    from .platform_key import gemini_key
+    key = gemini_key()
     if not key:
         raise HTTPException(503, "Voice is not set up on this server.")
     from . import usage

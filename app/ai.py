@@ -128,6 +128,9 @@ def model_name() -> str:
 
 
 def _key() -> str:
+    if provider() == "gemini":
+        from .platform_key import gemini_key      # founder console > API Manager > Default key
+        return gemini_key()
     env = {"anthropic": "ANTHROPIC_API_KEY",
            "gemini": "GEMINI_API_KEY",
            "openai": "OPENAI_API_KEY"}.get(provider())
@@ -226,6 +229,9 @@ _DOWN = {}          # provider -> {"until": ts, "why": str, "reason": str}
 
 
 def _key_for(p: str) -> str:
+    if p == "gemini":
+        from .platform_key import gemini_key
+        return gemini_key()
     return os.environ.get(_KEY_ENV.get(p, ""), "").strip()
 
 

@@ -67,7 +67,8 @@ def _json_from(text: str) -> dict:
 
 
 def _gemini(image: bytes, mime: str) -> dict:
-    key = os.environ.get("GEMINI_API_KEY", "")
+    from ..platform_key import gemini_key
+    key = gemini_key()
     if not key:
         raise RuntimeError("GEMINI_API_KEY is not set")
     model = os.environ.get("VISION_MODEL", "gemini-2.5-flash")

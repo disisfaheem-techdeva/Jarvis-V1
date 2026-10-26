@@ -97,6 +97,15 @@ def _open(row) -> str:
 
 
 def _platform_last4():
+    """Last 4 of the default key: the one chosen in the console, else the .env key."""
+    try:
+        from .platform_key import default_key_row
+        with tenant_session(None, "techdeva_admin") as cur:
+            row = default_key_row(cur)
+        if row:
+            return row["last4"]
+    except Exception:  # noqa: BLE001
+        pass
     v = (os.environ.get("GEMINI_API_KEY") or "").strip()
     return v[-4:] if v else None
 
@@ -542,6 +551,33 @@ def _bench_agent(cur, agents):
     return (running or agents or [{}])[0].get("agent_key")
 
 
+def _follow_default(cur, by, force=False):
+    """Every agent whose key was not chosen by hand goes to the default (key_id NULL,
+    pending). Keys chosen by hand stay. Returns the agents moved."""
+    cur.execute("SELECT agent_key, key_id, status, requested_by FROM ai_key_assignments")
+    assign = {r["agent_key"]: dict(r) for r in cur.fetchall()}
+    moved = []
+    for a in _agents(cur):
+        ak = a["agent_key"]
+        c = assign.get(ak)
+        by_hand = c and c["key_id"] and (c["requested_by"] or "") not in ("automatic", "auto-switch")
+        if by_hand:
+            continue
+        if not force and c and c["key_id"] is None and c["status"] in ("pending", "applied"):
+            continue                                   # already on the default
+        if not force and c and c["requested_by"] == "auto-switch":
+            cur.execute("SELECT 1 FROM ai_key_switches WHERE agent_key = %s AND at > now() - interval '12 hours'", (ak,))
+            if cur.fetchone():
+                continue                               # moved off the default because it ran out: not straight back
+        cur.execute("""INSERT INTO ai_key_assignments (agent_key, key_id, model, status, requested_by, requested_at, applied_at, error)
+                       VALUES (%s, NULL, NULL, 'pending', %s, now(), NULL, NULL)
+                       ON CONFLICT (agent_key) DO UPDATE SET key_id = NULL, model = NULL, status = 'pending',
+                             requested_by = EXCLUDED.requested_by, requested_at = now(), applied_at = NULL, error = NULL""",
+                    (ak, by))
+        moved.append(ak)
+    return moved
+
+
 def auto_balance():
     out = []
     with tenant_session(None, "techdeva_admin") as cur:
@@ -587,6 +623,13 @@ def auto_balance():
                         (bench_agent, k["id"], "(agent's Gemini chain)", json.dumps(AUTO_QUESTIONS), len(AUTO_QUESTIONS)))
             out.append("bench queued for %s on %s" % (k["label"], bench_agent))
             break                                   # one at a time: the bench takes a few minutes
+
+        # a default key chosen in the console: every agent not set by hand follows it
+        from .platform_key import default_key_row
+        if default_key_row(cur):
+            moved = _follow_default(cur, "automatic")
+            out += ["%s -> default key" % a for a in moved]
+            return out
 
         # tested Google keys: in rotation, and agents spread across them
         ready = [k for k in gem if _passed_bench(cur, k["id"])]
@@ -675,6 +718,9 @@ def make_ai_keys_router() -> APIRouter:
                 k["bench_passed"] = _passed_bench(cur, k["id"])
             platform_bench_passed = _passed_bench(cur, None)
             voice = _voice(cur)
+            from .platform_key import default_key_row
+            _d = default_key_row(cur)
+            default_key = {"key_id": str(_d["id"]), "label": _d["label"], "model": _d["model"]} if _d else None
             auto_on = _auto_on(cur)
             autoswitch_on = _autoswitch_on(cur)
             cur.execute("SELECT agent_key, from_last4, to_last4, reason, at FROM ai_key_switches ORDER BY at DESC LIMIT 20")
@@ -713,7 +759,8 @@ def make_ai_keys_router() -> APIRouter:
                 "agent_providers": list(PROVIDERS), "encryption": crypto.enabled(),
                 "benches": benches, "defaults": defaults, "default_questions": DEFAULT_QUESTIONS,
                 "platform_bench_passed": platform_bench_passed, "autohold": autohold_on,
-                "autoswitch": autoswitch_on, "switches": switches, "voice": voice, "auto": auto_on}
+                "autoswitch": autoswitch_on, "switches": switches, "voice": voice, "auto": auto_on,
+                "default_key": default_key}
 
     @router.post("/techdeva/api-keys")
     def add(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
@@ -969,6 +1016,28 @@ def make_ai_keys_router() -> APIRouter:
                    detail={"last4": row["last4"], "in_pool": in_pool, "order": order}, tenant_id=None)
         return {"in_pool": in_pool, "pool_order": order}
 
+    @router.put("/techdeva/ai-default-key")
+    def set_default_key(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                        authorization: str | None = Header(None),
+                        td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """The platform's default Gemini key (null = the .env key). Every agent without a key
+        chosen by hand moves to it within a minute (each restarts once); keys chosen by hand
+        for an agent stay. The platform's own AI uses it within a minute."""
+        uid = _admin(x_tenant_id, x_role, authorization, td_session)
+        key_id = body.get("key_id") or None
+        with tenant_session(None, "techdeva_admin") as cur:
+            if key_id:
+                row = _get(cur, key_id)
+                if row["provider"] != "gemini":
+                    raise HTTPException(400, "The default key must be a Google (Gemini) key.")
+                if row["status"] in ("disabled", "invalid"):
+                    raise HTTPException(409, "That key is %s. Test it or choose another." % row["status"])
+            _set_setting(cur, "ai_default_key", key_id or "")
+            moved = _follow_default(cur, str(uid) if uid else "founder", force=True)
+            record(cur, action="techdeva.ai_key.default", resource="platform_settings", resource_id="ai_default_key",
+                   actor=str(uid) if uid else None, status="ok", detail={"key_id": key_id, "agents": moved}, tenant_id=None)
+        return {"key_id": key_id, "agents": moved}
+
     @router.put("/techdeva/ai-auto")
     def set_auto(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
                  authorization: str | None = Header(None),
@@ -1139,11 +1208,15 @@ def _cli(argv):
                              FROM ai_key_assignments a LEFT JOIN ai_keys k ON k.id = a.key_id
                             WHERE a.status = 'pending' ORDER BY a.requested_at""")
             rows = [dict(r) for r in cur.fetchall()]
+            from .platform_key import default_key_row
+            default_row = default_key_row(cur)
         for r in rows:
             if PROTECTED.match(r["agent_key"]):
                 continue
             if r["key_id"] is None:
                 value, provider, base, model = (os.environ.get("GEMINI_API_KEY") or "").strip().strip("'\""), "gemini", "-", "-"
+                if default_row:                      # founder console > Default key
+                    value, model = _open(default_row), default_row["model"] or "-"
             elif r["status"] in ("disabled", "invalid"):
                 continue
             else:

@@ -43,7 +43,8 @@ def _prompt(biz, industry, idea, text_at, colour):
 
 def _generate(prompt, ratio):
     from .ai import base_url
-    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    from .platform_key import gemini_key
+    key = gemini_key()
     if not key:
         raise HTTPException(503, "The AI picture maker is not set up on this server.")
     from . import usage

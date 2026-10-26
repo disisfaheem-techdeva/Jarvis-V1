@@ -72,7 +72,8 @@ _MODEL = None
 
 
 def _key():
-    return os.environ.get("GEMINI_API_KEY", "").strip()
+    from .platform_key import gemini_key
+    return gemini_key()
 
 
 def log(*a):
