@@ -34,6 +34,10 @@ def last4(agent):
     # an agent switched to another provider by the API Manager runs on TD_AI_KEY
     var = "TD_AI_KEY=" if os.path.exists("/docker/hermes-%s/ai-key-gemini-model.json" % agent) else "GEMINI_API_KEY="
     try:
+        var = open("/docker/hermes-%s/ai-key-var" % agent, encoding="utf-8").read().split()[0] + "="
+    except (OSError, IndexError):
+        pass
+    try:
         for line in open("/docker/hermes-%s/agent.env" % agent, encoding="utf-8"):
             if line.startswith(var):
                 v = line.split("=", 1)[1].strip().strip("'\"")

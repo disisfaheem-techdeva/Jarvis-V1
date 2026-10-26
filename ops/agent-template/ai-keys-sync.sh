@@ -48,7 +48,11 @@ while IFS=$'\t' read -r agent last4 provider base model value; do
     # Gemini: the key is GEMINI_API_KEY; the agent's own Gemini model chain comes back
     grep -v -e '^GEMINI_API_KEY=' -e '^TD_AI_KEY=' "$dir/agent.env" > "$tmp"
     printf 'GEMINI_API_KEY=%s\n' "$value" >> "$tmp"
-    cfgout=$(python3 "$HERE/ai_key_config.py" "$cfg" "$saved" gemini 2>&1)
+    if [ "$model" = "-" ]; then
+      cfgout=$(python3 "$HERE/ai_key_config.py" "$cfg" "$saved" gemini 2>&1)
+    else
+      cfgout=$(python3 "$HERE/ai_key_config.py" "$cfg" "$saved" gemini-model "$model" 2>&1)
+    fi
   else
     # any other provider: TD_AI_KEY + config.yaml custom:tdkey; GEMINI_API_KEY stays for the fallback
     grep -v '^TD_AI_KEY=' "$dir/agent.env" > "$tmp"
@@ -60,6 +64,8 @@ while IFS=$'\t' read -r agent last4 provider base model value; do
     pyx applied "$agent" failed "" "config.yaml not changed: ${cfgout: -200}" </dev/null; log "fail $agent: $cfgout"; continue
   fi
   chmod 600 "$tmp"; mv "$tmp" "$dir/agent.env"
+  # which variable holds the key the agent really runs on (read by the live / usage reports)
+  if [ "$provider" = "gemini" ]; then echo GEMINI_API_KEY > "$dir/ai-key-var"; else echo TD_AI_KEY > "$dir/ai-key-var"; fi
   log "$agent: $provider ${model#-} ($cfgout)"
   if [ "$(docker inspect -f '{{.State.Running}}' "hermes-agent-$agent" 2>/dev/null)" = "true" ]; then
     if ! (cd "$dir" && docker compose up -d --force-recreate >/dev/null 2>&1 </dev/null); then
@@ -103,6 +109,7 @@ for d in /docker/hermes-*/; do
   agents="$agents $a"
   # an agent switched to another provider (saved Gemini chain present) runs on TD_AI_KEY
   var=GEMINI_API_KEY; [ -f "$d/ai-key-gemini-model.json" ] && var=TD_AI_KEY
+  [ -s "$d/ai-key-var" ] && var=$(head -1 "$d/ai-key-var")
   k=$(grep -E "^$var=" "$d/agent.env" | tail -1 | cut -d= -f2- | tr -d "'\"")
   r=$([ "$(docker inspect -f '{{.State.Running}}' "hermes-agent-$a")" = "true" ] && echo 1 || echo 0)
   printf '%s\t%s\t%s\n' "$a" "${k: -4}" "$r"

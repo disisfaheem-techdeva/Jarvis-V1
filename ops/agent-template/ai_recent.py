@@ -24,6 +24,10 @@ LIMITED = re.compile(r"API call failed.*?(?:HTTP 429|HTTP 413|RESOURCE_EXHAUSTED
 def live_last4(agent):
     var = "TD_AI_KEY=" if os.path.exists("/docker/hermes-%s/ai-key-gemini-model.json" % agent) else "GEMINI_API_KEY="
     try:
+        var = open("/docker/hermes-%s/ai-key-var" % agent, encoding="utf-8").read().split()[0] + "="
+    except (OSError, IndexError):
+        pass
+    try:
         for line in open("/docker/hermes-%s/agent.env" % agent, encoding="utf-8"):
             if line.startswith(var):
                 v = line.split("=", 1)[1].strip().strip("'\"")

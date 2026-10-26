@@ -220,6 +220,31 @@ def try_reply(provider: str, value: str, base_url=None, model=None):
     return status, error, detail
 
 
+# Models a WhatsApp agent can chat with (the list Test brings back also holds
+# speech, image and embedding models), and the default picked when the
+# founder does not choose: the first of these the key really has.
+NOT_CHAT = re.compile(r"(?i)(tts|whisper|embed|image|imagen|veo|aqa|guard|vision-only|audio|live|computer-use|robotics|omni)")
+PREFERRED = {
+    "gemini": ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.1-flash-lite", "gemini-3.5-flash",
+               "gemini-flash-latest", "gemini-3-flash-preview", "gemini-2.5-flash"],
+    "groq": ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3-32b",
+             "meta-llama/llama-4-scout-17b-16e-instruct", "llama-3.1-8b-instant"],
+}
+
+
+def chat_models(ids):
+    return [m for m in (ids or []) if not NOT_CHAT.search(m)]
+
+
+def pick_model(provider, ids):
+    ids = chat_models(ids)
+    low = {m.lower(): m for m in ids}
+    for p in PREFERRED.get(provider, []):
+        if p.lower() in low:
+            return low[p.lower()]
+    return ids[0] if ids else PROVIDERS[provider]["model"]
+
+
 def _agents(cur):
     """Every template agent the platform knows, with its business, its plan and
     whether it pays (status active)."""
@@ -439,8 +464,15 @@ def make_ai_keys_router() -> APIRouter:
         if len(value) < 8 or len(value) > 400 or re.search(r"\s", value):
             raise HTTPException(400, "That does not look like an API key. Paste the whole key, with no spaces.")
         base_url = _base_url(provider, body.get("base_url"))
-        model = _model(provider, body.get("model"))
+        typed = str(body.get("model") or "").strip()
+        model = _model(provider, typed) if typed else None
         status, error, detail = test_key(provider, value, base_url, model)
+        if detail.get("sample"):
+            detail["sample"] = chat_models(detail["sample"])
+        if not model:
+            model = pick_model(provider, detail.get("sample")) if status == "ok" else PROVIDERS[provider]["model"]
+            if detail.get("sample"):
+                detail["model_listed"] = model in detail["sample"]
         fp = _fingerprint(value)
         with tenant_session(None, "techdeva_admin") as cur:
             cur.execute("SELECT label FROM ai_keys WHERE fingerprint = %s", (fp,))
@@ -472,6 +504,8 @@ def make_ai_keys_router() -> APIRouter:
         with tenant_session(None, "techdeva_admin") as cur:
             row = _get(cur, key_id)
         status, error, detail = fn(row["provider"], _open(row), row["base_url"], row["model"])
+        if detail.get("sample"):
+            detail["sample"] = chat_models(detail["sample"])
         old = row["test_detail"] or {}
         if "sample" not in detail and old.get("sample"):
             # a reply test keeps the model list the last key test found (the Model box offers it)
@@ -564,6 +598,9 @@ def make_ai_keys_router() -> APIRouter:
         Recorded as pending; ai-keys-sync.sh applies it within a minute."""
         uid = _admin(x_tenant_id, x_role, authorization, td_session)
         key_id = body.get("key_id") or None
+        want_model = str(body.get("model") or "").strip() or None
+        if want_model and not MODEL_RE.match(want_model):
+            raise HTTPException(400, "That is not a model name.")
         if PROTECTED.match(agent_key):
             raise HTTPException(403, "This agent is managed by hand and cannot be changed here.")
         with tenant_session(None, "techdeva_admin") as cur:
@@ -574,15 +611,20 @@ def make_ai_keys_router() -> APIRouter:
                 row = _get(cur, key_id)
                 if row["status"] in ("disabled", "invalid"):
                     raise HTTPException(409, "That key is %s. Test it or choose another." % row["status"])
-                if row["provider"] != "gemini" and not (row["model"] and row["base_url"]):
+                if row["provider"] != "gemini" and not ((want_model or row["model"]) and row["base_url"]):
                     raise HTTPException(400, "Choose a model for this key first (Keys table, Model).")
-                last4, provider, model = row["last4"], row["provider"], row["model"]
-            cur.execute("""INSERT INTO ai_key_assignments (agent_key, key_id, status, requested_by, requested_at,
+                listed = ((row["test_detail"] or {}).get("sample")) or []
+                if want_model and listed and want_model not in listed:
+                    raise HTTPException(400, "%s does not have the model %s. Test the key to refresh its list." % (row["label"], want_model))
+                last4, provider, model = row["last4"], row["provider"], want_model or row["model"]
+            elif want_model:
+                raise HTTPException(400, "The platform key keeps the agent's own Gemini models.")
+            cur.execute("""INSERT INTO ai_key_assignments (agent_key, key_id, model, status, requested_by, requested_at,
                                                            applied_at, error)
-                           VALUES (%s, %s, 'pending', %s, now(), NULL, NULL)
-                           ON CONFLICT (agent_key) DO UPDATE SET key_id = EXCLUDED.key_id, status = 'pending',
+                           VALUES (%s, %s, %s, 'pending', %s, now(), NULL, NULL)
+                           ON CONFLICT (agent_key) DO UPDATE SET key_id = EXCLUDED.key_id, model = EXCLUDED.model, status = 'pending',
                                  requested_by = EXCLUDED.requested_by, requested_at = now(), applied_at = NULL, error = NULL""",
-                        (agent_key, key_id, str(uid) if uid else None))
+                        (agent_key, key_id, want_model, str(uid) if uid else None))
             record(cur, action="techdeva.ai_key.assign", resource="ai_key_assignments", resource_id=agent_key,
                    actor=str(uid) if uid else None, status="ok",
                    detail={"agent": agent_key, "key_last4": last4, "platform_key": key_id is None,
@@ -738,7 +780,8 @@ def _cli(argv):
     cmd = argv[1] if len(argv) > 1 else ""
     if cmd == "pending":
         with tenant_session(None, "techdeva_admin") as cur:
-            cur.execute("""SELECT a.agent_key, a.key_id, k.provider, k.secret, k.last4, k.status, k.base_url, k.model
+            cur.execute("""SELECT a.agent_key, a.key_id, k.provider, k.secret, k.last4, k.status, k.base_url,
+                                  coalesce(a.model, k.model) AS model
                              FROM ai_key_assignments a LEFT JOIN ai_keys k ON k.id = a.key_id
                             WHERE a.status = 'pending' ORDER BY a.requested_at""")
             rows = [dict(r) for r in cur.fetchall()]
@@ -752,8 +795,9 @@ def _cli(argv):
             else:
                 value, provider = _open(r), r["provider"]
                 base = r["base_url"] or "-"
-                # gemini: the agent keeps its own Gemini model chain unless one is chosen
-                model = r["model"] if provider != "gemini" else "-"
+                # gemini: the chosen model becomes the agent's first one (new keys cannot use
+                # gemini-2.5-flash-lite); "-" keeps the agent's own chain
+                model = r["model"] or "-"
                 if provider != "gemini" and (base == "-" or not r["model"]):
                     continue
             fields = (r["agent_key"], value[-4:], provider, base, model, value)

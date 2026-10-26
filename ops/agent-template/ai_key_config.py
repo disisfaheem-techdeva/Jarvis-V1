@@ -26,13 +26,32 @@ MAX_TOKENS = 4096
 
 
 def main(argv):
-    if len(argv) < 4 or argv[3] not in ("custom", "gemini") or (argv[3] == "custom" and len(argv) != 6):
-        sys.exit("usage: ai_key_config.py <config.yaml> <saved.json> custom <base_url> <model> | gemini")
+    if len(argv) < 4 or argv[3] not in ("custom", "gemini", "gemini-model") or (argv[3] == "custom" and len(argv) != 6) \
+            or (argv[3] == "gemini-model" and len(argv) != 5):
+        sys.exit("usage: ai_key_config.py <config.yaml> <saved.json> custom <base_url> <model> | gemini | gemini-model <model>")
     path, saved, mode = argv[1], argv[2], argv[3]
     with open(path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f) or {}
     st = os.stat(path)
-    if mode == "custom":
+    if mode == "gemini-model":
+        # a Gemini key with a chosen model: that model first, the agent's own chain after it
+        model = argv[4]
+        if not os.path.exists(saved):
+            keep = {"model": cfg.get("model") or {}, "fallback_providers": cfg.get("fallback_providers") or [],
+                    "providers": cfg.get("providers") or {}}
+            with open(saved + ".tmp", "w", encoding="utf-8") as f:
+                json.dump(keep, f)
+            os.chmod(saved + ".tmp", 0o600)
+            os.replace(saved + ".tmp", saved)
+        with open(saved, encoding="utf-8") as f:
+            keep = json.load(f)
+        gem = keep.get("model") or {}
+        chain = ([{"provider": "gemini", "model": gem["default"]}] if gem.get("provider") == "gemini" and gem.get("default") else [])
+        chain += [x for x in keep.get("fallback_providers") or [] if x not in chain]
+        cfg["model"] = {"provider": "gemini", "default": model}
+        cfg["fallback_providers"] = [x for x in chain if x.get("model") != model]
+        cfg["providers"] = keep.get("providers") or {}
+    elif mode == "custom":
         base, model = argv[4].rstrip("/"), argv[5]
         if not base.startswith("https://"):
             sys.exit("ai_key_config: base_url must be https")

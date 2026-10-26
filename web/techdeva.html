@@ -367,9 +367,26 @@ function wireApiKeys(){
   view.querySelectorAll('[data-apkset]').forEach(b => b.onclick = async () => {
     const agent = b.dataset.apkset, sel = view.querySelector('[data-apksel="' + agent + '"]');
     b.disabled = true; b.textContent = 'Saving...';
-    try { await api('/techdeva/api-keys/assign/' + encodeURIComponent(agent), {method: 'PUT', body: JSON.stringify({key_id: sel.value || null})}); }
+    const msel = view.querySelector('[data-apkmsel="' + agent + '"]');
+    try { await api('/techdeva/api-keys/assign/' + encodeURIComponent(agent), {method: 'PUT', body: JSON.stringify({key_id: sel.value || null, model: (sel.value && msel && msel.value) || null})}); }
     catch (ex) { alert(ex.message); }
     reload();
+  });
+  /* Each agent's model list follows the key chosen beside it. */
+  const keyList = (D.apk && D.apk.keys) || [];
+  view.querySelectorAll('[data-apksel]').forEach(sel => {
+    const agent = sel.dataset.apksel, msel = view.querySelector('[data-apkmsel="' + agent + '"]');
+    const ag = ((D.apk && D.apk.agents) || []).find(a => a.agent_key === agent) || {};
+    const fill = () => {
+      if (!msel) return;
+      const k = keyList.find(x => x.id === sel.value);
+      if (!k) { msel.innerHTML = '<option value="">its own Gemini models</option>'; msel.disabled = true; return; }
+      const ms = ((k.test_detail || {}).sample) || (k.model ? [k.model] : []);
+      const cur = ag.assignment && ag.assignment.key_id === k.id && ag.assignment.model ? ag.assignment.model : k.model;
+      msel.disabled = false;
+      msel.innerHTML = ms.map(m => '<option value="' + esc(m) + '"' + (m === cur ? ' selected' : '') + '>' + esc(m) + '</option>').join('');
+    };
+    sel.addEventListener('change', fill); fill();
   });
   const pay = document.getElementById('apk-paying');
   if (pay) pay.onchange = () => { D.apkPaying = pay.checked; paint(); };
@@ -671,7 +688,7 @@ const VIEWS = {
         '<div class="sub">' + esc(when(k.last_test_at)) + '</div>'; };
     const plan = a => '<span class="aiu-tag' + (a.paying ? '' : ' warn') + '">' + esc(a.paying ? 'paying' : a.tenant_status) + '</span>' +
       (a.plan_name ? ' <span class="sub">' + esc(a.plan_name) + (a.monthly_fee ? ' · ' + nf(a.monthly_fee) : '') + '</span>' : '');
-    const provOpts = provs.map(p => '<option value="' + esc(p.key) + '">' + esc(p.label) + '</option>').join('');
+    const provOpts = provs.filter(p => p.key === 'gemini' || p.key === 'groq').map(p => '<option value="' + esc(p.key) + '">' + esc(p.label) + '</option>').join('');
     return (d.encryption ? '' : '<div class="empty" style="border-color:var(--danger)">Key storage is off: CREDENTIAL_ENCRYPTION_KEY is not set, so no key can be saved.</div>') +
       '<div class="grid">' +
         kpi('Keys saved', nf(keys.length), nf(keys.filter(k => k.status === 'ok').length) + ' working') +
@@ -684,17 +701,20 @@ const VIEWS = {
         '<label class="sub">Name<input id="apk-label" class="fee" style="width:100%;text-align:left" maxlength="80" placeholder="e.g. Ali - Google" required></label>' +
         '<label class="sub">Note (optional)<input id="apk-note" class="fee" style="width:100%;text-align:left" maxlength="200" placeholder="whose account, paid or free"></label>' +
         '<label class="sub" id="apk-base-wrap" style="display:none">Base URL<input id="apk-base" class="fee" style="width:100%;text-align:left" maxlength="300" placeholder="https://api.example.com/v1" spellcheck="false"></label>' +
-        '<label class="sub">Model<input id="apk-model" class="fee" style="width:100%;text-align:left" maxlength="120" spellcheck="false" placeholder="' + esc((provs[0] || {}).model || '') + '"></label>' +
+        '<input type="hidden" id="apk-model" value="">' +
         '<label class="sub">API key<input id="apk-key" class="fee" type="password" autocomplete="off" spellcheck="false" style="width:100%;text-align:left" required></label>' +
         '<button class="primary" type="submit" id="apk-go">Save and test</button></form>' +
         '<div class="sub" id="apk-msg" role="status" style="margin-top:8px">The key is encrypted on the server and never shown again, only its last 4 characters. Saving runs one free test (the provider\'s model list, no quota used). ' +
-        'Custom: any OpenAI-compatible provider; give its base URL (the part before /chat/completions). Empty model = the provider\'s usual one.</div></div></section>' +
+        'Its models are fetched by the test and the best one is chosen for you; change it in the Keys table or per agent below.</div></div></section>' +
       '<section><h2>Keys</h2><div class="card" style="padding:6px 8px;overflow-x:auto">' +
       tbl('<th>Name</th><th>Provider</th><th>Model</th><th>Key</th><th>Status</th><th>Last test result</th><th>Agents</th><th class="num">Calls 7d</th><th class="num">Limit hits 7d</th><th></th>',
         keys.map(k => '<tr><td class="name">' + esc(k.label) + (k.owner_note ? '<div class="sub">' + esc(k.owner_note) + '</div>' : '') + '</td>' +
           '<td>' + esc(pname(k.provider)) + (k.provider === 'custom' && k.base_url ? '<div class="sub">' + esc(k.base_url) + '</div>' : '') + '</td>' +
-          '<td><input class="fee" style="width:190px;text-align:left" list="apk-ml-' + esc(k.id) + '" data-apkmodel="' + esc(k.id) + '" value="' + esc(k.model || '') + '" placeholder="' + (k.provider === 'gemini' ? 'agent\'s own Gemini chain' : 'choose a model') + '" aria-label="Model for ' + esc(k.label) + '" spellcheck="false">' +
-            '<datalist id="apk-ml-' + esc(k.id) + '">' + (((k.test_detail || {}).sample) || []).map(m => '<option value="' + esc(m) + '">').join('') + '</datalist></td>' +
+          '<td>' + (function(){ const ms = ((k.test_detail || {}).sample) || [];
+              if (!ms.length) return '<span class="sub">' + esc(k.model || '—') + '</span><div class="sub">press Test key to fetch its models</div>';
+              const list = ms.indexOf(k.model) >= 0 || !k.model ? ms : [k.model].concat(ms);
+              return '<select class="fee" style="width:auto;max-width:220px;text-align:left" data-apkmodel="' + esc(k.id) + '" aria-label="Default model for ' + esc(k.label) + '">' +
+                list.map(m => '<option value="' + esc(m) + '"' + (m === k.model ? ' selected' : '') + '>' + esc(m) + '</option>').join('') + '</select><div class="sub">' + esc(ms.length) + ' models</div>'; })() + '</td>' +
           '<td>…' + esc(k.last4) + '</td>' +
           '<td>' + tag(k.status) + (k.last_error ? '<div class="sub">' + esc(k.last_error) + '</div>' : '') + '</td>' +
           '<td>' + result(k) + '</td>' +
@@ -721,7 +741,8 @@ const VIEWS = {
           '<td><select class="fee" style="width:auto;max-width:260px;text-align:left" data-apksel="' + esc(a.agent_key) + '" aria-label="Key for ' + esc(a.agent_key) + '">' +
             '<option value="">Platform key ' + plat + ' (Gemini)</option>' +
             usable.map(k => '<option value="' + esc(k.id) + '"' + (a.assignment && a.assignment.key_id === k.id ? ' selected' : '') + '>' + esc(k.label) + ' · ' + esc(pname(k.provider)) + (k.model ? ' · ' + esc(k.model) : '') + ' …' + esc(k.last4) + '</option>').join('') +
-          '</select> <button class="tiny" data-apkset="' + esc(a.agent_key) + '">Apply</button></td>' +
+          '</select> <select class="fee" style="width:auto;max-width:200px;text-align:left" data-apkmsel="' + esc(a.agent_key) + '" aria-label="Model for ' + esc(a.agent_key) + '"></select>' +
+          ' <button class="tiny" data-apkset="' + esc(a.agent_key) + '">Apply</button></td>' +
           '<td>' + state(a) + '</td>' +
           '<td class="num">' + nf((a.today || {}).ok) + '</td><td class="num">' + nf((a.today || {}).rate_limited) + '</td><td class="num">' + nf((a.week || {}).ok) + '</td></tr>')) +
       (keys.length && !usable.length ? '<div class="sub" style="margin-top:6px;color:var(--warn)">No key can be given to an agent yet: a non-Gemini key needs a model (Keys table) and must not be off or refused.</div>' : '') +
