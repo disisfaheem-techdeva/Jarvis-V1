@@ -281,6 +281,11 @@ def _clean_prefs(raw):
     return out
 
 
+UC_RULE = ("\n\nUniversal caption: when the owner asks to write, make or redo the caption or text that goes "
+           "under every post (\"universal caption\", \"har post ke neeche wala caption\"), answer kind \"action\" "
+           "with action universal_caption (args: language, optional: english, mix, urdu).")
+
+
 def _dash_rule():
     """Dashboard Customizer tools for the classifier, only while the flag is on."""
     try:
@@ -949,7 +954,7 @@ def make_console_router():
         if attached:
             message += ("\n[The owner attached %d picture%s to this message, for the post or ad campaign they ask for.]"
                         % (len(attached), "" if len(attached) == 1 else "s"))
-        system = CLASSIFY + _dash_rule() + LANG_RULE + FACTS_RULE + (VOICE_RULE if voice else "")
+        system = CLASSIFY + _dash_rule() + UC_RULE + LANG_RULE + FACTS_RULE + (VOICE_RULE if voice else "")
         t0 = time.time()
         try:
             # No retry here on purpose. A person is sitting in front of this

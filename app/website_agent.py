@@ -1142,6 +1142,11 @@ def make_business_profile_router(identity):
             _FACTS_CACHE.clear()                                # Jarvis sees the new profile on the next question
         except Exception:  # noqa: BLE001
             pass
+        try:
+            from .universal_caption import ensure_later      # never blocks or fails the approval
+            ensure_later(tid, "website")
+        except Exception:  # noqa: BLE001
+            pass
         res = profile_out(out)
         res["setup_offered"] = offered
         return res

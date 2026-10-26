@@ -238,6 +238,48 @@ def _publish_facebook(page, caption, images):
     return {"ok": True, "id": body.get("post_id") or body.get("id"), "page": page.get("name")}
 
 
+IG_DAILY_DEFAULT = 5
+IG_RESTRICTED = ("Instagram has restricted this account for now (it saw too much activity). Open the Instagram "
+                 "app > notifications or Help > Support requests and press Request review, or wait a few days. "
+                 "Facebook posts still go out.")
+
+
+def ig_daily_limit() -> int:
+    try:
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("SELECT value FROM platform_settings WHERE key = 'ig_daily_limit'")
+            r = cur.fetchone()
+        return max(0, int((r or {}).get("value") or IG_DAILY_DEFAULT))
+    except Exception:  # noqa: BLE001
+        return IG_DAILY_DEFAULT
+
+
+def ig_posted_today(cur) -> int:
+    """Instagram posts this business made in the last 24 hours: Publisher and Autopilot Gallery."""
+    cur.execute("""SELECT (SELECT count(*) FROM social_posts WHERE published_at > now() - interval '24 hours'
+                            AND (results -> 'instagram' ->> 'ok') = 'true')
+                        + (SELECT count(*) FROM scheduled_posts WHERE platform = 'instagram' AND status = 'published'
+                            AND published_at > now() - interval '24 hours'
+                            AND coalesce(external_post_id, '') NOT LIKE 'stub:%%') AS n""")
+    return int((cur.fetchone() or {}).get("n") or 0)
+
+
+def ig_over_limit(tid) -> str | None:
+    """The reason Instagram must wait, or None."""
+    limit = ig_daily_limit()
+    with tenant_session(tid, "owner") as cur:
+        n = ig_posted_today(cur)
+    if n >= limit:
+        return ("Instagram daily limit reached (%d posts in 24 hours). Too many posts in a day is what makes "
+                "Instagram restrict an account, so this one waits. Post it again tomorrow." % limit)
+    return None
+
+
+def ig_explain(err):
+    err = str(err or "")
+    return IG_RESTRICTED + " (" + err[:160] + ")" if "2207051" in err else err
+
+
 def _publish_instagram(page, caption, images):
     ig = page.get("ig_id")
     if not ig:
@@ -329,12 +371,16 @@ def publish_post(tid, role, post_id, actor, claim_from, page_id=None):
         if "facebook" in post["platforms"]:
             results["facebook"] = _publish_facebook_video(page, post["caption"], url)
         if "instagram" in post["platforms"]:
-            results["instagram"] = _publish_reel(page, post["caption"], url)
+            wait = ig_over_limit(tid)
+            results["instagram"] = {"ok": False, "error": wait} if wait else _publish_reel(page, post["caption"], url)
     else:
         if "facebook" in post["platforms"]:
             results["facebook"] = _publish_facebook(page, post["caption"], images)
         if "instagram" in post["platforms"]:
-            results["instagram"] = _publish_instagram(page, post["caption"], images)
+            wait = ig_over_limit(tid)
+            results["instagram"] = {"ok": False, "error": wait} if wait else _publish_instagram(page, post["caption"], images)
+    if (results.get("instagram") or {}).get("error"):
+        results["instagram"]["error"] = ig_explain(results["instagram"]["error"])
     oks = [r["ok"] for r in results.values()]
     status = "published" if all(oks) else ("partial" if any(oks) else "failed")
     with tenant_session(tid, role) as cur:

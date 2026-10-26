@@ -42,10 +42,12 @@ CONFIRM = {"add_expense", "cancel_appointment", "schedule_post", "publish_post",
 DASH_OPS = {"dashboard_hide": "disable", "dashboard_show": "enable", "dashboard_reorder": "reorder",
             "dashboard_reset": "reset", "dashboard_set": "set"}
 CONFIRM |= set(DASH_OPS)
+# Universal caption (app/universal_caption.py): asked first, owner only
+CONFIRM |= {"universal_caption"}
 ACTIONS = {"navigate", "book_appointment", "reschedule_appointment", "cancel_appointment",
            "complete_appointment", "add_customer", "add_lead", "add_expense", "schedule_post",
            "publish_post", "update_order", "record_order_payment", "cancel_order", "write_campaign",
-           "add_followup", "complete_followup"} | set(DASH_OPS)
+           "add_followup", "complete_followup", "universal_caption"} | set(DASH_OPS)
 _HHMM = re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -189,6 +191,15 @@ def _money(v):
 # ------------------------------------------------------------ describe (for "shall I?")
 def describe(tid, role, action, args, founder=False):
     """Check the action can run and word the question. Raises ActionError."""
+    if action == "universal_caption":
+        if founder or role not in ("owner", "techdeva_admin"):
+            raise ActionError("only the business owner can change the caption that goes under every post")
+        from .universal_caption import get
+        with tenant_session(tid, role) as cur:
+            have = get(cur)
+        return ("Write a new universal caption from your business details and use it under every post? "
+                "It replaces the one you have now." if have else
+                "Write a universal caption from your business details to use under every post?")
     if action in DASH_OPS:
         from . import dashcustom as dc
         if role not in ("owner", "techdeva_admin"):
@@ -244,6 +255,17 @@ def run(tid, role, uid, action, args, founder=False):
     """Carry out one action. Returns (result dict for the dashboard, short fact
     for the reply). Raises ActionError with a speakable reason."""
     args = args if isinstance(args, dict) else {}
+    if action == "universal_caption":
+        from fastapi import HTTPException as _H
+        from .universal_caption import save, write_options
+        try:
+            opts = write_options(tid, args.get("language") or "english")
+        except _H as e:
+            raise ActionError(str(e.detail))
+        best = next((o for o in opts if not o["unbacked"]), opts[0])
+        with tenant_session(tid, role) as cur:
+            u = save(cur, tid, best["text"], best["hashtags"], "jarvis", uid or "jarvis", args.get("language"))
+        return {"refresh": ["captions"], "universal_caption": u}, "it is saved; edit it on the Caption Writer page"
     if action in DASH_OPS:
         body = dict(args, op=DASH_OPS[action], via="jarvis")
         out = _call(tid, role, uid, "POST", "/dashboard-config/change", body)
@@ -381,9 +403,13 @@ def run(tid, role, uid, action, args, founder=False):
             raise ActionError("only the business owner can post for the business")
         from .social import create_draft, is_our_media
         imgs = [u for u in (args.get("image_urls") or []) if isinstance(u, str) and is_our_media(u)]
+        from .universal_caption import apply as uc_apply, get as uc_get
         with tenant_session(tid, role) as cur:
-            draft = create_draft(cur, tid, uid, _need(args, "caption", "post text"),
-                                 args.get("platforms"), image_urls=imgs)
+            uc = uc_get(cur)
+            text = _need(args, "caption", "post text")
+            if uc and uc.get("auto_add", True):
+                text = uc_apply(text, uc)          # the business's own block under every post
+            draft = create_draft(cur, tid, uid, text, args.get("platforms"), image_urls=imgs)
         try:
             out = _call(tid, role, uid, "POST", "/social/posts/%s/schedule" % draft["id"],
                         {"at": _need(args, "at", "date and time to post")})

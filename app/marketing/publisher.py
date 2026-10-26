@@ -108,6 +108,15 @@ def publish_one(tid, post_id) -> dict:
     post, media, camp = _claim(tid, post_id)
     if not post:
         return {"status": "skipped", "reason": "not due, not approved, already taken or already published", "events": []}
+    if post["platform"] == "instagram" and meta.mode() == "live":
+        from ..social import ig_over_limit
+        wait = ig_over_limit(tid)
+        if wait:
+            with tenant_session(tid, "owner") as cur:
+                cur.execute("""UPDATE scheduled_posts SET status = 'approved', attempts = GREATEST(attempts - 1, 0),
+                                      last_error = %s, retry_after = now() + interval '3 hours', updated_at = now()
+                                WHERE id = %s""", (wait, post["id"]))
+            return {"status": "waiting", "error": wait, "events": []}
     if post["platform"] in ("facebook", "instagram") and meta.mode() == "live" and not camp["page"]:
         outcome = meta.Outcome(False, kind="auth", message="No connected Facebook Page for this campaign.")
     else:

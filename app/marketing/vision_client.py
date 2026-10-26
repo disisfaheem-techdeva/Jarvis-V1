@@ -34,8 +34,34 @@ PROMPT = ("Look at this image from a small business's social media gallery and d
 KEYS = ("subject", "setting", "visible_service_guess", "people_present", "text_in_image")
 
 
+_SET = {"at": 0.0, "v": {}}
+
+
+def _settings() -> dict:
+    """platform_settings vision_provider / vision_model, read at most once a minute."""
+    import time
+    if time.time() - _SET["at"] > 60:
+        try:
+            from ..db import tenant_session
+            with tenant_session(None, "techdeva_admin") as cur:
+                cur.execute("SELECT key, value FROM platform_settings WHERE key IN ('vision_provider', 'vision_model')")
+                _SET["v"] = {r["key"]: (r["value"] or "").strip() for r in cur.fetchall()}
+        except Exception:  # noqa: BLE001 -- no database: the environment alone decides
+            _SET["v"] = {}
+        _SET["at"] = time.time()
+    return _SET["v"]
+
+
+def provider() -> str:
+    return (os.environ.get("VISION_PROVIDER", "").strip() or _settings().get("vision_provider", "")).lower()
+
+
+def _model(default: str) -> str:
+    return os.environ.get("VISION_MODEL", "").strip() or _settings().get("vision_model", "") or default
+
+
 def mode() -> str:
-    return "live" if os.environ.get("VISION_PROVIDER", "").strip() else "stub"
+    return "live" if provider() else "stub"
 
 
 def _words(s: str) -> list[str]:
@@ -71,7 +97,7 @@ def _gemini(image: bytes, mime: str) -> dict:
     key = gemini_key()
     if not key:
         raise RuntimeError("GEMINI_API_KEY is not set")
-    model = os.environ.get("VISION_MODEL", "gemini-2.5-flash")
+    model = _model("gemini-2.5-flash")
     r = requests.post("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
                       headers={"x-goog-api-key": key},
                       json={"contents": [{"parts": [{"text": PROMPT},
@@ -88,7 +114,7 @@ def _anthropic(image: bytes, mime: str) -> dict:
     key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not key:
         raise RuntimeError("ANTHROPIC_API_KEY is not set")
-    model = os.environ.get("VISION_MODEL", "claude-haiku-5-5")
+    model = _model("claude-haiku-5-5")
     r = requests.post("https://api.anthropic.com/v1/messages",
                       headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
                       json={"model": model, "max_tokens": 400, "messages": [{"role": "user", "content": [
@@ -107,7 +133,7 @@ PROVIDERS = {"gemini": _gemini, "anthropic": _anthropic}
 def describe(asset: dict, image: bytes | None, mime: str = "image/jpeg") -> dict:
     if mode() == "stub":
         return {"mode": "stub", "summary": _stub(asset), "error": None}
-    prov = os.environ.get("VISION_PROVIDER", "").strip().lower()
+    prov = provider()
     try:
         if prov not in PROVIDERS:
             raise RuntimeError("unknown VISION_PROVIDER %r" % prov)

@@ -4369,6 +4369,7 @@ VIEWS.posts = function(){
           '<button class="btn" id="ps_pick" type="button">📎 Add pictures</button>' +
           '<input type="file" id="ps_file" accept="image/*" multiple style="display:none">' +
         '</div>' +
+        '<div id="ps_more">' + pstMoreHTML() + '</div>' +
         '<div class="card-note" style="margin-top:8px">Add up to 10 pictures: several pictures go out as one Facebook album post and one Instagram carousel. Each picture is sent as JPEG, up to 4 MB. Or add one video instead (MP4 or MOV, up to 100 MB, 3 seconds to 15 minutes): it goes out as a Facebook video and an Instagram Reel. Instagram needs a picture or a video.</div>' +
         '<div style="margin-top:12px"><button class="btn primary" id="ps_save" type="button">Save as draft</button></div>' +
       '</div>');
@@ -4431,8 +4432,130 @@ function pstCard(p, own, connected, pgList){
     acts + '</div>';
 }
 function pstReload(){ S.social_posts = undefined; LOADING.social_posts = false; need('social_posts', '/social/posts', true); }
+/* ---- New post: Content Gallery, Caption Writer and the universal caption, in one place (27 Oct 2026)
+   Pictures come from the Autopilot Gallery (/marketing/media, already public https links), captions
+   from the Caption Writer (/autopilot/caption), the block under every post from /captions/universal.
+   Posting is the same as before: Save as draft, then Post now or Schedule. */
+var PSX = { uc: undefined, gal: undefined, galOpen: false, cwOpen: false, caps: null, busy: false, msg: '' };
+function tdUniApply(text, u){
+  text = String(text || '').replace(/\s+$/, '');
+  if (!u || !u.text || text.indexOf(u.text) !== -1) return text;
+  var have = (text.match(/#\w+/g) || []).map(function(t){ return t.toLowerCase(); });
+  var tags = (u.hashtags || []).filter(function(t){ return have.indexOf(String(t).toLowerCase()) === -1; });
+  return (text + (text ? '\n\n' : '') + u.text + (tags.length ? '\n\n' + tags.join(' ') : '')).slice(0, 2200);
+}
+function psxLoadUni(){
+  if (PSX.uc !== undefined || PSX.ucLoading) return;
+  PSX.ucLoading = true;
+  api('/captions/universal').then(function(r){
+    PSX.ucLoading = false;
+    PSX.uc = r.ok ? (r.data.universal || null) : null;
+    psxRedraw();
+  });
+}
+function pstMoreHTML(){
+  psxLoadUni();
+  var h = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' +
+    '<button class="btn" type="button" id="psx_gal" aria-expanded="' + PSX.galOpen + '">🖼 From Content Gallery</button>' +
+    '<button class="btn" type="button" id="psx_cw" aria-expanded="' + PSX.cwOpen + '">✍ Caption Writer</button>' +
+    '<button class="btn" type="button" id="psx_uc"' + (PSX.uc ? '' : ' disabled') + ' title="' +
+      (PSX.uc ? 'Adds your universal caption under the text' : 'Write your universal caption on the Caption Writer page first') + '">➕ Universal caption</button></div>';
+  if (PSX.uc === null) h += '<div class="card-note" style="margin-top:6px">No universal caption yet: <a href="#/captions">write it on the Caption Writer page</a>.</div>';
+  if (PSX.msg) h += '<div class="card-note" role="status" style="margin-top:6px">' + esc(PSX.msg) + '</div>';
+  if (PSX.galOpen) {
+    var g = PSX.gal;
+    if (g === undefined || g === 'loading') h += '<div class="card-note" style="margin-top:8px">Loading your Content Gallery…</div>';
+    else if (g && g.err) h += '<div class="card-note p1-msg bad" style="margin-top:8px">' + esc(g.err) + '</div>';
+    else {
+      var pics = g.filter(function(m){ return m.kind === 'image' && m.public_url; });
+      h += pics.length
+        ? '<div class="card-note" style="margin-top:8px">Tap pictures to add them to this post (up to ' + PST.MAX + '). Videos from the gallery go out through Autopilot Gallery.</div>' +
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">' + pics.map(function(m){
+            var on = PST.imgs.some(function(x){ return x.url === m.public_url; });
+            return '<button type="button" class="pst-thumb" data-psxg="' + esc(m.public_url) + '" aria-pressed="' + on + '" title="' + esc(m.original_name || '') + '"' +
+              ' style="padding:0;cursor:pointer;outline:' + (on ? '3px solid var(--accent)' : '1px solid var(--line)') + '">' +
+              '<img src="' + esc(m.public_url) + '" alt="' + esc(m.original_name || 'Gallery picture') + '" loading="lazy"></button>';
+          }).join('') + '</div>'
+        : '<div class="card-note" style="margin-top:8px">The Content Gallery has no pictures yet. <a href="#/gallery">Upload them in Autopilot Gallery</a>.</div>';
+    }
+  }
+  if (PSX.cwOpen) {
+    h += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+      '<input class="fld" id="psx_topic" maxlength="400" placeholder="What is the post about? e.g. weekend BBQ platter" style="flex:1;min-width:220px">' +
+      '<button class="btn primary" type="button" id="psx_write"' + (PSX.busy ? ' disabled' : '') + '>' + (PSX.busy ? 'Writing…' : 'Write 3 captions') + '</button></div>';
+    if (PSX.caps) h += PSX.caps.map(function(c, i){
+      var t = c.caption + (c.hashtags && c.hashtags.length ? '\n\n' + c.hashtags.join(' ') : '');
+      return '<div style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:8px">' +
+        '<pre style="white-space:pre-wrap;font:inherit;margin:0 0 8px">' + esc(t) + '</pre>' +
+        (c.unbacked && c.unbacked.length ? '<div class="card-note p1-msg bad">Check: ' + esc(c.unbacked.join('; ')) + ' is not in your business details.</div>' : '') +
+        '<button class="btn" type="button" data-psxc="' + i + '">Use this caption</button></div>';
+    }).join('');
+  }
+  return h;
+}
+function psxRedraw(){
+  var m = document.getElementById('ps_more');
+  if (m) { m.innerHTML = pstMoreHTML(); pstMoreWire(); }
+}
+function pstMoreWire(){
+  var g = function(id){ return document.getElementById(id); };
+  if (!g('ps_more')) return;
+  if (g('psx_gal')) g('psx_gal').onclick = function(){
+    PSX.galOpen = !PSX.galOpen; PSX.msg = '';
+    if (PSX.galOpen && (PSX.gal === undefined || (PSX.gal && PSX.gal.err))) {
+      PSX.gal = 'loading';
+      api('/marketing/media').then(function(r){
+        PSX.gal = r.ok ? ((r.data && r.data.media) || []) : { err: (r.data && r.data.detail) || 'Could not open the Content Gallery.' };
+        psxRedraw();
+      });
+    }
+    psxRedraw();
+  };
+  if (g('psx_cw')) g('psx_cw').onclick = function(){ PSX.cwOpen = !PSX.cwOpen; PSX.msg = ''; psxRedraw(); if (PSX.cwOpen && g('psx_topic')) g('psx_topic').focus(); };
+  if (g('psx_uc')) g('psx_uc').onclick = function(){
+    var c = g('ps_cap'); if (!c || !PSX.uc) return;
+    var before = c.value;
+    c.value = tdUniApply(c.value, PSX.uc);
+    PSX.msg = c.value === before ? 'Your universal caption is already in the text.' : 'Universal caption added under the text.';
+    psxRedraw();
+  };
+  document.querySelectorAll('[data-psxg]').forEach(function(b){
+    b.onclick = function(){
+      var url = b.getAttribute('data-psxg'), i = -1;
+      PST.imgs.forEach(function(x, k){ if (x.url === url) i = k; });
+      if (i !== -1) PST.imgs.splice(i, 1);
+      else if (PST.imgs.length >= PST.MAX) { PSX.msg = 'A post can have ' + PST.MAX + ' pictures.'; psxRedraw(); return; }
+      else PST.imgs.push({ src: url, url: url });
+      var box = g('ps_img'); if (box) box.innerHTML = pstImgHTML();
+      PSX.msg = ''; psxRedraw(); pstWire();
+    };
+  });
+  if (g('psx_topic') && !g('psx_topic').value && g('ps_cap')) g('psx_topic').value = (g('ps_cap').value || '').split('\n')[0].slice(0, 120);
+  if (g('psx_write')) g('psx_write').onclick = function(){
+    var topic = (g('psx_topic').value || '').trim();
+    if (topic.length < 3) { PSX.msg = 'Say in a few words what the post is about.'; psxRedraw(); return; }
+    PSX.busy = true; PSX.msg = ''; psxRedraw();
+    api('/autopilot/caption', { method: 'POST', body: { topic: topic } }).then(function(r){
+      PSX.busy = false;
+      if (r.ok) PSX.caps = r.data.captions; else PSX.msg = (r.data && r.data.detail) || 'The caption writer did not answer.';
+      psxRedraw();
+      if (g('psx_topic')) g('psx_topic').value = topic;
+    });
+  };
+  document.querySelectorAll('[data-psxc]').forEach(function(b){
+    b.onclick = function(){
+      var c = PSX.caps[+b.getAttribute('data-psxc')], box = g('ps_cap');
+      if (!c || !box) return;
+      box.value = c.caption + (c.hashtags && c.hashtags.length ? '\n\n' + c.hashtags.join(' ') : '');
+      if (PSX.uc) box.value = tdUniApply(box.value, PSX.uc);
+      PSX.msg = PSX.uc ? 'Caption added, with your universal caption under it. Edit it if you like.' : 'Caption added. Edit it if you like.';
+      psxRedraw(); box.focus();
+    };
+  });
+}
 function pstWire(){
   var g = function(id){ return document.getElementById(id); };
+  pstMoreWire();
   if (g('ps_pick')) g('ps_pick').onclick = function(){ g('ps_file').click(); };
   if (g('ps_page')) g('ps_page').onchange = function(){ PST.page = g('ps_page').value || null; };
   var needPage = function(){
@@ -9096,10 +9219,83 @@ function siWire(){
 
   /* ---- Caption Writer: AI captions for any business, or write your own ---- */
   var CAP = { busy: false, list: null, err: null, msg: null, topic: '', offers: '', language: 'english', tone: 'friendly', own: '' };
+  // Universal caption (app/universal_caption.py): the block that goes under every post
+  CAP.uc = undefined; CAP.ucOpts = null; CAP.ucBusy = false; CAP.ucMsg = null; CAP.ucAdd = true; CAP.ucPoll = 0; CAP.ucWriting = false;
+  var UC_SRC = { auto: 'written by Jarvis by itself', ai: 'chosen from the AI options', custom: 'written or edited by you', jarvis: 'written by Jarvis when you asked' };
+  function capUniLoad(force){
+    if ((CAP.uc !== undefined && !force) || CAP.ucLoading) return;
+    CAP.ucLoading = true;
+    api('/captions/universal').then(function(r){
+      CAP.ucLoading = false;
+      CAP.uc = r.ok ? (r.data.universal || null) : null;
+      CAP.ucWriting = !!(r.ok && r.data.writing && !CAP.uc);
+      if (typeof PSX !== 'undefined') PSX.uc = CAP.uc;
+      // written by itself the first time: look again for about a minute
+      if (CAP.ucWriting && CAP.ucPoll < 12) { CAP.ucPoll++; setTimeout(function(){ if (currentView() === 'captions') capUniLoad(true); }, 5000); }
+      if (currentView() === 'captions') renderShell();
+    });
+  }
+  function capUniText(u){ return u ? u.text + (u.hashtags && u.hashtags.length ? '\n\n' + u.hashtags.join(' ') : '') : ''; }
+  function capUniHTML(){
+    capUniLoad(false);
+    var u = CAP.uc, body;
+    if (u === undefined) return panel('Universal caption (under every post)', loading('Loading your universal caption...'));
+    body = '<p class="card-note" style="margin:0 0 10px">One block that goes under every post: who you are, what you offer, how to reach you, and your hashtags. ' +
+      (u ? 'Jarvis and the Social Media Publisher use this one.' : (CAP.ucWriting ? 'Jarvis is writing it from your business details now…' : 'Not written yet.')) + '</p>';
+    if (u) body += '<textarea class="p1-cap" id="uc-text" rows="6" maxlength="700" aria-label="Universal caption">' + esc(u.text) + '</textarea>' +
+      '<label style="display:block;margin-top:8px">Hashtags<input class="fld" id="uc-tags" maxlength="400" value="' + esc((u.hashtags || []).join(' ')) + '" style="width:100%"></label>' +
+      '<label style="display:flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="uc-auto"' + (u.auto_add !== false ? ' checked' : '') + '> Add it under the posts Jarvis writes for me</label>' +
+      '<p class="card-note" style="margin-top:6px">Version ' + esc(String(u.version || 1)) + ' · ' + esc(UC_SRC[u.source] || u.source || '') + '</p>';
+    body += '<div class="p1-cap-acts">' + (u ? '<button type="button" class="btn primary" id="uc-save"' + (CAP.ucBusy ? ' disabled' : '') + '>Save</button>' : '') +
+      '<button type="button" class="btn' + (u ? '' : ' primary') + '" id="uc-write"' + (CAP.ucBusy ? ' disabled' : '') + '>' +
+      (CAP.ucBusy ? 'Working...' : (u ? 'Write 3 new options' : 'Write 3 options')) + '</button></div>';
+    if (CAP.ucMsg) body += '<p class="card-note p1-msg' + (CAP.ucMsg.bad ? ' bad' : '') + '" role="status">' + esc(CAP.ucMsg.text) + '</p>';
+    if (CAP.ucOpts) body += CAP.ucOpts.map(function(o, i){
+      return '<div style="border-top:1px solid var(--line);margin-top:12px;padding-top:10px"><div class="card-note">Option ' + (i + 1) + '</div>' +
+        '<pre style="white-space:pre-wrap;font:inherit;margin:6px 0">' + esc(capUniText(o)) + '</pre>' +
+        (o.unbacked && o.unbacked.length ? '<p class="card-note p1-msg bad">Check before using: ' + esc(o.unbacked.join('; ')) + ' is not in your business details.</p>' : '') +
+        '<button type="button" class="btn" data-ucuse="' + i + '">Use this one</button></div>';
+    }).join('');
+    return panel('Universal caption (under every post)', '<div style="padding:14px 16px">' + body + '</div>');
+  }
+  function capWithUni(text){ return CAP.ucAdd && CAP.uc ? tdUniApply(text, CAP.uc) : text; }
+  function capUniWire(){
+    var ug = function(id){ return document.getElementById(id); };
+    function ucPut(body, okText){
+      CAP.ucBusy = true; CAP.ucMsg = null; renderShell();
+      api('/captions/universal', { method: 'PUT', body: body }).then(function(r){
+        CAP.ucBusy = false;
+        if (r.ok) { CAP.uc = r.data.universal; CAP.ucOpts = null; CAP.ucMsg = { text: okText }; if (typeof PSX !== 'undefined') PSX.uc = CAP.uc; }
+        else CAP.ucMsg = { text: (r.data && r.data.detail) || 'Not saved.', bad: true };
+        renderShell();
+      });
+    }
+    if (ug('uc-save')) ug('uc-save').onclick = function(){
+      ucPut({ text: ug('uc-text').value, hashtags: String(ug('uc-tags').value || '').split(/[\s,]+/).filter(Boolean),
+              auto_add: ug('uc-auto').checked }, 'Saved. It goes under your posts from now on.');
+    };
+    if (ug('uc-write')) ug('uc-write').onclick = function(){
+      CAP.ucBusy = true; CAP.ucMsg = null; renderShell();
+      api('/captions/universal/write', { method: 'POST', body: { language: CAP.language } }).then(function(r){
+        CAP.ucBusy = false;
+        if (r.ok) CAP.ucOpts = r.data.options;
+        else CAP.ucMsg = { text: (r.data && r.data.detail) || 'The caption writer did not answer.', bad: true };
+        renderShell();
+      });
+    };
+    document.querySelectorAll('[data-ucuse]').forEach(function(b){
+      b.onclick = function(){
+        var o = CAP.ucOpts[+b.getAttribute('data-ucuse')];
+        ucPut({ text: o.text, hashtags: o.hashtags, source: 'ai' }, 'Saved as your universal caption.');
+      };
+    });
+    if (ug('cap-uc-add')) ug('cap-uc-add').onchange = function(){ CAP.ucAdd = this.checked; };
+  }
   VIEWS.captions = function(){
     if (!isOwner()) return ownerOnlyPage('captions');
     var out = '<h1>Caption Writer</h1><p class="sub">Captions for a Facebook or Instagram post, written from your own services, products and prices. ' +
       'Nothing is posted: pick one, edit it, and it becomes a draft on the Social Media Publisher.</p>';
+    out += capUniHTML();
     function opt(v, cur, label){ return '<option value="' + v + '"' + (v === cur ? ' selected' : '') + '>' + label + '</option>'; }
     out += '<div class="panel"><div class="panel-head"><div class="panel-title">Write with AI</div></div><form id="cap-f" class="tdm-form">' +
       '<label class="wide">What is the post about? *<input name="topic" required minlength="3" maxlength="400" value="' + esc(CAP.topic) + '" placeholder="e.g. weekend BBQ platter, Hair PRP results, new batch starting Monday"></label>' +
@@ -9108,6 +9304,8 @@ function siWire(){
       '<label>Tone<select name="tone">' + opt('friendly', CAP.tone, 'Friendly') + opt('premium', CAP.tone, 'Premium') + opt('fun', CAP.tone, 'Fun') + opt('urgent', CAP.tone, 'Urgent') + '</select></label>' +
       '<div class="wide"><button class="btn primary" type="submit"' + (CAP.busy ? ' disabled' : '') + '>' + (CAP.busy ? 'Writing...' : (CAP.list ? 'Write 3 more' : 'Write 3 captions')) + '</button></div></form></div>';
     if (CAP.msg) out += '<p class="card-note p1-msg' + (CAP.msg.bad ? ' bad' : '') + '" role="status">' + esc(CAP.msg.text) + '</p>';
+    if (CAP.uc) out += '<label class="card-note" style="display:flex;gap:6px;align-items:center;margin:4px 0 10px"><input type="checkbox" id="cap-uc-add"' +
+      (CAP.ucAdd ? ' checked' : '') + '> Add my universal caption under the post when I make it a draft</label>';
     if (CAP.busy) out += panel('Captions', loading('Writing from your business details...'));
     else if (CAP.err) out += panel('Captions', errState(CAP.err));
     else if (CAP.list) out += CAP.list.map(function(c, i){
@@ -9125,6 +9323,7 @@ function siWire(){
   function capDraft(text){
     text = String(text || '').trim();
     if (text.length < 2) { CAP.msg = { text: 'Write the caption first.', bad: true }; renderShell(); return; }
+    text = capWithUni(text);
     api('/social/posts', { method: 'POST', body: { caption: text } }).then(function(r){
       CAP.msg = r.ok ? { text: 'Saved as a draft. Add a picture and publish it from the Social Media Publisher.' }
                      : { text: (r.data && r.data.detail) || 'The draft was not saved.', bad: true };
@@ -9133,6 +9332,7 @@ function siWire(){
     });
   }
   function capWire(){
+    capUniWire();
     var f = document.getElementById('cap-f');
     if (!f) return;
     f.onsubmit = function(e){
@@ -11369,7 +11569,12 @@ function galConfirmApprove(){
         var every = galSelected().length === (GAL.media || []).length;
         (GAL.media || []).forEach(function(m){ GAL.sel[m.id] = !every; }); renderShell();
       };
-      if (g('gal-name')) g('gal-name').oninput = function(){ GAL.name = this.value; };
+      if (g('gal-name')) g('gal-name').oninput = function(){
+        GAL.name = this.value;
+        // the button follows the name as it is typed, not only when the field is left
+        var b = g('gal-gen'), w = g('gal-gen-why');
+        if (b && w && /name/.test(w.textContent) && this.value.trim()) { b.disabled = false; b.removeAttribute('aria-describedby'); w.textContent = ''; }
+      };
       if (g('gal-name')) g('gal-name').onchange = function(){ renderShell(); };
       all('[data-galday]').forEach(function(b){ b.onclick = function(){
         var d = b.getAttribute('data-galday'), i = GAL.rule.days.indexOf(d);

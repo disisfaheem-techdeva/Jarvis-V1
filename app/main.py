@@ -162,6 +162,9 @@ app.include_router(make_storefront_router(P))
 # Dashboard Customizer (behind DASHBOARD_CUSTOMIZER_ENABLED): app/dashcustom.py
 from .dashcustom import make_dashcustom_router
 app.include_router(make_dashcustom_router())
+# Universal caption under every post: app/universal_caption.py
+from .universal_caption import make_universal_caption_router
+app.include_router(make_universal_caption_router())
 
 # The two client-facing pages. The API image is built from ./app, so web/ is
 # mounted in (see docker-compose.yml) rather than baked into the image; WEB_DIR
