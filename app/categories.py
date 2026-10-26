@@ -77,7 +77,10 @@ def facts(cur, tid):
             "knowledge": knowledge}
 
 
-GUIDE_MAX = 20000          # the whole guide; the agent's knowledge block holds up to 60,000 characters
+GUIDE_MAX = 50000          # the whole guide (raised from 20,000 on the owner's request, 26 Oct 2026)
+AGENT_MAX = 60000          # the agent keeps only the first 60,000 characters of the knowledge block
+                           # (ops/pairctl writeKnowledge); anything past it, the hard rule at the end
+                           # included, would be dropped silently, so a guide that overflows is refused
 GUIDE_PART = 2000          # business_knowledge.body is at most 2,000 characters per row
 
 
@@ -423,6 +426,12 @@ def make_categories_router():
                                VALUES (%s, 'guide', %s, %s, %s)""",
                             (tid, "Owner's guide, part %02d of %02d" % (i + 1, len(parts)), part,
                              uid if uid and len(str(uid)) == 36 else None))
+            # the whole block the agent receives must fit, or its end (the hard rule) would be cut off
+            total = len(knowledge_block(facts(cur, tid)))
+            if total > AGENT_MAX:
+                raise HTTPException(400, "Together with your products, prices and rules this comes to %s characters; "
+                                         "your agent can take %s. Shorten the guide by about %s characters." % (
+                                             "{:,}".format(total), "{:,}".format(AGENT_MAX), "{:,}".format(total - AGENT_MAX)))
             record(cur, action="business.guide_" + ("set" if parts else "remove"), resource="business_knowledge",
                    resource_id=tid, actor=str(uid), actor_type="human", status="ok",
                    detail={"chars": len(text), "parts": len(parts)})

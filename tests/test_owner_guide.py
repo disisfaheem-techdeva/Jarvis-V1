@@ -66,7 +66,7 @@ def test_the_guide_reaches_the_agent_exactly_as_written(world, agent):
     assert r.status_code == 200, r.text
     assert r.json()["chars"] == len(GUIDE) and r.json()["parts"] >= 3 and r.json()["sync"].startswith("synced")
     g = c.get("/business-profile/guide", headers=world["h"]["owner"]).json()
-    assert g["text"] == GUIDE and g["max"] == 20000
+    assert g["text"] == GUIDE and g["max"] == 50000
     path, text = agent[-1]
     assert path == "/soul/knowledge" and GUIDE in text                                    # line breaks and examples intact
     assert text.index("## The owner's guide") < text.index("## Greeting") < text.index("## Hard rule")
@@ -89,10 +89,25 @@ def test_saving_again_replaces_and_empty_removes(world, agent):
 
 def test_limits_roles_and_other_businesses(world, agent):
     c = TestClient(app)
-    assert c.put("/business-profile/guide", json={"text": "x" * 20001}, headers=world["h"]["owner"]).status_code == 400
+    assert c.put("/business-profile/guide", json={"text": "x" * 50001}, headers=world["h"]["owner"]).status_code == 400
+    assert c.get("/business-profile/guide", headers=world["h"]["owner"]).json()["max"] == 50000
     assert c.put("/business-profile/guide", json={"text": "too short"}, headers=world["h"]["owner"]).status_code == 400
     assert c.put("/business-profile/guide", json={"text": GUIDE}, headers=world["h"]["staff"]).status_code == 403
     c.put("/business-profile/guide", json={"text": GUIDE}, headers=world["h"]["owner"])
     assert c.get("/business-profile/guide", headers=world["h"]["b_owner"]).json()["text"] == ""   # B sees none of A's
     # the short rules box keeps its own limit; Jarvis still asks for a sentence or two there
     assert c.post("/console", json={"message": "x" * 2001}, headers=world["h"]["owner"]).status_code == 400
+
+
+def test_a_long_guide_fits_but_never_pushes_the_hard_rule_out(world, agent, monkeypatch):
+    c, h = TestClient(app), world["h"]["owner"]
+    big = ("Customer: kya aap ke paas family deal hai?\nBot: Ji, Family Deal 4 logon ke liye.\n\n" * 700)[:49000]
+    r = c.put("/business-profile/guide", json={"text": big}, headers=h)
+    assert r.status_code == 200, r.text
+    text = agent[-1][1]
+    assert len(text) <= categories.AGENT_MAX and text.rstrip().endswith("If you are not sure, say the team will confirm.")
+    before = c.get("/business-profile/guide", headers=h).json()["text"]
+    monkeypatch.setattr(categories, "AGENT_MAX", len(text) - 1000)      # products and rules leave too little room
+    r = c.put("/business-profile/guide", json={"text": big + " more"}, headers=h)
+    assert r.status_code == 400 and "Shorten the guide" in r.json()["detail"]
+    assert c.get("/business-profile/guide", headers=h).json()["text"] == before                 # the old guide is kept
