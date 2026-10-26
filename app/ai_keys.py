@@ -509,6 +509,122 @@ def _incident(cur, kind, severity, title, detail):
     _upsert_incident(cur, None, kind, severity, title, detail)
 
 
+# ---------------------------------------------------------------- automatic mode
+# The founder only adds keys (platform_settings ai_auto, on unless set to 0):
+#   * Groq keys: the first working one transcribes voice notes for every agent;
+#   * Google keys: each new one is put on the test bench by itself (two short
+#     questions on the TechDeva agent); once it passes it goes into rotation
+#     and every agent not on a working, tested key is moved to the key with the
+#     fewest agents. Limits are then handled by auto-switch and auto-hold.
+AUTO_QUESTIONS = DEFAULT_QUESTIONS[:2]
+
+
+def _auto_on(cur):
+    cur.execute("SELECT value FROM platform_settings WHERE key = 'ai_auto'")
+    r = cur.fetchone()
+    return not (r and r["value"] == "0")
+
+
+def _set_setting(cur, key, value):
+    cur.execute("""INSERT INTO platform_settings (key, value) VALUES (%s, %s)
+                   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""", (key, value))
+
+
+def _bench_agent(cur, agents):
+    """Where new keys are tried: TechDeva's own agent, else the first running one."""
+    cur.execute("SELECT value FROM platform_settings WHERE key = 'home_tenant_id'")
+    h = cur.fetchone()
+    home = h["value"] if h else None
+    for a in agents:
+        if home and str(a["tenant_id"]) == home:
+            return a["agent_key"]
+    running = [a for a in agents if (a.get("live") or {}).get("running")]
+    return (running or agents or [{}])[0].get("agent_key")
+
+
+def auto_balance():
+    out = []
+    with tenant_session(None, "techdeva_admin") as cur:
+        if not _auto_on(cur):
+            return out
+        cur.execute("SELECT * FROM ai_keys ORDER BY created_at")
+        keys = [dict(k) for k in cur.fetchall()]
+        agents = _agents(cur)
+        cur.execute("SELECT * FROM ai_agent_live")
+        live = {r["agent_key"]: dict(r) for r in cur.fetchall()}
+        for a in agents:
+            a["live"] = live.get(a["agent_key"])
+
+        # voice notes: the first working Groq key, for every agent
+        groq = [k for k in keys if k["provider"] == "groq" and k["status"] == "ok"]
+        v = _voice(cur)
+        if groq and (v["key_id"] not in {str(k["id"]) for k in groq} or v["agents"]):
+            k = next((k for k in groq if str(k["id"]) == v["key_id"]), groq[0])
+            model = pick_stt_model(((k["test_detail"] or {}).get("stt_models")))
+            _set_setting(cur, "ai_stt_key", str(k["id"]))
+            _set_setting(cur, "ai_stt_model", model)
+            _set_setting(cur, "ai_stt_agents", "")
+            out.append("voice notes: %s (%s) for every agent" % (k["label"], model))
+        elif not groq and v["key_id"]:
+            _set_setting(cur, "ai_stt_key", "")
+            out.append("voice notes off: no working Groq key")
+
+        # Google keys: an untested one goes on the bench by itself
+        bench_agent = _bench_agent(cur, agents)
+        gem = [k for k in keys if k["provider"] == "gemini" and k["status"] == "ok" and k["model"]]
+        for k in gem:
+            if _passed_bench(cur, k["id"]):
+                continue
+            cur.execute("""SELECT 1 FROM ai_model_tests WHERE key_id = %s AND (status IN ('pending','running')
+                              OR requested_at > now() - interval '6 hours')""", (k["id"],))
+            if cur.fetchone() or not bench_agent:
+                continue
+            cur.execute("SELECT 1 FROM ai_model_tests WHERE agent_key = %s AND status IN ('pending','running')", (bench_agent,))
+            if cur.fetchone():
+                continue
+            cur.execute("""INSERT INTO ai_model_tests (agent_key, key_id, model, questions, total, requested_by)
+                           VALUES (%s, %s, %s, %s, %s, 'automatic')""",
+                        (bench_agent, k["id"], "(agent's Gemini chain)", json.dumps(AUTO_QUESTIONS), len(AUTO_QUESTIONS)))
+            out.append("bench queued for %s on %s" % (k["label"], bench_agent))
+            break                                   # one at a time: the bench takes a few minutes
+
+        # tested Google keys: in rotation, and agents spread across them
+        ready = [k for k in gem if _passed_bench(cur, k["id"])]
+        for i, k in enumerate(ready):
+            if not k["in_pool"]:
+                cur.execute("UPDATE ai_keys SET in_pool = true, pool_order = %s, updated_at = now() WHERE id = %s",
+                            (i + 1, k["id"]))
+                out.append("%s in rotation" % k["label"])
+        if not ready:
+            return out
+        cur.execute("SELECT agent_key, key_id, status FROM ai_key_assignments")
+        assign = {r["agent_key"]: dict(r) for r in cur.fetchall()}
+        ready_ids = {str(k["id"]) for k in ready}
+        load = {str(k["id"]): 0 for k in ready}
+        for a in assign.values():
+            if str(a["key_id"] or "") in load:
+                load[str(a["key_id"])] += 1
+        for a in agents:
+            ak = a["agent_key"]
+            cur_a = assign.get(ak)
+            if cur_a and (cur_a["status"] == "pending" or str(cur_a["key_id"] or "") in ready_ids):
+                continue
+            cur.execute("SELECT 1 FROM ai_key_switches WHERE agent_key = %s AND at > now() - interval '30 minutes'", (ak,))
+            if cur.fetchone():
+                continue
+            kid = min(load, key=lambda x: (load[x], [str(k["id"]) for k in ready].index(x)))
+            cur.execute("""INSERT INTO ai_key_assignments (agent_key, key_id, model, status, requested_by, requested_at, applied_at, error)
+                           VALUES (%s, %s, NULL, 'pending', 'automatic', now(), NULL, NULL)
+                           ON CONFLICT (agent_key) DO UPDATE SET key_id = EXCLUDED.key_id, model = NULL, status = 'pending',
+                                 requested_by = 'automatic', requested_at = now(), applied_at = NULL, error = NULL""", (ak, kid))
+            load[kid] += 1
+            label = next(k["label"] for k in ready if str(k["id"]) == kid)
+            record(cur, action="techdeva.ai_key.auto_assign", resource="ai_key_assignments", resource_id=ak,
+                   actor="automatic", actor_type="system", status="ok", detail={"agent": ak, "key": label}, tenant_id=None)
+            out.append("%s -> %s" % (ak, label))
+    return out
+
+
 def make_ai_keys_router() -> APIRouter:
     router = APIRouter()
 
@@ -539,6 +655,7 @@ def make_ai_keys_router() -> APIRouter:
                 k["bench_passed"] = _passed_bench(cur, k["id"])
             platform_bench_passed = _passed_bench(cur, None)
             voice = _voice(cur)
+            auto_on = _auto_on(cur)
             autoswitch_on = _autoswitch_on(cur)
             cur.execute("SELECT agent_key, from_last4, to_last4, reason, at FROM ai_key_switches ORDER BY at DESC LIMIT 20")
             switches = [dict(r) for r in cur.fetchall()]
@@ -576,7 +693,7 @@ def make_ai_keys_router() -> APIRouter:
                 "agent_providers": list(PROVIDERS), "encryption": crypto.enabled(),
                 "benches": benches, "defaults": defaults, "default_questions": DEFAULT_QUESTIONS,
                 "platform_bench_passed": platform_bench_passed, "autohold": autohold_on,
-                "autoswitch": autoswitch_on, "switches": switches, "voice": voice}
+                "autoswitch": autoswitch_on, "switches": switches, "voice": voice, "auto": auto_on}
 
     @router.post("/techdeva/api-keys")
     def add(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
@@ -832,6 +949,18 @@ def make_ai_keys_router() -> APIRouter:
                    detail={"last4": row["last4"], "in_pool": in_pool, "order": order}, tenant_id=None)
         return {"in_pool": in_pool, "pool_order": order}
 
+    @router.put("/techdeva/ai-auto")
+    def set_auto(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                 authorization: str | None = Header(None),
+                 td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        uid = _admin(x_tenant_id, x_role, authorization, td_session)
+        on = bool(body.get("on"))
+        with tenant_session(None, "techdeva_admin") as cur:
+            _set_setting(cur, "ai_auto", "1" if on else "0")
+            record(cur, action="techdeva.ai_key.auto_setting", resource="platform_settings", resource_id="ai_auto",
+                   actor=str(uid) if uid else None, status="ok", detail={"on": on}, tenant_id=None)
+        return {"on": on}
+
     @router.put("/techdeva/ai-voice")
     def set_voice(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
                   authorization: str | None = Header(None),
@@ -1046,6 +1175,10 @@ def _cli(argv):
         for line in autoswitch(rows):
             print(line)
         return 0
+    if cmd == "auto-balance":
+        for line in auto_balance():
+            print(line)
+        return 0
     if cmd == "stt-agents":
         # the agents that get voice notes, one per line (nothing = every agent)
         with tenant_session(None, "techdeva_admin") as cur:
@@ -1086,8 +1219,7 @@ def _cli(argv):
             job = {"provider": "gemini", "base_url": None, "model": None,
                    "key": (os.environ.get("GEMINI_API_KEY") or "").strip().strip("'\"")}
         else:
-            job = {"provider": r["provider"], "base_url": r["base_url"],
-                   "model": r["model"] if r["provider"] != "gemini" else None, "key": _open(r)}
+            job = {"provider": r["provider"], "base_url": r["base_url"], "model": r["model"], "key": _open(r)}
         job.update({"id": str(r["id"]), "agent_key": r["agent_key"], "questions": r["questions"]})
         sys.stdout.write(json.dumps(job) + "\n")
         return 0

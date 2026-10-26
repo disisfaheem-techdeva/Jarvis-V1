@@ -404,6 +404,12 @@ function wireApiKeys(){
     try { await api('/techdeva/ai-autohold', {method: 'PUT', body: JSON.stringify({on: ah.checked})}); } catch (ex) { alert(ex.message); }
     reload();
   };
+  /* Automatic mode. */
+  const autoAll = document.getElementById('apk-autoall');
+  if (autoAll) autoAll.onchange = async () => {
+    try { await api('/techdeva/ai-auto', {method: 'PUT', body: JSON.stringify({on: autoAll.checked})}); } catch (ex) { alert(ex.message); }
+    reload();
+  };
   /* Voice notes key. */
   const vsave = document.getElementById('apk-voice-save');
   if (vsave) vsave.onclick = async () => {
@@ -778,6 +784,17 @@ const VIEWS = {
         kpi('Model calls today', nf(sum(d.agents || [], 'today', 'ok')), 'answered by a model, all agents') +
         kpi('Limit hits today', nf(sum(d.agents || [], 'today', 'rate_limited')), nf(sum(d.agents || [], 'today', 'overloaded')) + ' overloaded (503)', sum(d.agents || [], 'today', 'rate_limited') ? 'warn' : '') +
         kpi('Platform key', plat, 'GEMINI_API_KEY in the server .env') + '</div>' +
+      '<section><h2>Automatic</h2><div class="card">' + (function(){
+        const gem = keys.filter(k => k.provider === 'gemini'), groq = keys.filter(k => k.provider === 'groq' && k.status === 'ok');
+        const vo = d.voice || {}, vk = keys.find(k => k.id === vo.key_id);
+        return '<label style="display:inline-flex;gap:8px;align-items:center"><input type="checkbox" id="apk-autoall"' + (d.auto ? ' checked' : '') + '> <b>Do everything automatically: I only add keys</b></label>' +
+          '<ul class="sub" style="margin:8px 0 0 18px;padding:0">' +
+          '<li><b>Groq keys</b> write out voice notes for every agent: ' + (vk ? esc(vk.label) + ' (' + esc(vo.model || '') + ')' + ((vo.agents || []).length ? ', now only for ' + esc(vo.agents.join(', ')) : ', every agent') : (groq.length ? 'starting within 5 minutes' : 'add a Groq key')) + '.</li>' +
+          '<li><b>Google keys</b> answer customers: a new key is tried on the test bench by itself, then agents are spread across the keys that passed. ' +
+            esc(gem.filter(k => k.bench_passed).length) + ' of ' + esc(gem.length) + ' Google keys tested and in use.</li>' +
+          '<li>When a key runs out, auto-switch moves its agents to another tested key; with none left, auto-hold pauses them until the quota comes back.</li></ul>' +
+          '<div class="sub" style="margin-top:6px">Checked every 5 minutes. Each agent that moves restarts for a few seconds. Turn this off to choose keys and models by hand below.</div>';
+      })() + '</div></section>' +
       '<section><h2>Add a key</h2><div class="card"><form id="apk-add" style="display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));align-items:end">' +
         '<label class="sub">Provider<select id="apk-prov" class="fee" style="width:100%;text-align:left">' + provOpts + '</select></label>' +
         '<label class="sub">Name<input id="apk-label" class="fee" style="width:100%;text-align:left" maxlength="80" placeholder="e.g. Ali - Google" required></label>' +

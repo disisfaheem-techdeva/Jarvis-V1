@@ -83,6 +83,12 @@ while IFS=$'\t' read -r agent last4 provider base model value; do
 done <<< "$pending"
 unset pending value
 
+# ---- 1a. automatic mode (API Manager > Automatic): Groq keys -> voice notes for every agent;
+#      Google keys -> bench by themselves, then agents spread across the tested ones.
+#      What it decides is applied by the steps below (this minute or the next).
+auto=$(pyx auto-balance 2>/dev/null) || log "automatic mode check failed"
+[ -n "${auto:-}" ] && log "automatic: $(echo "$auto" | tr '\n' ';')"
+
 # ---- 1b. On/Off (founder console) and auto-hold resume: stop or start the agent's compose project
 power=$(pyx power-pending 2>/dev/null) || { log "could not read on/off requests"; power=""; }
 while IFS=$'\t' read -r agent want; do

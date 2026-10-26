@@ -82,6 +82,9 @@ def run(job):
                 shutil.copy2(saved, os.path.join(sbx, "saved.json"))
                 subprocess.run([sys.executable, os.path.join(HERE, "ai_key_config.py"), cfg,
                                 os.path.join(sbx, "saved.json"), "gemini"], check=True, capture_output=True)
+            if job.get("model"):                 # the model this key gives an agent comes first, as in a real switch
+                subprocess.run([sys.executable, os.path.join(HERE, "ai_key_config.py"), cfg,
+                                os.path.join(sbx, "saved2.json"), "gemini-model", job["model"]], check=True, capture_output=True)
         else:
             env["TD_AI_KEY"] = job["key"]
             subprocess.run([sys.executable, os.path.join(HERE, "ai_key_config.py"), cfg, os.path.join(sbx, "saved.json"),
