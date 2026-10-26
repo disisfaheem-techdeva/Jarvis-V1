@@ -157,6 +157,10 @@ docker exec "$PAIR" sh -c 'cd /opt/data/scripts/whatsapp-bridge && [ "$(sha256su
   && ok "T9 bridge packages stamped (the gateway will not try to reinstall them)" || bad "T9 bridge package stamp missing (WhatsApp would never start after pairing)"
 [ $fail = 0 ] || die "verification failed; the agent is up but NOT assigned to the tenant. Remove with remove-agent.sh --key $KEY --yes"
 
+# ---- T13/T14: the reply guard (td_guard: no photo replies, nothing internal to a customer),
+#      HERMES_MAX_TOKENS 4096 and reasoning low, so a reply is never cut and sent in pieces
+bash "$HERE/add-td-guard.sh" "$KEY" || die "add-td-guard.sh failed for $KEY"
+
 # ---- tell the platform which agent this tenant uses (TechDeva action)
 if [ $ASSIGN = 1 ]; then
   cd "$PLATFORM"

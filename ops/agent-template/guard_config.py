@@ -36,6 +36,9 @@ def main(path):
     cfg.setdefault("display", {})["memory_notifications"] = "off"
     cfg.setdefault("memory", {})["nudge_interval"] = 0
     cfg.setdefault("skills", {})["creation_nudge_interval"] = 0
+    # T14: a sales reply needs little thinking; at "medium" Gemini 3.x spent most of
+    # the shared 800-token output cap thinking and the reply was cut and continued
+    cfg.setdefault("agent", {})["reasoning_effort"] = "low"
     if json.dumps(cfg, sort_keys=True, default=str) == before:
         print("guard_config: unchanged")
         return 3
@@ -46,7 +49,8 @@ def main(path):
     os.chmod(tmp, st.st_mode & 0o7777)
     back = yaml.safe_load(open(tmp, encoding="utf-8"))
     if (PLUGIN not in back["plugins"]["enabled"] or back["display"]["memory_notifications"] != "off"
-            or back["memory"]["nudge_interval"] != 0 or back["skills"]["creation_nudge_interval"] != 0):
+            or back["memory"]["nudge_interval"] != 0 or back["skills"]["creation_nudge_interval"] != 0
+            or back["agent"]["reasoning_effort"] != "low"):
         os.unlink(tmp)
         sys.exit("guard_config: read-back mismatch, config not changed")
     os.replace(tmp, path)

@@ -1,6 +1,9 @@
 #!/bin/bash
 # T13: on WhatsApp a photo is not answered, and no "💾 Self-improvement review"
 # (or any background review) reaches a customer.
+# T14: every outgoing WhatsApp text passes the reply guard (td_guard.clean_reply),
+# the agent has HERMES_MAX_TOKENS=4096 and reasoning_effort low (no cut replies).
+# new-agent.sh runs this on every new agent.
 #
 #   add-td-guard.sh <agent-key>
 #
@@ -24,6 +27,16 @@ if ! diff -rq "$HERE/td_guard" "$V/plugins/td_guard" >/dev/null 2>&1; then
   mkdir -p "$V/plugins/td_guard"
   cp "$HERE/td_guard/plugin.yaml" "$HERE/td_guard/__init__.py" "$V/plugins/td_guard/"
   chown -R "$OWN" "$V/plugins"; chmod 755 "$V/plugins" "$V/plugins/td_guard"; chmod 644 "$V/plugins/td_guard/"*
+  changed=1
+fi
+# T14: the shared workspace .env sets HERMES_MAX_TOKENS=800 (the clinic stack's setting); a
+# Gemini 3.x reply thinks first and was cut at 800, continued, and sent joined. This
+# agent's own agent.env (read after the shared file) gives it room.
+if ! grep -qx 'HERMES_MAX_TOKENS=4096' "$D/agent.env"; then
+  cp -a "$D/agent.env" "$D/agent.env.bak-guard-$TS"
+  tmp=$(mktemp "$D/.agent.env.XXXXXX")
+  grep -v '^HERMES_MAX_TOKENS=' "$D/agent.env" > "$tmp"; echo 'HERMES_MAX_TOKENS=4096' >> "$tmp"
+  chmod 600 "$tmp"; mv "$tmp" "$D/agent.env"
   changed=1
 fi
 set +e; python3 "$HERE/guard_config.py" "$V/config.yaml"; rc=$?; set -e
