@@ -73,8 +73,70 @@ def facts(cur, tid):
     cur.execute("""SELECT id::text AS id, kind, title, body FROM business_knowledge
                     WHERE tenant_id = %s AND active ORDER BY kind, created_at LIMIT 300""", (tid,))
     knowledge = [dict(r) for r in cur.fetchall()]
+    cur.execute("SELECT approved FROM business_profiles WHERE tenant_id = %s AND approved IS NOT NULL", (tid,))
+    p = cur.fetchone()
     return {"business": t, "category": cat, "services": services, "products": products, "hours": hours,
-            "knowledge": knowledge}
+            "knowledge": knowledge, "website": website_facts(p["approved"] if p else None)}
+
+
+TEST_PER_DAY = 30         # dashboard test messages a business may send its agent per day
+WEBSITE_MAX = 6000         # the website section never crowds out the lists and the hard rule
+
+
+def _observed(x):
+    """The text of one profile claim, only when it was read ON the website
+    (app/website_agent.py marks every claim observed / derived / inferred)."""
+    if isinstance(x, dict) and x.get("basis") == "observed":
+        v = x.get("value")
+        if isinstance(v, str) and v.strip():
+            return " ".join(v.split())[:300]
+    return None
+
+
+def website_facts(profile):
+    """What the agent may repeat from the owner-approved website profile: only
+    claims seen on the site itself, never derived or guessed ones, and never a
+    price (prices come from the services and products lists alone)."""
+    if not isinstance(profile, dict):
+        return []
+    out = []
+    ident = profile.get("identity") or {}
+    for k, label in (("description", "What it does"), ("tagline", "In one line")):
+        v = _observed(ident.get(k))
+        if v:
+            out.append("%s: %s" % (label, v))
+    c = profile.get("contact") or {}
+    for k, label in (("address", "Address"), ("hours", "Hours (as the website says)")):
+        v = _observed(c.get(k))
+        if v:
+            out.append("%s: %s" % (label, v))
+    for k, label in (("phones", "Phone"), ("emails", "Email"), ("service_areas", "Serves")):
+        vals = [v for v in (_observed(x) for x in (c.get(k) or [])) if v]
+        if vals:
+            out.append("%s: %s" % (label, ", ".join(dict.fromkeys(vals))))
+    for k, label in (("value_proposition", "Why customers choose it"), ("differentiators", "Strength"), ("policies", "Policy"), ("offers", "Offer on the website")):
+        items = profile.get(k)
+        for x in (items if isinstance(items, list) else [items])[:8]:
+            v = _observed(x)
+            if v and not re.search(r"(?i)\b(rs\.?|pkr|usd|\$)\s?\d", v):
+                out.append("%s: %s" % (label, v))
+    for x in (profile.get("faqs") or [])[:12]:
+        if isinstance(x, dict) and x.get("basis") == "observed":
+            v = x.get("value")
+            if isinstance(v, dict):
+                q, a = v.get("question"), v.get("answer")
+            else:
+                q, a = x.get("question"), x.get("answer")
+            if isinstance(q, str) and isinstance(a, str) and q.strip() and a.strip() \
+                    and not re.search(r"(?i)\b(rs\.?|pkr|usd|\$)\s?\d", a):
+                out.append("Q: %s A: %s" % (" ".join(q.split())[:200], " ".join(a.split())[:300]))
+    text, kept = 0, []
+    for line in out:
+        text += len(line) + 3
+        if text > WEBSITE_MAX:
+            break
+        kept.append(line)
+    return kept
 
 
 GUIDE_MAX = 50000          # the whole guide (raised from 20,000 on the owner's request, 26 Oct 2026)
@@ -175,6 +237,11 @@ def knowledge_block(f):
             out.append("- %s%s" % (x["title"], (": " + x["body"]) if x["body"] else ""))
         for x in by["faq"]:
             out.append("- Q: %s A: %s" % (x["title"], x["body"] or "(the team will answer)"))
+    if f.get("website"):
+        out += ["", "## From the business's own website (approved by the owner)",
+                "Use these to answer questions about the business. The lists above still decide what is "
+                "offered and at what price; if a line here disagrees with them, the lists win."]
+        out += ["- " + x for x in f["website"]]
     if by["not_offered"]:
         out += ["", "## This business does NOT offer"]
         for x in by["not_offered"]:
@@ -205,6 +272,14 @@ def knowledge_block(f):
                 "replies. The lists above still decide what is offered and at what price: if this guide names "
                 "an item, price, time or offer that is not listed above, the list wins.",
                 guide]
+    out += ["", "## Language",
+            "Reply in the language and script of the customer's LAST message:",
+            "- Roman Urdu (Urdu written in English letters, e.g. \"kitne ka hai\", \"kal aa sakte hain?\") -> reply in Roman Urdu.",
+            "- English (e.g. \"how much is it?\") -> reply in English.",
+            "- Urdu script (e.g. \"\u06a9\u062a\u0646\u06d2 \u06a9\u0627 \u06c1\u06d2\u061f\") -> reply in Urdu script.",
+            "- A mix -> the language most of the message is in. If unsure, Roman Urdu.",
+            "Switch only when the customer switches. Write service, product and business names exactly as "
+            "listed, whatever the language."]
     out += ["", "## Greeting",
             "Say \"Welcome to %s\" (or any greeting) only in your FIRST reply in a chat. In every later "
             "reply, answer straight away: never start a reply with the welcome line again." % t["name"]]
@@ -304,6 +379,81 @@ def make_categories_router():
                 "sync": dict(s) if s else {"status": "never", "synced_at": None},
                 "suggestion": sug,
                 "agent_text": knowledge_block(f) if role in ("owner", "techdeva_admin") else None}
+
+    @router.get("/business-profile/training")
+    def training(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                 authorization: str | None = Header(None),
+                 td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Where the WhatsApp agent's knowledge comes from (Hermes AI > How your agent learns)."""
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        with tenant_session(tid, role) as cur:
+            f = facts(cur, tid)
+            cur.execute("SELECT status, version, approved_at FROM business_profiles WHERE tenant_id = %s", (tid,))
+            p = cur.fetchone()
+            cur.execute("""SELECT count(*) AS n, count(*) FILTER (WHERE said_as LIKE 'WhatsApp /sikho%%') AS wa
+                             FROM agent_lessons WHERE tenant_id = %s AND active AND agent = 'whatsapp'""", (tid,))
+            les = cur.fetchone()
+            cur.execute("SELECT status, synced_at FROM agent_knowledge_sync WHERE tenant_id = %s", (tid,))
+            s = cur.fetchone()
+            conns = [r for r in _rows(cur, tid) if not PROTECTED.search(r["agent_key"] or "")]
+            cur.execute("""SELECT count(*) AS n FROM executions WHERE tenant_id = %s AND action = 'agent.test_chat'
+                              AND at > now() - interval '1 day'""", (tid,))
+            tests = cur.fetchone()["n"]
+        g = guide_text(f)
+        return {"website": {"status": p["status"] if p else "none", "version": p["version"] if p else None,
+                            "approved_at": p["approved_at"] if p else None, "facts": len(f["website"])},
+                "services": len(f["services"]), "products": len(f.get("products") or []), "hours_set": bool(f["hours"]),
+                "knowledge": len([x for x in f["knowledge"] if x["kind"] != "guide"]), "guide_chars": len(g),
+                "lessons": les["n"], "lessons_whatsapp": les["wa"],
+                "sync": dict(s) if s else {"status": "never", "synced_at": None},
+                "agent": bool(conns), "tests_today": tests, "tests_per_day": TEST_PER_DAY}
+
+    @router.post("/business-profile/test-chat")
+    def test_chat(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                  authorization: str | None = Header(None),
+                  td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """The owner writes to their own agent as a customer would, from the dashboard.
+        Same agent, same knowledge, its own session (not WhatsApp: nothing is sent to
+        anyone, and the chat does not show in the inbox). Each message is one AI
+        request, so there is a daily cap."""
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        _owner(role)
+        msg = " ".join(str(body.get("message") or "").split())
+        if not msg or len(msg) > 1000:
+            raise HTTPException(400, "Write a message of up to 1,000 characters.")
+        with tenant_session(tid, role) as cur:
+            conns = [r for r in _rows(cur, tid) if not PROTECTED.search(r["agent_key"] or "")]
+            if not conns:
+                raise HTTPException(409, "Your WhatsApp agent is not set up yet.")
+            cur.execute("""SELECT count(*) AS n FROM executions WHERE tenant_id = %s AND action = 'agent.test_chat'
+                              AND at > now() - interval '1 day'""", (tid,))
+            if cur.fetchone()["n"] >= TEST_PER_DAY:
+                raise HTTPException(429, "That is today's %d test messages. Try again tomorrow." % TEST_PER_DAY)
+            record(cur, action="agent.test_chat", resource="agents", resource_id=conns[0]["agent_key"],
+                   actor=str(uid or role), actor_type="human", status="ok", detail={"chars": len(msg)}, error=None,
+                   tenant_id=tid)
+        agent = conns[0]["agent_key"]
+        if not re.fullmatch(r"[a-z0-9-]{3,60}", agent or ""):
+            raise HTTPException(409, "This agent cannot be tested from here.")
+        conv = re.sub(r"[^A-Za-z0-9]", "", str(body.get("chat") or ""))[:16] or "1"
+        sid = ("tdtest-%s-%s" % (str(tid).replace("-", "")[:12], conv))[:64]
+        from . import hermes_client as hc
+        import os
+        headers = {"Content-Type": "application/json"}
+        if os.environ.get("HERMES_API_KEY"):
+            headers["Authorization"] = "Bearer " + os.environ["HERMES_API_KEY"]
+        base = "http://hermes-agent-%s:8642" % agent
+        try:
+            hc._ensure_session(base, sid, "", headers, 10, 0)
+            _st, out = hc._post_with_retries(base + "/api/sessions/%s/chat" % sid, {"message": msg}, headers, 120, 0)
+        except Exception as e:                      # the agent is down or the model failed
+            raise HTTPException(502, "Your agent did not answer (%s). On WhatsApp the customer would get no reply "
+                                     "and you would get an alert." % str(e)[:160])
+        m = (out or {}).get("message")
+        reply = m.get("content") if isinstance(m, dict) else None
+        if not isinstance(reply, str) or not reply.strip():
+            raise HTTPException(502, "Your agent gave no answer.")
+        return {"reply": reply[:4000], "chat": conv}
 
     @router.put("/business-profile/type")
     def set_type(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),

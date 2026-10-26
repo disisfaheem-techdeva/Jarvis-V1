@@ -1957,7 +1957,7 @@ VIEWS.calendar = function(){
 
 /* ------------------------------------------------------------- Hermes AI */
 VIEWS.hermes = function(){
-  var out = '<h1>Hermes AI</h1><p class="sub">Your WhatsApp sales agent: its status, what it has been taught, and a box to teach it more.</p>';
+  var out = '<h1>Hermes AI</h1><p class="sub">Train your WhatsApp sales agent: what it knows, where that comes from, and a test chat to try it.</p>';
   if (!need('wa_status', '/whatsapp') | !need('lessons', '/console/lessons'))
     return out + panel('Your agent', loading('Checking your agent...'));
   ibxLoad(false);
@@ -1971,6 +1971,63 @@ VIEWS.hermes = function(){
   if (!w || !w.connected)
     out += panel('Connect', '<div class="sub">Your agent is ready but not on WhatsApp yet.</div>' +
       '<a class="btn primary" href="#/whatsapp" style="margin-top:8px;display:inline-block">Connect WhatsApp</a>');
+  /* Phase 1 training (26 Oct 2026): where the agent's knowledge comes from, and a
+     test chat with the agent itself (POST /business-profile/test-chat, not WhatsApp). */
+  var TR = S.training;
+  if (!need('training', '/business-profile/training')) out += panel('How your agent learns', loading('Loading...'));
+  else if (TR) {
+    var trRow = function(name, state, note, href, label){
+      return '<div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line)">' +
+        '<div style="flex:1"><strong>' + esc(name) + '</strong> <span class="card-note">' + state + '</span>' +
+        (note ? '<div class="card-note" style="margin-top:2px">' + note + '</div>' : '') + '</div>' +
+        (href ? '<a class="btn" href="' + href + '">' + esc(label) + '</a>' : '') + '</div>';
+    };
+    var ws = TR.website || {};
+    out += panel('How your agent learns',
+      trRow('1. Your website', ws.status === 'approved' || ws.version ? 'approved, ' + esc(ws.facts) + ' facts sent to the agent'
+              : ws.status === 'none' ? 'not analysed yet' : esc(String(ws.status).replace(/_/g, ' ')),
+            'Only what is written on your site is used, after you approve it. Prices always come from your list below.', '#/bizprofile', 'Website') +
+      trRow('2. Services, products and prices', esc(TR.services) + ' services, ' + esc(TR.products) + ' products' + (TR.hours_set ? ', hours set' : ', no opening hours'),
+            'The agent offers and prices only what is listed here.', '#/catalogue', 'Open') +
+      trRow('3. Your full guide', TR.guide_chars ? esc(Number(TR.guide_chars).toLocaleString()) + ' characters' : 'not written yet',
+            'How to talk to customers, in your words. Below on this page.', '', '') +
+      trRow('4. Lessons', esc(TR.lessons) + ' active' + (TR.lessons_whatsapp ? ' (' + esc(TR.lessons_whatsapp) + ' sent from WhatsApp)' : ''),
+            'Type one rule below, or from <strong>your own WhatsApp number</strong> send <code>/sikho &lt;rule&gt;</code> to your agent, then <code>/haan</code> to save it ' +
+            '(<code>/nahi</code> drops it). Only your number can do this.', '', '') +
+      trRow('Language', 'automatic', 'Your agent answers in the customer\'s language: Roman Urdu, English or Urdu script.', '', '') +
+      '<div class="card-note" style="margin-top:8px">Last sent to your agent: ' + esc(TR.sync && TR.sync.synced_at ? String(TR.sync.synced_at).slice(0, 16).replace('T', ' ') : 'never') + '</div>');
+    if (TR.agent) {
+      var TC = S.tchat || (S.tchat = { chat: String(Date.now()).slice(-8), msgs: [], busy: false, err: '' });
+      out += panel('Test your agent',
+        '<div class="card-note" style="margin-bottom:8px">Write as a customer would. Your agent answers with everything it has been taught. Nothing is sent on WhatsApp. ' +
+        esc(Math.max(0, TR.tests_per_day - TR.tests_today - TC.msgs.filter(function(m){ return m.me; }).length)) + ' test messages left today.</div>' +
+        '<div style="max-height:360px;overflow:auto;margin-bottom:8px">' + (TC.msgs.length ? TC.msgs.map(function(m){
+          return '<div style="margin:6px 0;display:flex;justify-content:' + (m.me ? 'flex-end' : 'flex-start') + '"><div style="max-width:80%;padding:8px 12px;border-radius:12px;white-space:pre-wrap;' +
+            (m.me ? 'background:var(--accent,#6d4aff);color:#fff' : 'background:var(--panel2,rgba(255,255,255,.06))') + '">' + esc(m.text) + '</div></div>';
+        }).join('') : '<div class="card-note">e.g. "Assalam o alaikum, aap ke packages kya hain?" or "Hi, how much is it?"</div>') +
+        (TC.busy ? '<div class="card-note">Your agent is answering...</div>' : '') + '</div>' +
+        (TC.err ? '<div class="card-note" style="color:var(--danger);margin-bottom:6px">' + esc(TC.err) + '</div>' : '') +
+        row() + '<input class="fld" id="tc_in" maxlength="1000" placeholder="Message to your agent" style="flex:1"' + (TC.busy ? ' disabled' : '') + '>' +
+        '<button class="btn primary" id="tc_go"' + (TC.busy ? ' disabled' : '') + '>Send</button><button class="btn" id="tc_new">New test chat</button></div>');
+      setTimeout(function(){
+        var go = document.getElementById('tc_go'), inp = document.getElementById('tc_in'), nw = document.getElementById('tc_new');
+        var send = function(){
+          var t = inp && inp.value.trim(); if (!t || TC.busy) return;
+          TC.msgs.push({ me: true, text: t }); TC.busy = true; TC.err = ''; renderShell();
+          api('/business-profile/test-chat', { method: 'POST', body: { message: t, chat: TC.chat } }).then(function(r){
+            TC.busy = false;
+            if (r.ok) TC.msgs.push({ me: false, text: r.data.reply });
+            else TC.err = (r.data && r.data.detail) || 'Your agent did not answer.';
+            renderShell();
+            var b = document.getElementById('tc_in'); if (b) b.focus();
+          });
+        };
+        if (go) go.onclick = send;
+        if (inp) inp.onkeydown = function(e){ if (e.key === 'Enter') { e.preventDefault(); send(); } };
+        if (nw) nw.onclick = function(){ S.tchat = null; need('training', '/business-profile/training', true); renderShell(); };
+      }, 0);
+    }
+  }
   out += panel('Teach your agent',
     '<textarea id="hm_teach" rows="3" style="width:100%;padding:10px;border-radius:10px;font:inherit" ' +
     'placeholder="e.g. Hair PRP is 25,000 per session. Always ask the patient\'s name before quoting."></textarea>' +

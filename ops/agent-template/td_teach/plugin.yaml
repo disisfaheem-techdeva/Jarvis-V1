@@ -1,0 +1,4 @@
+name: td_teach
+version: 1.0.0
+description: "TechDeva: the business owner teaches the WhatsApp agent from their own number (/sikho, /haan, /nahi). Owner only, through the gateway's admin list; no model call."
+author: TechDeva
