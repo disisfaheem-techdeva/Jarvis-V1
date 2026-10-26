@@ -1,4 +1,4 @@
--- 79_owner_guide.sql
+-- 81_owner_guide.sql
 -- The owner's full guide for their WhatsApp agent (Faheem, 25 Oct 2026).
 -- "Teach your agent" took one short rule, and the agent's lesson list cuts each
 -- lesson to 500 characters on one line, so a full prompt with example chats

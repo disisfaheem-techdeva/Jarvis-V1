@@ -1,4 +1,4 @@
-"""The owner's full guide for the WhatsApp agent (db/79): kept exactly as
+"""The owner's full guide for the WhatsApp agent (db/81): kept exactly as
 written, split into stored parts, written into the agent's knowledge block
 before the hard rule, replaced on save. Scratch database; the agent is a fake."""
 import os
