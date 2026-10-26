@@ -453,6 +453,12 @@ def make_categories_router():
         reply = m.get("content") if isinstance(m, dict) else None
         if not isinstance(reply, str) or not reply.strip():
             raise HTTPException(502, "Your agent gave no answer.")
+        if reply.startswith("API call failed"):
+            # the model call failed; on WhatsApp this never reaches the customer (T10)
+            why = ("the AI key has used up its free requests for today" if re.search(r"\b429\b|RESOURCE_EXHAUSTED|quota", reply)
+                   else "the AI service refused the request")
+            raise HTTPException(502, "Your agent could not answer: %s. On WhatsApp the customer gets no reply and you get "
+                                     "an alert. Ask TechDeva to give your agent another key (API Manager)." % why)
         return {"reply": reply[:4000], "chat": conv}
 
     @router.put("/business-profile/type")
