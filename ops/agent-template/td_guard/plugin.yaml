@@ -1,0 +1,6 @@
+name: td_guard
+version: 1.0.0
+description: "TechDeva: on WhatsApp a photo (any image) is not looked at and not answered."
+author: TechDeva
+hooks:
+  - pre_gateway_dispatch
