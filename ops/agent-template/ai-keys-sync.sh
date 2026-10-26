@@ -99,6 +99,47 @@ while IFS=$'\t' read -r agent want; do
   log "agent $agent switched $want: $r"
 done <<< "$power"
 
+# ---- 1c. voice notes (founder console > API Manager > Voice notes): one Groq key for every agent.
+#      The agent gets GROQ_API_KEY and stt on (stt_config.py), the current td_guard (its outbound
+#      filter keeps the raw transcript from the customer), and is re-created once. Off = the reverse.
+stt=$(pyx stt-key 2>/dev/null) || stt="__error__"
+if [ "$stt" = "__error__" ]; then log "could not read the voice-notes key"; else
+  IFS=$'\t' read -r s4 smodel skey <<< "$stt"
+  want="${s4:-off}"; [ "$want" = "off" ] || want="$s4 $smodel"
+  for d in /docker/hermes-*/; do
+    a=$(basename "$d"); a=${a#hermes-}
+    protected "$a" && continue
+    [ -f "$d/agent.env" ] && [ -f "$d/docker-compose.yml" ] || continue
+    v=$(docker volume inspect -f '{{.Mountpoint}}' "hermes-$a-data" 2>/dev/null) || continue
+    [ -f "$v/config.yaml" ] || continue
+    have=$(cat "$d/ai-stt" 2>/dev/null || echo off)
+    [ "$have" = "$want" ] && continue
+    ts=$(date +%Y%m%d_%H%M%S)
+    cp -a "$d/agent.env" "$d/agent.env.bak-stt-$ts"; cp -a "$v/config.yaml" "$d/config.yaml.bak-stt-$ts"
+    if ! diff -rq "$HERE/td_guard" "$v/plugins/td_guard" >/dev/null 2>&1; then
+      own=$(stat -c '%u:%g' "$v/config.yaml")
+      mkdir -p "$v/plugins/td_guard"; cp "$HERE/td_guard/plugin.yaml" "$HERE/td_guard/__init__.py" "$v/plugins/td_guard/"
+      chown -R "$own" "$v/plugins"; chmod 755 "$v/plugins" "$v/plugins/td_guard"; chmod 644 "$v/plugins/td_guard/"*
+      python3 "$HERE/guard_config.py" "$v/config.yaml" >/dev/null 2>&1
+    fi
+    tmp=$(mktemp "$d/.agent.env.XXXXXX")
+    grep -v '^GROQ_API_KEY=' "$d/agent.env" > "$tmp"
+    if [ "$want" = "off" ]; then
+      out=$(python3 "$HERE/stt_config.py" "$v/config.yaml" off 2>&1); rc=$?
+    else
+      printf 'GROQ_API_KEY=%s\n' "$skey" >> "$tmp"
+      out=$(python3 "$HERE/stt_config.py" "$v/config.yaml" on "$smodel" 2>&1); rc=$?
+    fi
+    if [ $rc -ne 0 ] && [ $rc -ne 3 ]; then rm -f "$tmp"; log "voice notes for $a not changed: $out"; continue; fi
+    chmod 600 "$tmp"; mv "$tmp" "$d/agent.env"; echo "$want" > "$d/ai-stt"
+    if [ "$(docker inspect -f '{{.State.Running}}' "hermes-agent-$a" 2>/dev/null)" = "true" ]; then
+      (cd "$d" && docker compose up -d --force-recreate >/dev/null 2>&1 </dev/null) || log "re-create failed for $a"
+    fi
+    log "voice notes for $a: ${want%% *} ($out)"
+  done
+fi
+unset stt skey
+
 # ---- 2. live keys
 agents=""
 for d in /docker/hermes-*/; do

@@ -245,6 +245,32 @@ def pick_model(provider, ids):
     return ids[0] if ids else PROVIDERS[provider]["model"]
 
 
+# ---------------------------------------------------------------- voice notes
+# One Groq key (Whisper) transcribes every template agent's voice notes:
+# platform_settings ai_stt_key / ai_stt_model; ai-keys-sync.sh writes it to each
+# agent as GROQ_API_KEY and turns stt on (stt_config.py).
+STT_PREFERRED = ["whisper-large-v3-turbo", "whisper-large-v3", "distil-whisper-large-v3-en"]
+
+
+def stt_models(ids):
+    return [m for m in (ids or []) if "whisper" in m.lower()]
+
+
+def pick_stt_model(ids):
+    ms = stt_models(ids)
+    low = {m.lower(): m for m in ms}
+    for p in STT_PREFERRED:
+        if p in low:
+            return low[p]
+    return ms[0] if ms else "whisper-large-v3-turbo"
+
+
+def _voice(cur):
+    cur.execute("SELECT key, value FROM platform_settings WHERE key IN ('ai_stt_key', 'ai_stt_model')")
+    d = {r["key"]: r["value"] for r in cur.fetchall()}
+    return {"key_id": d.get("ai_stt_key") or None, "model": d.get("ai_stt_model") or None}
+
+
 def _agents(cur):
     """Every template agent the platform knows, with its business, its plan and
     whether it pays (status active)."""
@@ -509,6 +535,7 @@ def make_ai_keys_router() -> APIRouter:
             for k in keys:
                 k["bench_passed"] = _passed_bench(cur, k["id"])
             platform_bench_passed = _passed_bench(cur, None)
+            voice = _voice(cur)
             autoswitch_on = _autoswitch_on(cur)
             cur.execute("SELECT agent_key, from_last4, to_last4, reason, at FROM ai_key_switches ORDER BY at DESC LIMIT 20")
             switches = [dict(r) for r in cur.fetchall()]
@@ -546,7 +573,7 @@ def make_ai_keys_router() -> APIRouter:
                 "agent_providers": list(PROVIDERS), "encryption": crypto.enabled(),
                 "benches": benches, "defaults": defaults, "default_questions": DEFAULT_QUESTIONS,
                 "platform_bench_passed": platform_bench_passed, "autohold": autohold_on,
-                "autoswitch": autoswitch_on, "switches": switches}
+                "autoswitch": autoswitch_on, "switches": switches, "voice": voice}
 
     @router.post("/techdeva/api-keys")
     def add(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
@@ -570,6 +597,7 @@ def make_ai_keys_router() -> APIRouter:
         model = _model(provider, typed) if typed else None
         status, error, detail = test_key(provider, value, base_url, model)
         if detail.get("sample"):
+            detail["stt_models"] = stt_models(detail["sample"])
             detail["sample"] = chat_models(detail["sample"])
         if not model:
             model = pick_model(provider, detail.get("sample")) if status == "ok" else PROVIDERS[provider]["model"]
@@ -607,6 +635,7 @@ def make_ai_keys_router() -> APIRouter:
             row = _get(cur, key_id)
         status, error, detail = fn(row["provider"], _open(row), row["base_url"], row["model"])
         if detail.get("sample"):
+            detail["stt_models"] = stt_models(detail["sample"])
             detail["sample"] = chat_models(detail["sample"])
         old = row["test_detail"] or {}
         if "sample" not in detail and old.get("sample"):
@@ -800,6 +829,33 @@ def make_ai_keys_router() -> APIRouter:
                    detail={"last4": row["last4"], "in_pool": in_pool, "order": order}, tenant_id=None)
         return {"in_pool": in_pool, "pool_order": order}
 
+    @router.put("/techdeva/ai-voice")
+    def set_voice(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                  authorization: str | None = Header(None),
+                  td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """The Groq key that transcribes every agent's voice notes (null = voice notes off).
+        Applied by ai-keys-sync.sh within a minute; each agent restarts once."""
+        uid = _admin(x_tenant_id, x_role, authorization, td_session)
+        key_id = body.get("key_id") or None
+        with tenant_session(None, "techdeva_admin") as cur:
+            model = ""
+            if key_id:
+                row = _get(cur, key_id)
+                if row["provider"] != "groq":
+                    raise HTTPException(400, "Voice notes need a Groq key (Whisper).")
+                if row["status"] in ("disabled", "invalid"):
+                    raise HTTPException(409, "That key is %s. Test it or choose another." % row["status"])
+                listed = (row["test_detail"] or {}).get("stt_models")
+                model = str(body.get("model") or "").strip() or pick_stt_model(listed)
+                if listed and model not in listed:
+                    raise HTTPException(400, "%s does not have %s." % (row["label"], model))
+            for k, v in (("ai_stt_key", key_id or ""), ("ai_stt_model", model)):
+                cur.execute("""INSERT INTO platform_settings (key, value) VALUES (%s, %s)
+                               ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""", (k, v))
+            record(cur, action="techdeva.ai_key.voice", resource="platform_settings", resource_id="ai_stt_key",
+                   actor=str(uid) if uid else None, status="ok", detail={"key_id": key_id, "model": model}, tenant_id=None)
+        return {"key_id": key_id, "model": model or None}
+
     @router.post("/techdeva/ai-bench")
     def bench(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
               authorization: str | None = Header(None),
@@ -978,6 +1034,21 @@ def _cli(argv):
         rows = [json.loads(l) for l in sys.stdin if l.strip()]
         for line in autoswitch(rows):
             print(line)
+        return 0
+    if cmd == "stt-key":
+        # last4 \t model \t key of the voice-notes key (nothing = off); for ai-keys-sync.sh only
+        with tenant_session(None, "techdeva_admin") as cur:
+            v = _voice(cur)
+            if not v["key_id"]:
+                return 0
+            cur.execute("SELECT * FROM ai_keys WHERE id = %s", (v["key_id"],))
+            r = cur.fetchone()
+        if not r or r["status"] in ("disabled", "invalid") or r["provider"] != "groq":
+            return 0
+        value = _open(dict(r))
+        model = v["model"] or "whisper-large-v3-turbo"
+        if value and "\t" not in value and "\n" not in value:
+            sys.stdout.write("%s\t%s\t%s\n" % (value[-4:], model, value))
         return 0
     if cmd == "bench-next":
         # one queued bench run, as a JSON line for model_bench.py (contains the key: pipe only)

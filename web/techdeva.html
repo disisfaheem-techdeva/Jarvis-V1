@@ -404,6 +404,15 @@ function wireApiKeys(){
     try { await api('/techdeva/ai-autohold', {method: 'PUT', body: JSON.stringify({on: ah.checked})}); } catch (ex) { alert(ex.message); }
     reload();
   };
+  /* Voice notes key. */
+  const vsave = document.getElementById('apk-voice-save');
+  if (vsave) vsave.onclick = async () => {
+    const kid = document.getElementById('apk-voice').value || null;
+    if (!confirm(kid ? 'Turn voice notes on for every agent with this key? Each agent restarts once.' : 'Turn voice notes off for every agent? Each agent restarts once.')) return;
+    vsave.disabled = true;
+    try { await api('/techdeva/ai-voice', {method: 'PUT', body: JSON.stringify({key_id: kid})}); } catch (ex) { alert(ex.message); }
+    reload();
+  };
   /* Phase 3: auto-switch and the key rotation. */
   const auto = document.getElementById('apk-auto');
   if (auto) auto.onchange = async () => {
@@ -831,6 +840,18 @@ const VIEWS = {
         return line('paying', 'Paying clients') + line('trial', 'Trial clients') +
           '<button class="tiny primary" id="apk-def-save">Save defaults</button>' +
           '<div class="sub" style="margin-top:6px">Apply moves every agent of that group to its saved key (each restarts for a few seconds). The key must fully pass the test bench first, so one bad key cannot stop every agent at once.</div>';
+      })() + '</div></section>' +
+      '<section><h2>Voice notes</h2><div class="card">' + (function(){
+        const vo = d.voice || {}, groq = keys.filter(k => k.provider === 'groq' && k.status !== 'disabled' && k.status !== 'invalid');
+        const cur = keys.find(k => k.id === vo.key_id);
+        return '<div class="sub" style="margin-bottom:8px">' + (cur ? 'On: voice notes are written out by <b>' + esc(cur.label) + '</b> (' + esc(vo.model || '') + ') and the agent answers what was said. The written text is never sent to the customer.'
+                 : 'Off: a voice note gets no transcription. Choose a Groq key (it has Whisper) to turn voice notes on for every agent.') + '</div>' +
+          '<div class="row" style="gap:8px;align-items:center"><select class="fee" style="width:auto;max-width:320px;text-align:left" id="apk-voice"><option value="">Off</option>' +
+          groq.map(k => '<option value="' + esc(k.id) + '"' + (k.id === vo.key_id ? ' selected' : '') + '>' + esc(k.label) + ' …' + esc(k.last4) +
+            ' (' + esc((((k.test_detail || {}).stt_models) || []).length) + ' speech models)</option>').join('') + '</select>' +
+          '<button class="tiny primary" id="apk-voice-save">Save</button></div>' +
+          (groq.length ? '' : '<div class="sub" style="margin-top:6px">Add a Groq key above first.</div>') +
+          '<div class="sub" style="margin-top:6px">Saving restarts every agent once (a few seconds each), within a minute.</div>';
       })() + '</div></section>' +
       '<section><h2>Auto-switch</h2><div class="card">' +
         '<label style="display:inline-flex;gap:8px;align-items:center"><input type="checkbox" id="apk-auto"' + (d.autoswitch ? ' checked' : '') + '> <b>Move an agent to the next key when its key runs out</b></label>' +

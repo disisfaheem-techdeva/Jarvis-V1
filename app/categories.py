@@ -278,6 +278,9 @@ def knowledge_block(f):
             "- English (e.g. \"how much is it?\") -> reply in English.",
             "- Urdu script (e.g. \"\u06a9\u062a\u0646\u06d2 \u06a9\u0627 \u06c1\u06d2\u061f\") -> reply in Urdu script.",
             "- A mix -> the language most of the message is in. If unsure, Roman Urdu.",
+            "- A voice message (it reaches you as \"The user sent a voice message~ Here's what they said: ...\") "
+            "-> reply in Roman Urdu, or in English if they spoke English. Never reply in Hindi (Devanagari) script, "
+            "and never repeat the transcript back.",
             "Switch only when the customer switches. Write service, product and business names exactly as "
             "listed, whatever the language."]
     out += ["", "## Greeting",
