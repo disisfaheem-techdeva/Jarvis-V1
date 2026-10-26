@@ -404,6 +404,21 @@ function wireApiKeys(){
     try { await api('/techdeva/ai-autohold', {method: 'PUT', body: JSON.stringify({on: ah.checked})}); } catch (ex) { alert(ex.message); }
     reload();
   };
+  /* Phase 3: auto-switch and the key rotation. */
+  const auto = document.getElementById('apk-auto');
+  if (auto) auto.onchange = async () => {
+    if (auto.checked && !confirm('Turn on auto-switch? Agents will be moved between keys in rotation on their own when a key runs out.')) { auto.checked = false; return; }
+    try { await api('/techdeva/ai-autoswitch', {method: 'PUT', body: JSON.stringify({on: auto.checked})}); } catch (ex) { alert(ex.message); }
+    reload();
+  };
+  view.querySelectorAll('[data-apkpool]').forEach(i => i.onchange = async () => {
+    try { await api('/techdeva/ai-pool/' + i.dataset.apkpool, {method: 'PUT', body: JSON.stringify({in_pool: i.checked})}); } catch (ex) { alert(ex.message); }
+    reload();
+  });
+  view.querySelectorAll('[data-apkorder]').forEach(i => i.addEventListener('change', async () => {
+    try { await api('/techdeva/ai-pool/' + i.dataset.apkorder, {method: 'PUT', body: JSON.stringify({pool_order: i.value})}); } catch (ex) { alert(ex.message); }
+    reload();
+  }));
   /* Phase 2: defaults by plan, and the test bench. */
   const defSave = document.getElementById('apk-def-save');
   if (defSave) defSave.onclick = async () => {
@@ -817,6 +832,16 @@ const VIEWS = {
           '<button class="tiny primary" id="apk-def-save">Save defaults</button>' +
           '<div class="sub" style="margin-top:6px">Apply moves every agent of that group to its saved key (each restarts for a few seconds). The key must fully pass the test bench first, so one bad key cannot stop every agent at once.</div>';
       })() + '</div></section>' +
+      '<section><h2>Auto-switch</h2><div class="card">' +
+        '<label style="display:inline-flex;gap:8px;align-items:center"><input type="checkbox" id="apk-auto"' + (d.autoswitch ? ' checked' : '') + '> <b>Move an agent to the next key when its key runs out</b></label>' +
+        '<div class="sub" style="margin:6px 0">Every 5 minutes: an agent whose key was refused for a limit 3 or more times in 15 minutes and answered nothing moves to the first key below that is <b>in rotation</b>, has passed the test bench and is not itself out. At most once per agent per 30 minutes. Each move and each "no spare key" opens an incident.</div>' +
+        tbl('<th>Key</th><th>In rotation</th><th>Order</th><th>Bench</th>', keys.map(k => '<tr><td>' + esc(k.label) + ' <span class="sub">' + esc(pname(k.provider)) + (k.model ? ' · ' + esc(k.model) : '') + ' …' + esc(k.last4) + '</span></td>' +
+          '<td><input type="checkbox" data-apkpool="' + esc(k.id) + '"' + (k.in_pool ? ' checked' : '') + '></td>' +
+          '<td><input class="fee" style="width:70px" data-apkorder="' + esc(k.id) + '" value="' + esc(k.pool_order) + '"></td>' +
+          '<td>' + (k.bench_passed ? '<span class="aiu-tag">passed</span>' : '<span class="aiu-tag warn">not passed</span>') + '</td></tr>')) +
+        ((d.switches || []).length ? '<h3 style="margin:12px 0 4px">Recent switches</h3>' + tbl('<th>When</th><th>Agent</th><th>From</th><th>To</th><th>Why</th>', d.switches.map(s =>
+          '<tr><td>' + esc(when(s.at)) + '</td><td>' + esc(s.agent_key) + '</td><td>…' + esc(s.from_last4 || '') + '</td><td>' + keyName(s.to_last4) + '</td><td>' + esc(s.reason) + '</td></tr>')) : '') +
+      '</div></section>' +
       '<section><h2>Test bench</h2><div class="card">' + (function(){
         const ag = d.agents || [], bs = d.benches || [];
         const keyLabel = id => { if (!id) return 'Platform key ' + plat; const k = keys.find(x => x.id === id); return k ? esc(k.label) + ' …' + esc(k.last4) : 'deleted key'; };

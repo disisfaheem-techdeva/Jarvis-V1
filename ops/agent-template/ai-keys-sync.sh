@@ -119,7 +119,12 @@ done | pyx live || log "could not report live keys"
 if [ $(( $(date +%-M) % 5 )) -eq 0 ]; then
   list=$(for d in /docker/hermes-*/; do a=$(basename "$d"); a=${a#hermes-}; protected "$a" || echo "$a"; done)
   python3 "$HERE/ai_usage_collect.py" $list | pyx usage || log "could not store usage"
-  # 4. auto-hold: an agent whose key keeps hitting its limit is put on hold until the quota resets
-  held=$(python3 "$HERE/ai_recent.py" $list | pyx autohold 2>/dev/null) || log "auto-hold check failed"
+  # 4. the last 15 minutes of each agent, counted once:
+  #    auto-switch first (founder turns it on): move to the next tested key in rotation;
+  #    then auto-hold: whoever still has no working key is paused until its quota resets
+  recent=$(python3 "$HERE/ai_recent.py" $list)
+  sw=$(printf '%s\n' "$recent" | pyx autoswitch 2>/dev/null) || log "auto-switch check failed"
+  [ -n "${sw:-}" ] && log "auto-switch: $sw"
+  held=$(printf '%s\n' "$recent" | pyx autohold 2>/dev/null) || log "auto-hold check failed"
   [ -n "${held:-}" ] && log "auto-hold: $held"
 fi

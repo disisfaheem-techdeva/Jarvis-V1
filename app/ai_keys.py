@@ -350,6 +350,11 @@ def autohold(rows):
                 continue
             if r.get("limited", 0) < HOLD_HITS or r.get("ok", 0) > 0:
                 continue
+            cur.execute("""SELECT 1 FROM ai_key_assignments WHERE agent_key = %s AND status = 'pending'
+                           UNION ALL SELECT 1 FROM ai_key_switches WHERE agent_key = %s AND at > now() - interval '30 minutes'""",
+                        (agent, agent))
+            if cur.fetchone():
+                continue                                    # just moved to another key: give it the chance
             provider = prov.get(r.get("live_last4"), "gemini")
             until = _quota_reset(provider)
             why = "AI key ...%s hit its limit %d times in 15 minutes with no answer" % (r.get("live_last4"), r.get("limited", 0))
@@ -368,19 +373,111 @@ def autohold(rows):
     return out
 
 
+def _upsert_incident(cur, tenant_id, kind, severity, title, detail):
+    """One open incident per business and kind (a database rule): a new event
+    updates it (title = the latest, detail = latest first, older lines kept)."""
+    cur.execute("""SELECT id, detail FROM incidents WHERE tenant_id IS NOT DISTINCT FROM %s AND kind = %s
+                    AND status = 'open' FOR UPDATE""", (tenant_id, kind))
+    r = cur.fetchone()
+    if r:
+        lines = [detail] + [l for l in (r["detail"] or "").split(chr(10)) if l and l != detail]
+        cur.execute("""UPDATE incidents SET title = %s, detail = %s, severity = %s, last_seen_at = now(),
+                              seen_count = seen_count + 1 WHERE id = %s""",
+                    (title, chr(10).join(lines)[:3000], severity, r["id"]))
+    else:
+        cur.execute("INSERT INTO incidents (tenant_id, kind, severity, title, detail) VALUES (%s, %s, %s, %s, %s)",
+                    (tenant_id, kind, severity, title, detail))
+
+
 def _hold_incident(cur, tenant_id, kind, title, detail):
-    cur.execute("""UPDATE incidents SET last_seen_at = now(), seen_count = seen_count + 1, detail = %s
-                    WHERE tenant_id IS NOT DISTINCT FROM %s AND kind = %s AND title = %s AND status = 'open' RETURNING id""",
-                (detail, tenant_id, kind, title))
-    if not cur.fetchone():
-        cur.execute("INSERT INTO incidents (tenant_id, kind, severity, title, detail) VALUES (%s, %s, 'warn', %s, %s)",
-                    (tenant_id, kind, title, detail))
+    _upsert_incident(cur, tenant_id, kind, "warn", title, detail)
 
 
 def _resolve_hold_incidents(cur, agent, tenant_id):
-    cur.execute("""UPDATE incidents SET status = 'resolved', resolved_at = now()
-                    WHERE kind = 'agent.on_hold' AND status = 'open'
-                      AND ((tenant_id IS NULL AND title LIKE %s) OR tenant_id = %s)""", (agent + " on hold%", tenant_id))
+    """This business's hold notice closes when its agent is back; the founder's
+    closes when no agent is on hold any more."""
+    if tenant_id:
+        cur.execute("""UPDATE incidents SET status = 'resolved', resolved_at = now()
+                        WHERE kind = 'agent.on_hold' AND status = 'open' AND tenant_id = %s""", (tenant_id,))
+    cur.execute("SELECT 1 FROM agent_power WHERE want = 'off' AND auto LIMIT 1")
+    if not cur.fetchone():
+        cur.execute("""UPDATE incidents SET status = 'resolved', resolved_at = now()
+                        WHERE kind = 'agent.on_hold' AND status = 'open' AND tenant_id IS NULL""")
+
+def _autoswitch_on(cur):
+    cur.execute("SELECT value FROM platform_settings WHERE key = 'ai_key_autoswitch'")
+    r = cur.fetchone()
+    return bool(r and r["value"] == "1")
+
+
+LIMIT_HITS = 3              # refused calls in 15 minutes ...
+SWITCH_GAP = "30 minutes"   # ... with none answered moves the agent, at most once per this
+
+
+def autoswitch(rows):
+    """rows: {agent_key, ok, limited, live_last4} for the last 15 minutes (ai_recent.py).
+    An agent whose key keeps hitting its limit and answered nothing is moved to the
+    next key in rotation that has passed the test bench and is not itself hitting
+    its limit. Every move, and every time no spare key is left, opens a founder
+    incident. Returns lines describing what was done."""
+    out = []
+    with tenant_session(None, "techdeva_admin") as cur:
+        if not _autoswitch_on(cur):
+            return out
+        hot = {r.get("live_last4") for r in rows if r.get("limited", 0) >= LIMIT_HITS}
+        cur.execute("""SELECT * FROM ai_keys WHERE in_pool AND status NOT IN ('disabled','invalid','rate_limited')
+                        ORDER BY pool_order, created_at""")
+        pool = [dict(k) for k in cur.fetchall() if _usable(k) and _passed_bench(cur, k["id"])]
+        known = {a["agent_key"] for a in _agents(cur)}
+        for r in rows:
+            agent = r.get("agent_key")
+            if agent not in known or PROTECTED.match(agent or ""):
+                continue
+            if r.get("limited", 0) < LIMIT_HITS or r.get("ok", 0) > 0:
+                continue
+            cur.execute("SELECT 1 FROM ai_key_switches WHERE agent_key = %s AND at > now() - interval '" + SWITCH_GAP + "'", (agent,))
+            if cur.fetchone():
+                continue
+            cur.execute("SELECT status FROM ai_key_assignments WHERE agent_key = %s", (agent,))
+            a = cur.fetchone()
+            if a and a["status"] == "pending":
+                continue
+            used = {}
+            cur.execute("SELECT live_last4, count(*) AS n FROM ai_agent_live WHERE running GROUP BY 1")
+            for u in cur.fetchall():
+                used[u["live_last4"]] = u["n"]
+            spare = [k for k in pool if k["last4"] != r.get("live_last4") and k["last4"] not in hot]
+            spare.sort(key=lambda k: (k["pool_order"], used.get(k["last4"], 0)))
+            if not spare:
+                _incident(cur, "ai_key.pool_empty", "critical", "No spare AI key for %s" % agent,
+                          "Its key (...%s) keeps hitting its limit and no key in rotation is free and tested. "
+                          "Add a key (API Manager), run the test bench, and put it in rotation." % r.get("live_last4"))
+                out.append("%s: no spare key" % agent)
+                continue
+            k = spare[0]
+            cur.execute("""INSERT INTO ai_key_assignments (agent_key, key_id, status, requested_by, requested_at, applied_at, error)
+                           VALUES (%s, %s, 'pending', 'auto-switch', now(), NULL, NULL)
+                           ON CONFLICT (agent_key) DO UPDATE SET key_id = EXCLUDED.key_id, status = 'pending',
+                                 requested_by = 'auto-switch', requested_at = now(), applied_at = NULL, error = NULL""",
+                        (agent, k["id"]))
+            why = "%d calls refused for a limit, none answered, in 15 minutes" % r.get("limited", 0)
+            cur.execute("""INSERT INTO ai_key_switches (agent_key, from_last4, to_key_id, to_last4, reason)
+                           VALUES (%s, %s, %s, %s, %s)""", (agent, r.get("live_last4"), k["id"], k["last4"], why))
+            record(cur, action="techdeva.ai_key.autoswitch", resource="ai_key_assignments", resource_id=agent,
+                   actor="auto-switch", actor_type="system", status="ok",
+                   detail={"agent": agent, "from_last4": r.get("live_last4"), "to_last4": k["last4"], "why": why},
+                   tenant_id=None)
+            _incident(cur, "ai_key.switched", "warn", "%s moved to key %s" % (agent, k["label"]),
+                      "Key ...%s: %s. Moved to %s (...%s); it applies within a minute." % (
+                          r.get("live_last4"), why, k["label"], k["last4"]))
+            used[k["last4"]] = used.get(k["last4"], 0) + 1
+            out.append("%s: ...%s -> %s ...%s" % (agent, r.get("live_last4"), k["label"], k["last4"]))
+    return out
+
+
+def _incident(cur, kind, severity, title, detail):
+    """A founder incident (no business): one open per kind, updated by each new event."""
+    _upsert_incident(cur, None, kind, severity, title, detail)
 
 
 def make_ai_keys_router() -> APIRouter:
@@ -393,7 +490,8 @@ def make_ai_keys_router() -> APIRouter:
         _admin(x_tenant_id, x_role, authorization, td_session)
         with tenant_session(None, "techdeva_admin") as cur:
             cur.execute("""SELECT id, provider, label, owner_note, last4, status, last_test_at, last_error,
-                                  base_url, model, test_detail, created_at, disabled_at FROM ai_keys ORDER BY created_at""")
+                                  base_url, model, test_detail, in_pool, pool_order, created_at, disabled_at
+                             FROM ai_keys ORDER BY created_at""")
             keys = [dict(r) for r in cur.fetchall()]
             agents = _agents(cur)
             cur.execute("SELECT * FROM ai_key_assignments")
@@ -411,6 +509,9 @@ def make_ai_keys_router() -> APIRouter:
             for k in keys:
                 k["bench_passed"] = _passed_bench(cur, k["id"])
             platform_bench_passed = _passed_bench(cur, None)
+            autoswitch_on = _autoswitch_on(cur)
+            cur.execute("SELECT agent_key, from_last4, to_last4, reason, at FROM ai_key_switches ORDER BY at DESC LIMIT 20")
+            switches = [dict(r) for r in cur.fetchall()]
             cur.execute("SELECT * FROM agent_power")
             power = {r["agent_key"]: dict(r) for r in cur.fetchall()}
             autohold_on = _autohold_on(cur)
@@ -444,7 +545,8 @@ def make_ai_keys_router() -> APIRouter:
                               for k, v in PROVIDERS.items()],
                 "agent_providers": list(PROVIDERS), "encryption": crypto.enabled(),
                 "benches": benches, "defaults": defaults, "default_questions": DEFAULT_QUESTIONS,
-                "platform_bench_passed": platform_bench_passed, "autohold": autohold_on}
+                "platform_bench_passed": platform_bench_passed, "autohold": autohold_on,
+                "autoswitch": autoswitch_on, "switches": switches}
 
     @router.post("/techdeva/api-keys")
     def add(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
@@ -662,6 +764,42 @@ def make_ai_keys_router() -> APIRouter:
                    actor=str(uid) if uid else None, status="ok", detail={"on": on}, tenant_id=None)
         return {"on": on}
 
+    @router.put("/techdeva/ai-autoswitch")
+    def set_autoswitch(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                       authorization: str | None = Header(None),
+                       td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        uid = _admin(x_tenant_id, x_role, authorization, td_session)
+        on = bool(body.get("on"))
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("""INSERT INTO platform_settings (key, value) VALUES ('ai_key_autoswitch', %s)
+                           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""", ("1" if on else "0",))
+            record(cur, action="techdeva.ai_key.autoswitch_setting", resource="platform_settings",
+                   resource_id="ai_key_autoswitch", actor=str(uid) if uid else None, status="ok", detail={"on": on},
+                   tenant_id=None)
+        return {"on": on}
+
+    @router.put("/techdeva/ai-pool/{key_id}")
+    def set_pool(key_id: str, body: dict = Body(...), x_tenant_id: str | None = Header(None),
+                 x_role: str | None = Header(None), authorization: str | None = Header(None),
+                 td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Put a key in rotation (the auto-switcher may move agents onto it) and its place in the order."""
+        uid = _admin(x_tenant_id, x_role, authorization, td_session)
+        with tenant_session(None, "techdeva_admin") as cur:
+            row = _get(cur, key_id)
+            in_pool = bool(body.get("in_pool", row["in_pool"]))
+            try:
+                order = int(body.get("pool_order", row["pool_order"]))
+            except (TypeError, ValueError):
+                raise HTTPException(400, "The order is a number.")
+            if in_pool and not _usable(row):
+                raise HTTPException(409, "That key cannot run an agent (off, refused, or no model chosen).")
+            cur.execute("UPDATE ai_keys SET in_pool = %s, pool_order = %s, updated_at = now() WHERE id = %s",
+                        (in_pool, max(0, min(order, 999)), key_id))
+            record(cur, action="techdeva.ai_key.pool", resource="ai_keys", resource_id=key_id,
+                   actor=str(uid) if uid else None, status="ok",
+                   detail={"last4": row["last4"], "in_pool": in_pool, "order": order}, tenant_id=None)
+        return {"in_pool": in_pool, "pool_order": order}
+
     @router.post("/techdeva/ai-bench")
     def bench(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
               authorization: str | None = Header(None),
@@ -834,6 +972,11 @@ def _cli(argv):
     if cmd == "autohold":
         rows = [json.loads(l) for l in sys.stdin if l.strip()]
         for line in autohold(rows):
+            print(line)
+        return 0
+    if cmd == "autoswitch":
+        rows = [json.loads(l) for l in sys.stdin if l.strip()]
+        for line in autoswitch(rows):
             print(line)
         return 0
     if cmd == "bench-next":
