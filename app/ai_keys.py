@@ -262,13 +262,16 @@ def pick_stt_model(ids):
     for p in STT_PREFERRED:
         if p in low:
             return low[p]
-    return ms[0] if ms else "whisper-large-v3-turbo"
+    # a key may list its speech model under another name ("Whisper", which 404s on
+    # /audio/transcriptions); the standard Groq name answers (checked 26 Oct 2026)
+    return "whisper-large-v3-turbo"
 
 
 def _voice(cur):
-    cur.execute("SELECT key, value FROM platform_settings WHERE key IN ('ai_stt_key', 'ai_stt_model')")
+    cur.execute("SELECT key, value FROM platform_settings WHERE key IN ('ai_stt_key', 'ai_stt_model', 'ai_stt_agents')")
     d = {r["key"]: r["value"] for r in cur.fetchall()}
-    return {"key_id": d.get("ai_stt_key") or None, "model": d.get("ai_stt_model") or None}
+    return {"key_id": d.get("ai_stt_key") or None, "model": d.get("ai_stt_model") or None,
+            "agents": [a for a in (d.get("ai_stt_agents") or "").split(",") if a]}
 
 
 def _agents(cur):
@@ -847,14 +850,22 @@ def make_ai_keys_router() -> APIRouter:
                     raise HTTPException(409, "That key is %s. Test it or choose another." % row["status"])
                 listed = (row["test_detail"] or {}).get("stt_models")
                 model = str(body.get("model") or "").strip() or pick_stt_model(listed)
-                if listed and model not in listed:
+                if listed and model not in listed and model not in STT_PREFERRED:
                     raise HTTPException(400, "%s does not have %s." % (row["label"], model))
-            for k, v in (("ai_stt_key", key_id or ""), ("ai_stt_model", model)):
+            only = body.get("agents")
+            if only is not None:
+                known = {a["agent_key"] for a in _agents(cur)}
+                only = [str(a) for a in (only or []) if str(a) in known]
+            pairs = [("ai_stt_key", key_id or ""), ("ai_stt_model", model)]
+            if only is not None:
+                pairs.append(("ai_stt_agents", ",".join(only)))
+            for k, v in pairs:
                 cur.execute("""INSERT INTO platform_settings (key, value) VALUES (%s, %s)
                                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""", (k, v))
             record(cur, action="techdeva.ai_key.voice", resource="platform_settings", resource_id="ai_stt_key",
-                   actor=str(uid) if uid else None, status="ok", detail={"key_id": key_id, "model": model}, tenant_id=None)
-        return {"key_id": key_id, "model": model or None}
+                   actor=str(uid) if uid else None, status="ok", detail={"key_id": key_id, "model": model, "agents": only},
+                   tenant_id=None)
+        return {"key_id": key_id, "model": model or None, "agents": only}
 
     @router.post("/techdeva/ai-bench")
     def bench(body: dict = Body(...), x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
@@ -1034,6 +1045,12 @@ def _cli(argv):
         rows = [json.loads(l) for l in sys.stdin if l.strip()]
         for line in autoswitch(rows):
             print(line)
+        return 0
+    if cmd == "stt-agents":
+        # the agents that get voice notes, one per line (nothing = every agent)
+        with tenant_session(None, "techdeva_admin") as cur:
+            for a in _voice(cur)["agents"]:
+                sys.stdout.write(a + "\n")
         return 0
     if cmd == "stt-key":
         # last4 \t model \t key of the voice-notes key (nothing = off); for ai-keys-sync.sh only

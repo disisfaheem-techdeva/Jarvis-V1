@@ -105,13 +105,17 @@ done <<< "$power"
 stt=$(pyx stt-key 2>/dev/null) || stt="__error__"
 if [ "$stt" = "__error__" ]; then log "could not read the voice-notes key"; else
   IFS=$'\t' read -r s4 smodel skey <<< "$stt"
-  want="${s4:-off}"; [ "$want" = "off" ] || want="$s4 $smodel"
+  want_all="${s4:-off}"; [ "$want_all" = "off" ] || want_all="$s4 $smodel"
+  only=$(pyx stt-agents 2>/dev/null) || only="__error__"
   for d in /docker/hermes-*/; do
     a=$(basename "$d"); a=${a#hermes-}
     protected "$a" && continue
     [ -f "$d/agent.env" ] && [ -f "$d/docker-compose.yml" ] || continue
     v=$(docker volume inspect -f '{{.Mountpoint}}' "hermes-$a-data" 2>/dev/null) || continue
     [ -f "$v/config.yaml" ] || continue
+    [ "$only" = "__error__" ] && break
+    want="$want_all"
+    if [ -n "$only" ] && ! grep -qxF "$a" <<< "$only"; then want=off; fi
     have=$(cat "$d/ai-stt" 2>/dev/null || echo off)
     [ "$have" = "$want" ] && continue
     ts=$(date +%Y%m%d_%H%M%S)

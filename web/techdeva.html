@@ -844,7 +844,7 @@ const VIEWS = {
       '<section><h2>Voice notes</h2><div class="card">' + (function(){
         const vo = d.voice || {}, groq = keys.filter(k => k.provider === 'groq' && k.status !== 'disabled' && k.status !== 'invalid');
         const cur = keys.find(k => k.id === vo.key_id);
-        return '<div class="sub" style="margin-bottom:8px">' + (cur ? 'On: voice notes are written out by <b>' + esc(cur.label) + '</b> (' + esc(vo.model || '') + ') and the agent answers what was said. The written text is never sent to the customer.'
+        return '<div class="sub" style="margin-bottom:8px">' + (cur ? 'On' + ((vo.agents || []).length ? ' only for <b>' + esc(vo.agents.join(', ')) + '</b>' : ' for every agent') + ': voice notes are written out by <b>' + esc(cur.label) + '</b> (' + esc(vo.model || '') + ') and the agent answers what was said. The written text is never sent to the customer.'
                  : 'Off: a voice note gets no transcription. Choose a Groq key (it has Whisper) to turn voice notes on for every agent.') + '</div>' +
           '<div class="row" style="gap:8px;align-items:center"><select class="fee" style="width:auto;max-width:320px;text-align:left" id="apk-voice"><option value="">Off</option>' +
           groq.map(k => '<option value="' + esc(k.id) + '"' + (k.id === vo.key_id ? ' selected' : '') + '>' + esc(k.label) + ' …' + esc(k.last4) +
