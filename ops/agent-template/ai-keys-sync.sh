@@ -135,6 +135,16 @@ if [ "$stt" = "__error__" ]; then log "could not read the voice-notes key"; else
       out=$(python3 "$HERE/stt_config.py" "$v/config.yaml" on "$smodel" 2>&1); rc=$?
     fi
     if [ $rc -ne 0 ] && [ $rc -ne 3 ]; then rm -f "$tmp"; log "voice notes for $a not changed: $out"; continue; fi
+    # the compose file blanks GROQ_API_KEY (GROQ_API_KEY: "" under environment) so the shared
+    # workspace .env key never reaches an agent; that line beats agent.env, so voice notes
+    # need it gone, and it comes back when they are off
+    cp -a "$d/docker-compose.yml" "$d/docker-compose.yml.bak-stt-$ts"
+    if [ "$want" = "off" ]; then
+      grep -q '^      GROQ_API_KEY: ""$' "$d/docker-compose.yml" || \
+        sed -i '0,/^    environment:$/s//    environment:\n      GROQ_API_KEY: ""/' "$d/docker-compose.yml"
+    else
+      sed -i '/^      GROQ_API_KEY: ""$/d' "$d/docker-compose.yml"
+    fi
     chmod 600 "$tmp"; mv "$tmp" "$d/agent.env"; echo "$want" > "$d/ai-stt"
     if [ "$(docker inspect -f '{{.State.Running}}' "hermes-agent-$a" 2>/dev/null)" = "true" ]; then
       (cd "$d" && docker compose up -d --force-recreate >/dev/null 2>&1 </dev/null) || log "re-create failed for $a"
