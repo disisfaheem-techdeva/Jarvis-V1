@@ -22,6 +22,7 @@ import sys
 import yaml
 
 NAME = "tdkey"
+MAX_TOKENS = 4096
 
 
 def main(argv):
@@ -51,7 +52,10 @@ def main(argv):
         fallbacks += [x for x in keep.get("fallback_providers") or [] if x not in fallbacks]
         cfg["providers"] = {NAME: {"name": NAME, "base_url": base, "key_env": "TD_AI_KEY",
                                    "api_mode": "chat_completions", "model": model}}
-        cfg["model"] = {"provider": "custom:" + NAME, "default": model}
+        # A model Hermes does not know gets a huge max_tokens, which providers
+        # refuse (Groq: 400 "max_tokens must be <= 16384", seen 26 Oct 2026).
+        # A WhatsApp reply never needs more than this.
+        cfg["model"] = {"provider": "custom:" + NAME, "default": model, "max_tokens": MAX_TOKENS}
         cfg["fallback_providers"] = fallbacks
     else:
         if not os.path.exists(saved):
