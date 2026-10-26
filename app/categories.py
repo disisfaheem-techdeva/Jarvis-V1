@@ -387,7 +387,7 @@ def make_categories_router():
                    actor=str(uid), actor_type="human", status="ok", detail={})
         return {"ok": True, "sync": sync_knowledge(tid)}
 
-    # ---- the owner's full guide for the WhatsApp agent (db/81): kept exactly as written
+    # ---- the owner's full guide for the WhatsApp agent (db/82): kept exactly as written
     @router.get("/business-profile/guide")
     def get_guide(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
                   authorization: str | None = Header(None),

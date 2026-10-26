@@ -1945,7 +1945,7 @@ VIEWS.hermes = function(){
     '<textarea id="hm_teach" rows="3" style="width:100%;padding:10px;border-radius:10px;font:inherit" ' +
     'placeholder="e.g. Hair PRP is 25,000 per session. Always ask the patient\'s name before quoting."></textarea>' +
     row() + '<button class="btn primary" id="hm_go">Teach</button><button class="btn" id="hm_sync">Re-send everything to the agent</button></div>' + actbar());
-  // the owner's full guide (db/81): kept exactly as written, sent with the business knowledge
+  // the owner's full guide (db/82): kept exactly as written, sent with the business knowledge
   var G = S.wa_guide;
   if (!need('wa_guide', '/business-profile/guide')) out += panel('Full guide for your agent', loading('Loading your guide...'));
   else if (G === null) out += panel('Full guide for your agent', errState('Your guide could not be loaded.'));
