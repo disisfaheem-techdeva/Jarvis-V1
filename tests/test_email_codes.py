@@ -49,10 +49,10 @@ def mail(monkeypatch):
 
     box = Box()
 
-    def send(to, subject, text):
+    def send(to, subject, text, html=None):
         if box.fail:
             raise ConnectionError("SMTP server disconnected")
-        box.append({"to": to, "subject": subject, "text": text})
+        box.append({"to": to, "subject": subject, "text": text, "html": html})
 
     monkeypatch.setattr(account, "send_mail", send)
     monkeypatch.setattr(account, "mail_configured", lambda: True)

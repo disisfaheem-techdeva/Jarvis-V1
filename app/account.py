@@ -52,8 +52,9 @@ def mail_configured():
     return bool(os.environ.get("SMTP_HOST") and os.environ.get("MAIL_FROM"))
 
 
-def send_mail(to, subject, text):
-    """Send one plain-text email. Raises on failure; the caller decides."""
+def send_mail(to, subject, text, html=None):
+    """Send one email: plain text, plus an HTML version when given (clients that
+    cannot show HTML show the text). Raises on failure; the caller decides."""
     host = os.environ["SMTP_HOST"]
     port = int(os.environ.get("SMTP_PORT") or 587)
     user = os.environ.get("SMTP_USER") or ""
@@ -63,6 +64,8 @@ def send_mail(to, subject, text):
     msg["To"] = to
     msg["Subject"] = subject
     msg.set_content(text)
+    if html:
+        msg.add_alternative(html, subtype="html")
     ctx = ssl.create_default_context()
     if port == 465:
         with smtplib.SMTP_SSL(host, port, context=ctx, timeout=15) as s:

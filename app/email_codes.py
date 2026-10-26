@@ -150,6 +150,51 @@ def _body(name, code):
             "If this wasn't you, ignore this email.\n\nTechDeva" % (name or "there", code, TTL_MIN))
 
 
+def _html_body(name, code):
+    """The same message as _body, laid out like the dashboard (violet on near-white).
+    Email clients ignore <style> and web fonts often, so everything is inline and in tables."""
+    from html import escape
+    hi = escape(name) if name else "there"
+    font = "'Geist',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
+    return (
+        '<!doctype html><html><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<meta name="color-scheme" content="light"><title>Your TechDeva code</title></head>'
+        '<body style="margin:0;padding:0;background:#fbfaff">'
+        '<div style="display:none;max-height:0;overflow:hidden">Your TechDeva code is %(code)s. It expires in %(ttl)d minutes.</div>'
+        '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="background:#fbfaff">'
+        '<tr><td align="center" style="padding:32px 16px">'
+        '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" '
+        'style="max-width:440px;background:#ffffff;border:1px solid #e8e7ed;border-radius:16px">'
+        # wordmark
+        '<tr><td style="padding:28px 32px 20px;border-bottom:1px solid #e8e7ed">'
+        '<table role="presentation" cellpadding="0" cellspacing="0"><tr>'
+        '<td style="width:28px;height:28px;background:#6d28d9;border-radius:8px;color:#ffffff;'
+        'font:700 13px/28px %(font)s;text-align:center">TD</td>'
+        '<td style="padding-left:10px;font:700 20px/28px %(font)s;color:#15131d;letter-spacing:-0.3px">'
+        'Tech<span style="color:#6d28d9">Deva</span></td>'
+        '</tr></table></td></tr>'
+        # message
+        '<tr><td style="padding:24px 32px 0;font:400 15px/22px %(font)s;color:#15131d">Hi %(hi)s,</td></tr>'
+        '<tr><td style="padding:14px 32px 0;font:400 15px/22px %(font)s;color:#15131d">Your verification code is:</td></tr>'
+        # the code
+        '<tr><td style="padding:16px 32px 0">'
+        '<div style="background:#ede9fe;border:1px solid #ddd6fe;border-radius:14px;padding:20px 8px;text-align:center;'
+        "font:700 34px/40px 'Geist Mono',ui-monospace,Menlo,Consolas,monospace;letter-spacing:8px;color:#5b21b6\">"
+        '%(code)s</div></td></tr>'
+        '<tr><td style="padding:12px 32px 0;font:400 13px/20px %(font)s;color:#4b4859">'
+        'It expires in %(ttl)d minutes. Never share this code with anyone.</td></tr>'
+        '<tr><td style="padding:14px 32px 26px;font:400 15px/22px %(font)s;color:#15131d">'
+        "If you did not try to sign in, you can ignore this email.</td></tr>"
+        # footer
+        '<tr><td style="padding:18px 32px 24px;border-top:1px solid #e8e7ed;text-align:center;'
+        'font:400 12px/18px %(font)s;color:#615d70">'
+        '&copy; TechDeva &middot; AI Business Operating System<br>'
+        '<a href="https://techdeva.net" style="color:#6d28d9;text-decoration:none">techdeva.net</a></td></tr>'
+        '</table></td></tr></table></body></html>'
+    ) % {"code": escape(code), "hi": hi, "ttl": TTL_MIN, "font": font}
+
+
 def send_code(user) -> dict:
     """Make a code and email it. {"sent": bool, "reason": None|"no_mail"|"failed"|"too_soon", "wait": s}"""
     from .account import mail_configured, send_mail
@@ -161,7 +206,8 @@ def send_code(user) -> dict:
     except TooSoon as e:
         return {"sent": False, "reason": "too_soon", "wait": e.wait}
     try:
-        send_mail(user["email"], "Your TechDeva code: %s" % code, _body(user.get("name"), code))
+        send_mail(user["email"], "Your TechDeva code: %s" % code, _body(user.get("name"), code),
+                  html=_html_body(user.get("name"), code))
     except Exception as e:  # noqa: BLE001 - the caller says so honestly
         print("[email_codes] code email failed: %s" % type(e).__name__, flush=True)
         return {"sent": False, "reason": "failed", "wait": 0}
