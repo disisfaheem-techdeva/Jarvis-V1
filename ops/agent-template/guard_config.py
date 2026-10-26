@@ -20,6 +20,7 @@ import sys
 import yaml
 
 PLUGIN = "td_guard"
+SLIM_OFF = ("clarify", "memory", "session_search", "skills", "tts", "todo", "vision")
 
 
 def main(path):
@@ -39,6 +40,20 @@ def main(path):
     # T14: a sales reply needs little thinking; at "medium" Gemini 3.x spent most of
     # the shared 800-token output cap thinking and the reply was cut and continued
     cfg.setdefault("agent", {})["reasoning_effort"] = "low"
+    # T15 slim input (26 Oct 2026): the model was sent ~10,700 tokens a message, ~12% of it
+    # this business. Off: tools a WhatsApp sales agent never uses (71 coding/design skills,
+    # memory writing, other chats' search, todo, clarify, speech, photos) and Hermes's
+    # coding guidance. The business's knowledge and lessons live in SOUL.md and stay; the
+    # memory files are not touched. Measured: ~2,100 tokens, same replies; fits Groq free.
+    agent = cfg["agent"]
+    dis = list(agent.get("disabled_toolsets") or [])
+    for t in SLIM_OFF:
+        if t not in dis:
+            dis.append(t)
+    agent["disabled_toolsets"] = dis
+    agent["task_completion_guidance"] = False
+    agent["parallel_tool_call_guidance"] = False
+    agent["tool_use_enforcement"] = False
     if json.dumps(cfg, sort_keys=True, default=str) == before:
         print("guard_config: unchanged")
         return 3
@@ -50,7 +65,9 @@ def main(path):
     back = yaml.safe_load(open(tmp, encoding="utf-8"))
     if (PLUGIN not in back["plugins"]["enabled"] or back["display"]["memory_notifications"] != "off"
             or back["memory"]["nudge_interval"] != 0 or back["skills"]["creation_nudge_interval"] != 0
-            or back["agent"]["reasoning_effort"] != "low"):
+            or back["agent"]["reasoning_effort"] != "low"
+            or not set(SLIM_OFF) <= set(back["agent"]["disabled_toolsets"])
+            or back["agent"]["tool_use_enforcement"] is not False):
         os.unlink(tmp)
         sys.exit("guard_config: read-back mismatch, config not changed")
     os.replace(tmp, path)
