@@ -1616,7 +1616,25 @@ document.addEventListener('visibilitychange', function(){ if (!document.hidden &
 setInterval(function(){ if (S.me) incidentBar(); }, INC_EVERY_MS);
 /* Alerts sit behind a bell in the top bar, not across every page: the count
    shows on the bell and the list opens on click. INC.open survives redraws. */
+/* Read alerts: a business's own ones close on the server; platform-wide ones
+   are hidden in this browser until they are seen again (id + last_seen_at). */
+var INC_HIDDEN = (function(){ try { return JSON.parse(localStorage.getItem('td-inc-read') || '{}') || {}; } catch (e) { return {}; } })();
+function incKey(i){ return i.id + '@' + i.last_seen_at; }
+function incHide(list){
+  list.forEach(function(i){ INC_HIDDEN[incKey(i)] = 1; });
+  try { localStorage.setItem('td-inc-read', JSON.stringify(INC_HIDDEN)); } catch (e) { /* lasts this page view */ }
+}
+function incRead(ids){
+  var gone = (INC.items || []).filter(function(i){ return ids.indexOf(i.id) >= 0; });
+  incHide(gone);
+  var box = document.getElementById('incbar');
+  INC.html = incidentHTML((INC.items || []).filter(function(i){ return ids.indexOf(i.id) < 0; }));
+  if (box) box.innerHTML = INC.html;
+  var own = gone.filter(function(i){ return !i.platform_wide; }).map(function(i){ return i.id; });
+  if (own.length) api('/incidents/read', { method: 'POST', body: { ids: own } });
+}
 function incidentHTML(items){
+    items = items.filter(function(i){ return !INC_HIDDEN[incKey(i)]; });
     INC.items = items;
     if (!items.length) { INC.open = false; return ''; }
     var critical = items.some(function(i){ return i.severity === 'critical'; });
@@ -1629,6 +1647,8 @@ function incidentHTML(items){
     return btn + '<div role="dialog" aria-label="Alerts" style="position:absolute;right:0;top:calc(100% + 8px);z-index:60;' +
       'width:min(380px,calc(100vw - 32px));max-height:70vh;overflow:auto;padding:12px;border-radius:12px;' +
       'background:var(--panel);border:1px solid var(--line,rgba(255,255,255,.14));box-shadow:0 12px 32px rgba(0,0,0,.35)">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:6px">' +
+      '<strong>Alerts</strong><button class="btn" type="button" data-inc-all style="padding:4px 10px;font-size:12px">Mark all as read</button></div>' +
       items.slice(0, 10).map(function(i){
         var c = i.severity === 'critical' ? 'var(--danger)' : 'var(--warn)';
         return '<div style="padding:10px 0;border-bottom:1px solid var(--line,rgba(255,255,255,.08))">' +
@@ -1636,12 +1656,16 @@ function incidentHTML(items){
           (i.detail ? '<div class="sub" style="margin-top:4px">' + esc(i.detail) + '</div>' : '') +
           '<div class="sub" style="margin-top:4px">Since ' +
           esc(String(i.opened_at).slice(0, 16).replace('T', ' ')) +
-          (i.seen_count > 1 ? ' - seen ' + i.seen_count + ' times' : '') + '</div></div>';
+          (i.seen_count > 1 ? ' - seen ' + i.seen_count + ' times' : '') + '</div>' +
+          '<button class="btn" type="button" data-inc-read="' + esc(i.id) + '" style="margin-top:8px;padding:4px 10px;font-size:12px">Mark as read</button></div>';
       }).join('') + '</div>';
 }
 document.addEventListener('click', function(e){
   var t = e.target, box = document.getElementById('incbar');
   if (!box) return;
+  var rd = t.closest && t.closest('[data-inc-read]');
+  if (rd) { incRead([rd.getAttribute('data-inc-read')]); return; }
+  if (t.closest && t.closest('[data-inc-all]')) { incRead((INC.items || []).map(function(i){ return i.id; })); return; }
   if (t.closest && t.closest('#incbell-btn')) INC.open = !INC.open;
   else if (INC.open && !box.contains(t)) INC.open = false;
   else return;

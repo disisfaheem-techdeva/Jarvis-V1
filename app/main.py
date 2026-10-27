@@ -1097,7 +1097,7 @@ def list_incidents(x_tenant_id: str | None = Header(None),
     admin = role == "techdeva_admin"
     hide = "" if admin else " AND (tenant_id IS NOT NULL OR kind = ANY(%s))"
     with tenant_session(tid, role) as cur:
-        cur.execute("""SELECT kind, severity, title, detail, status, seen_count,
+        cur.execute("""SELECT id::text AS id, kind, severity, title, detail, status, seen_count,
                               opened_at, last_seen_at,
                               (tenant_id IS NULL) AS platform_wide
                          FROM incidents
@@ -1108,6 +1108,37 @@ def list_incidents(x_tenant_id: str | None = Header(None),
                         LIMIT 50""", () if admin else (list(CLIENT_VISIBLE_PLATFORM_INCIDENTS),))
         rows = [dict(r) for r in cur.fetchall()]
     return {"incidents": rows, "open": len(rows)}
+
+
+@app.post("/incidents/read")
+def read_incidents(body: dict = Body(default={}),
+                   x_tenant_id: str | None = Header(None),
+                   x_role: str | None = Header(None),
+                   authorization: str | None = Header(None),
+                   td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+    """The owner read these alerts: close this business's own ones (body {"ids": [...]}
+    or {"all": true}). Platform-wide alerts are not the business's to close; the
+    dashboard hides those in the browser instead. Something new opens a fresh alert."""
+    tid, role, uid = scope(x_tenant_id, x_role, authorization, td_session, with_user=True)
+    ids = [str(i) for i in (body.get("ids") or []) if i][:100]
+    every = body.get("all") is True
+    if not ids and not every:
+        raise HTTPException(400, "ids or all required")
+    for i in ids:
+        try:
+            uuid.UUID(i)
+        except ValueError:
+            raise HTTPException(400, "bad id")
+    with tenant_session(tid, role) as cur:
+        cur.execute("""UPDATE incidents SET status = 'resolved', resolved_at = now()
+                        WHERE status = 'open' AND tenant_id = %s
+                          AND (%s OR id = ANY(%s::uuid[])) RETURNING id::text AS id, kind""",
+                    (tid, every, ids))
+        done = [dict(r) for r in cur.fetchall()]
+        if done:
+            record(cur, action="incident.read", resource="incidents", resource_id=done[0]["id"],
+                   actor=uid or role, detail={"closed": done})
+    return {"closed": len(done), "ids": [d["id"] for d in done]}
 
 
 @app.get("/ai/health")
