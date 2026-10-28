@@ -161,6 +161,10 @@ docker exec "$PAIR" sh -c 'cd /opt/data/scripts/whatsapp-bridge && [ "$(sha256su
 #      HERMES_MAX_TOKENS 4096 and reasoning low, so a reply is never cut and sent in pieces
 bash "$HERE/add-td-guard.sh" "$KEY" || die "add-td-guard.sh failed for $KEY"
 
+# ---- T16: the agent remembers a returning customer across the daily session reset
+#      (td_memory: name, when they last wrote, their last few exchanges; groups skipped)
+bash "$HERE/add-td-memory.sh" "$KEY" || die "add-td-memory.sh failed for $KEY"
+
 # ---- tell the platform which agent this tenant uses (TechDeva action)
 if [ $ASSIGN = 1 ]; then
   cd "$PLATFORM"

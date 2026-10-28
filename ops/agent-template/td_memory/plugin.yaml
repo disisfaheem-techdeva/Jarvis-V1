@@ -1,0 +1,8 @@
+name: td_memory
+version: 1.0.0
+description: "TechDeva: the WhatsApp agent remembers a returning customer (name, when they last wrote, what was said) across daily session resets. Per agent, no model call."
+author: TechDeva
+hooks:
+  - pre_gateway_dispatch
+  - pre_llm_call
+  - post_llm_call
