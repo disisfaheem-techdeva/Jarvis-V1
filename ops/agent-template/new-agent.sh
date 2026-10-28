@@ -6,7 +6,7 @@
 #
 # What every new agent gets (tonight's hand fixes, now automatic):
 #   T1 tool lockdown       agent.disabled_toolsets            (apply_config.py)
-#   T2 model chain         gemini-3.8-flash -> 2.5-flash-lite -> 3-flash-preview, no OpenRouter
+#   T2 model chain         gemini-3-flash-preview -> 3.5-flash-lite, no OpenRouter (T17: td_speed, minimal thinking)
 #   T3 no status leaks     gateway patched at IMAGE BUILD (patch_gateway.py) + display.tool_progress off
 #   T10 no error replies   a failed turn sends the customer nothing; the owner is alerted (patch_final_reply.py)
 #   T11 quota              no session-title request per conversation (patch_no_autotitle.py); STT off
@@ -164,6 +164,10 @@ bash "$HERE/add-td-guard.sh" "$KEY" || die "add-td-guard.sh failed for $KEY"
 # ---- T16: the agent remembers a returning customer across the daily session reset
 #      (td_memory: name, when they last wrote, their last few exchanges; groups skipped)
 bash "$HERE/add-td-memory.sh" "$KEY" || die "add-td-memory.sh failed for $KEY"
+
+# ---- T17: fast replies (td_speed: Gemini 3 Flash Preview with no thinking, reasoning minimal,
+#      gemini-3.5-flash-lite the only fallback)
+bash "$HERE/add-td-speed.sh" "$KEY" || die "add-td-speed.sh failed for $KEY"
 
 # ---- tell the platform which agent this tenant uses (TechDeva action)
 if [ $ASSIGN = 1 ]; then

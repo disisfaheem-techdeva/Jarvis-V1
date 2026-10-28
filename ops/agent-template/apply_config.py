@@ -6,8 +6,10 @@ other default stays whatever this Hermes version ships. Only these keys are
 set, and each is read back afterwards; any mismatch exits non-zero.
 
   T1  agent.disabled_toolsets: tools a WhatsApp sales agent must never have.
-  T2  model: provider gemini, default gemini-3.8-flash, fallbacks
-      gemini-2.5-flash-lite then gemini-3-flash-preview. No OpenRouter: a free
+  T2  model: provider gemini, default gemini-3-flash-preview, fallback
+      gemini-3.5-flash-lite (T17, 28 Oct 2026: 3.5-flash-lite took 11-46 s a
+      reply, 3-flash-preview ~1 s; 2.5-flash-lite 404s for new keys, 3.8-flash
+      answered 400/503). No OpenRouter: a free
       reasoning model in that chain once sent its private thinking to a
       customer. The key comes from GEMINI_API_KEY in the environment.
   T3  display.tool_progress: off (no "using tool X" lines to customers).
@@ -23,9 +25,8 @@ import yaml
 PATH = sys.argv[1] if len(sys.argv) > 1 else "/opt/data/config.yaml"
 DISABLED = ["terminal", "file", "code_execution", "computer_use", "browser", "cronjob",
             "delegation", "homeassistant", "kanban", "discord_admin"]
-MODEL = {"default": "gemini-3.8-flash", "provider": "gemini"}
-FALLBACKS = [{"provider": "gemini", "model": "gemini-2.5-flash-lite"},
-             {"provider": "gemini", "model": "gemini-3-flash-preview"}]
+MODEL = {"default": "gemini-3-flash-preview", "provider": "gemini"}
+FALLBACKS = [{"provider": "gemini", "model": "gemini-3.5-flash-lite"}]
 
 with open(PATH, encoding="utf-8") as f:
     cfg = yaml.safe_load(f) or {}

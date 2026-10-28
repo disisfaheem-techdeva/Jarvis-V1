@@ -1,0 +1,4 @@
+name: td_speed
+version: 1.0.0
+description: "TechDeva: Gemini 3 Flash replies with minimal thinking when reasoning_effort is minimal (~1 s instead of ~2.3 s)."
+author: TechDeva
