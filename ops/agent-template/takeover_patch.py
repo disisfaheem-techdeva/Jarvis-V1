@@ -3,8 +3,10 @@
 
   takeover_patch.py <bridge.js>
 
-Each anchor must occur exactly once, or nothing is written. Exit 0 when
-patched, 3 when already patched. Owner and mode kept; atomic; read back.
+Stages (each with its own marker, applied in order, a done one skipped):
+T18 human takeover, T18b stop per chat and the No Bot label. Each anchor must
+occur exactly once, or nothing is written. Exit 0 when patched, 3 when already
+patched. Owner and mode kept; atomic; read back.
 """
 import os
 import sys
@@ -139,18 +141,64 @@ EDITS = [
      "// Health check\n"),
 ]
 
+# T18b: the dashboard stops Hermes in one chat for a while or for good, and a
+# WhatsApp Business "No Bot" label stops it until the label is removed.
+MARK2 = "// ---- techdeva T18b: stop per chat, No Bot label ----"
+
+EDITS2 = [
+    # 1. hear label changes (names and which chats carry them)
+    ("  sock.ev.on('creds.update', () => { saveCreds(); lidToPhone = buildLidMap(); });\n",
+     "  sock.ev.on('creds.update', () => { saveCreds(); lidToPhone = buildLidMap(); });\n"
+     "  " + MARK2 + "\n"
+     "  sock.ev.on('labels.edit', (edit) => tdTakeover.labelEdit(edit));\n"
+     "  sock.ev.on('labels.association', (ev) => tdTakeover.labelAssociation(ev));\n"),
+    # 2. GET /takeover says it is this version (pairctl shows the switch only then)
+    ("  res.json({ paused: tdTakeover.list() });\n",
+     "  res.json({ version: 2, paused: tdTakeover.list() });\n"),
+    # 3. POST /takeover: minutes, for good, or start again
+    ("// techdeva T18: GET /takeover lists paused chats; POST { chatId, minutes }\n"
+     "// pauses one (minutes 0 resumes it). Internal key required.\n",
+     "// techdeva T18: GET /takeover lists stopped chats; POST { chatId, minutes } or\n"
+     "// { chatId, forever: true } stops Hermes in one chat (minutes 0 starts it\n"
+     "// again; a No Bot label still keeps it quiet). Internal key required.\n"),
+    ("  const { chatId, minutes } = req.body || {};\n"
+     "  if (!chatId) return res.status(400).json({ error: 'chatId required' });\n"
+     "  const m = Number(minutes);\n"
+     "  if (minutes !== undefined && (!Number.isFinite(m) || m < 0 || m > 1440)) return res.status(400).json({ error: 'minutes must be 0-1440' });\n"
+     "  if (m === 0) return res.json({ resumed: tdTakeover.resume(chatId, null, 'api'), paused: tdTakeover.list() });\n"
+     "  const until = minutes === undefined ? tdTakeover.pause(chatId, null, 'api') : tdTakeover.pause(chatId, null, 'api', m);\n"
+     "  res.json({ until: until ? new Date(until).toISOString() : null, paused: tdTakeover.list() });\n",
+     "  const { chatId, minutes, forever } = req.body || {};\n"
+     "  if (!chatId) return res.status(400).json({ error: 'chatId required' });\n"
+     "  if (forever === true) {\n"
+     "    tdTakeover.hold(chatId, null, null, 'api');\n"
+     "    return res.json({ status: tdTakeover.status(chatId) });\n"
+     "  }\n"
+     "  const m = Number(minutes);\n"
+     "  if (!Number.isFinite(m) || m < 0 || m > 43200) return res.status(400).json({ error: 'minutes must be 0-43200, or forever: true' });\n"
+     "  if (m === 0) tdTakeover.resume(chatId, null, 'api');\n"
+     "  else tdTakeover.hold(chatId, null, m, 'api');\n"
+     "  res.json({ status: tdTakeover.status(chatId) });\n"),
+]
+
+STAGES = [(MARK, EDITS), (MARK2, EDITS2)]
+
 
 def main(path):
     src = open(path, encoding="utf-8").read()
-    if MARK in src:
+    out, done = src, 0
+    for mark, edits in STAGES:
+        if mark in out:
+            continue
+        for i, (old, new) in enumerate(edits, 1):
+            n = out.count(old)
+            if n != 1:
+                sys.exit("takeover_patch: %s anchor %d found %d times, bridge.js not changed" % (mark, i, n))
+            out = out.replace(old, new)
+        done += len(edits)
+    if not done:
         print("takeover_patch: already patched")
         return 3
-    out = src
-    for i, (old, new) in enumerate(EDITS, 1):
-        n = out.count(old)
-        if n != 1:
-            sys.exit("takeover_patch: anchor %d found %d times, bridge.js not changed" % (i, n))
-        out = out.replace(old, new)
     st = os.stat(path)
     tmp = path + ".td-tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -161,7 +209,7 @@ def main(path):
         os.unlink(tmp)
         sys.exit("takeover_patch: read-back mismatch, bridge.js not changed")
     os.replace(tmp, path)
-    print("takeover_patch: bridge.js patched (%d edits)" % len(EDITS))
+    print("takeover_patch: bridge.js patched (%d edits)" % done)
     return 0
 
 

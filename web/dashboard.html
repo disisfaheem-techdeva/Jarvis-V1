@@ -2077,6 +2077,23 @@ VIEWS.hermes = function(){
     ? '<ul style="margin:0;padding-left:18px">' + L.map(function(l){ return '<li style="margin:6px 0">' + esc(l.lesson || l) + '</li>'; }).join('') + '</ul>' +
       '<div class="card-note" style="margin-top:8px">To remove one, open Jarvis.</div>'
     : empty('Nothing taught yet', 'Anything you teach here is what your agent will say to customers.'));
+  var offSeen = {}, hmxOn = false, offChats = chats.filter(function(c){
+    if ('hermes_off' in c) hmxOn = true;
+    if (!c.hermes_off) return false;
+    var k = c.phone || c.session_id;
+    if (offSeen[k]) return false;
+    offSeen[k] = 1; return true;
+  });
+  if (hmxOn) out += panel('Chats where the AI agent is off', (offChats.length
+    ? offChats.map(function(c){
+        return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)"><div><strong>' +
+          esc(c.phone ? '+' + c.phone : 'Unknown') + '</strong><div class="card-note">' + esc(hermesOffText(c.hermes_off)) + '</div></div>' +
+          (c.hermes_off.kind === 'label' ? '' : '<button class="btn" data-hermes="on" data-hsid="' + esc(c.session_id) + '"' + (IBX.hbusy ? ' disabled' : '') + '>Turn on</button>') + '</div>';
+      }).join('')
+    : empty('The AI agent is answering every chat', '')) +
+    '<div class="card-note" style="margin-top:8px">To turn it off for one customer, open the chat in the WhatsApp Inbox. ' +
+    'In the WhatsApp Business app you can also put a label named "No Bot" on a chat: the agent stays quiet there until you remove the label.</div>' +
+    hmxNote() + hmxWire());
   out += panel('Recent conversations', chats.length
     ? chats.slice(0, 5).map(function(c){ return '<div style="padding:6px 0;border-bottom:1px solid var(--line)"><strong>' +
         esc(c.phone ? '+' + c.phone : 'Unknown') + '</strong> <span class="card-note">' + esc(c.last || '') + '</span></div>'; }).join('') +
@@ -3382,6 +3399,58 @@ VIEWS.settings = function(){
    Who said what comes from the agent's own history: role 'user' is the
    customer, 'assistant' is the AI agent. 'owner' rows are replies a person
    sent from here (kept in the audit log, so they survive a refresh). */
+/* T18b: AI agent on/off per chat */
+function hermesOffText(o){
+  if (!o) return 'The AI agent is answering this chat.';
+  if (o.kind === 'label') return 'Off: this chat has the "No Bot" label in WhatsApp Business. Remove the label to turn the agent on.';
+  if (o.kind === 'auto') return 'Quiet for a minute, because a person replied in this chat.';
+  return o.until ? 'Off until ' + when(o.until) + '.' : 'Off until you turn it on.';
+}
+function ibxChat(sid){
+  var ch = null;
+  ((IBX.data && IBX.data.chats) || []).forEach(function(c){ if (c.session_id === sid) ch = c; });
+  return ch;
+}
+function hmxNote(){
+  return IBX.hnote ? '<div class="card-note" role="status" style="color:' + (IBX.hnote.bad ? 'var(--danger)' : 'var(--growth)') + '">' + esc(IBX.hnote.text) + '</div>' : '';
+}
+function ibxHermesBar(){
+  var c = ibxChat(IBX.sel);
+  if (!c || !('hermes_off' in c)) return '';           // this number's agent has no per-chat switch yet
+  var o = c.hermes_off;
+  var btn = function(mode, label, primary){
+    return '<button class="btn' + (primary ? ' primary' : '') + '" data-hermes="' + mode + '" data-hsid="' + esc(c.session_id) + '"' + (IBX.hbusy ? ' disabled' : '') + '>' + label + '</button>';
+  };
+  var btns = o && o.kind === 'label' ? '' :
+    (o ? btn('on', 'Turn on', true) : '') + btn('hour', 'Off for 1 hour') + btn('today', 'Off for today') + btn('forever', 'Always off');
+  return '<div class="ibx-hermes' + (o ? ' off' : '') + '"><div><strong>AI agent</strong> <span class="card-note">' + esc(hermesOffText(o)) + '</span></div>' +
+    (btns ? '<div class="ibx-hbtns">' + btns + '</div>' : '') + hmxNote() + '</div>';
+}
+function hmxWire(){
+  setTimeout(function(){
+    document.querySelectorAll('[data-hermes]').forEach(function(b){
+      b.onclick = function(){
+        var sid = b.getAttribute('data-hsid'), mode = b.getAttribute('data-hermes');
+        IBX.hbusy = true; IBX.hnote = null; renderShell();
+        api('/whatsapp/chats/' + encodeURIComponent(sid) + '/hermes', { method: 'POST', body: { mode: mode } }).then(function(r){
+          IBX.hbusy = false;
+          if (r.ok) {
+            var off = r.data.hermes_off || null, s = ibxChat(sid);
+            // every session of this customer is one chat on WhatsApp
+            ((IBX.data && IBX.data.chats) || []).forEach(function(c){ if (c === s || (s && s.phone && c.phone === s.phone)) c.hermes_off = off; });
+            IBX.hnote = { bad: false, text: mode === 'on'
+              ? (off ? 'Still off: ' + hermesOffText(off) : 'The AI agent is answering this chat again.')
+              : 'Done. The AI agent will not reply in this chat. ' + hermesOffText(off) };
+          } else {
+            IBX.hnote = { bad: true, text: (r.data && r.data.detail) || ('Not changed (HTTP ' + r.status + ').') };
+          }
+          renderShell();
+        });
+      };
+    });
+  }, 0);
+  return '';
+}
 var IBX_WHO = { user: 'Customer', assistant: 'AI agent', owner: 'You (dashboard)', system: 'Internal note to the AI (the customer never saw this)' };
 IBX.draft = ''; IBX.sending = false; IBX.note = null;
 function ibxSidParam(){ var m = /[?&]sid=([^&]+)/.exec(location.hash || ''); return m ? decodeURIComponent(m[1]) : null; }
@@ -3403,7 +3472,7 @@ VIEWS.inbox = function(){
   var list = chats.map(function(c){
     return '<div class="ibx-item' + (IBX.sel === c.session_id ? ' sel' : '') + '" data-sid="' + esc(c.session_id) + '">' +
       '<div style="display:flex;justify-content:space-between;gap:8px"><strong>' + esc(c.phone ? '+' + c.phone : 'Unknown number') +
-      '</strong><span class="card-note">' + esc(c.messages) + ' msgs</span></div>' +
+      (c.hermes_off ? ' <span class="ibx-off">AI off</span>' : '') + '</strong><span class="card-note">' + esc(c.messages) + ' msgs</span></div>' +
       '<div class="card-note" style="margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(c.last || '') + '</div>' +
       '<div class="card-note">' + (c.last_at ? when(c.last_at) : '') +
       (IBX.data.numbers > 1 && c.number ? ' · to +' + esc(c.number) : '') + '</div></div>';
@@ -3424,7 +3493,7 @@ VIEWS.inbox = function(){
              (m.role === 'owner' && m.status !== 'sent' && m.error ? '<div class="t" style="color:var(--danger)">' + esc(m.error) + '</div>' : '') + '</div>';
     }).join('') || empty('Empty chat', '');
     var connected = IBX.data.connected;
-    reply = '<div class="ibx-reply">' +
+    reply = ibxHermesBar() + '<div class="ibx-reply">' +
       (connected ? '' : '<div class="card-note" style="color:var(--warn)">Your number is not connected, so replies cannot be sent.</div>') +
       '<textarea class="fld" id="ibx_text" rows="2" maxlength="4000" placeholder="Type a reply to this customer…"' + (connected ? '' : ' disabled') + '>' + esc(IBX.draft) + '</textarea>' +
       '<div style="display:flex;gap:8px;align-items:center;margin-top:6px"><button class="btn primary" id="ibx_send"' + (connected && !IBX.sending ? '' : ' disabled') + '>' +
@@ -3432,18 +3501,18 @@ VIEWS.inbox = function(){
       esc(IBX.note ? IBX.note.text : '') + '</span>' +
       (IBX.note && IBX.note.wa ? '<a class="btn" target="_blank" rel="noopener" href="' + esc(IBX.note.wa) + '" title="Opens WhatsApp with this customer and your message typed in. Send it from your business WhatsApp.">Reply in WhatsApp</a>' : '') +
       '</div>' +
-      '<div class="card-note">Your AI agent keeps answering this chat too. Replies sent here go out from your business number.</div></div>';
+      '<div class="card-note">Replies sent here go out from your business number. After a person replies, the AI agent stays quiet in this chat for a minute.</div></div>';
   }
   out += panel('Conversations', '<div class="ibx"><div class="ibx-list">' + list + '</div><div><div class="ibx-chat" id="ibx_chat">' +
     chat + '</div>' + reply + '</div></div>', '<span class="pill count">' + chats.length + '</span> ' + head);
-  return out + ibxWire();
+  return out + ibxWire() + hmxWire();
 };
 function ibxWire(){
   setTimeout(function(){
     var r = document.getElementById('ibx_ref');
     if (r) r.onclick = function(){ IBX.data = undefined; ibxLoad(true); if (IBX.sel) ibxOpen(IBX.sel); };
     document.querySelectorAll('[data-sid]').forEach(function(el){
-      el.onclick = function(){ IBX.draft = ''; IBX.note = null; ibxOpen(el.getAttribute('data-sid')); };
+      el.onclick = function(){ IBX.draft = ''; IBX.note = null; IBX.hnote = null; ibxOpen(el.getAttribute('data-sid')); };
     });
     var box = document.getElementById('ibx_chat');
     if (box) box.scrollTop = box.scrollHeight;
@@ -3474,7 +3543,10 @@ function ibxWire(){
   var st = document.createElement('style');
   st.textContent = '.bub.sys{max-width:100%;margin:6px auto;background:transparent;border:1px dashed var(--line);color:var(--muted);font-size:12px}' +
     '.bub.sys summary{cursor:pointer}.bub.owner{background:var(--success-tint);border:1px solid color-mix(in oklab,var(--success-ink) 35%,transparent)}' +
-    '.ibx-reply{margin-top:10px}.ibx-reply textarea{width:100%;resize:vertical}';
+    '.ibx-reply{margin-top:10px}.ibx-reply textarea{width:100%;resize:vertical}' +
+    '.ibx-hermes{display:grid;gap:8px;margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px}' +
+    '.ibx-hermes.off{border-color:var(--warn)}.ibx-hbtns{display:flex;flex-wrap:wrap;gap:6px}' +
+    '.ibx-off{display:inline-block;margin-left:6px;font-size:11px;font-weight:600;padding:1px 7px;border-radius:99px;border:1px solid var(--warn);color:var(--warn)}';
   document.head.appendChild(st);
 })();
 

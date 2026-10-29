@@ -104,7 +104,7 @@ function resolvePhone(uid) {
   return '';
 }
 
-function listChats() {
+function listChats(off) {
   const d = openDb();
   if (!d) return [];
   try {
@@ -123,6 +123,7 @@ function listChats() {
         last: String(l.content || '').replace(/\s+/g, ' ').slice(0, 140),
         last_at: iso(l.timestamp),
         started_at: iso(r.started_at),
+        ...(off ? { hermes_off: offFor(off, r.user_id) } : {}),
       };
     });
   } finally { d.close(); }
@@ -182,6 +183,49 @@ function chatJid(sid) {
     const u = String(r.user_id);
     return u.includes('@') ? u : u.replace(/\D/g, '') + '@s.whatsapp.net';
   } finally { d.close(); }
+}
+
+// ---- techdeva T18b: Hermes off per chat ----
+// The bridge's td_takeover knows which chats Hermes is stopped in: for a
+// minute after the owner wrote (auto), for a while or for good from the
+// dashboard (manual), or while a "No Bot" label is on the chat (label).
+function bridgeJson(method, p, payload) {
+  return new Promise((resolve) => {
+    const body = payload === undefined ? '' : JSON.stringify(payload);
+    const headers = { host: '127.0.0.1:' + AGENT_BRIDGE_PORT, 'x-internal-key': KEY };
+    if (body) { headers['content-type'] = 'application/json'; headers['content-length'] = Buffer.byteLength(body); }
+    const req = http.request({ host: '127.0.0.1', port: AGENT_BRIDGE_PORT, path: p, method, timeout: 5000, headers }, (res) => {
+      let b = '';
+      res.on('data', c => b += c);
+      res.on('end', () => { let j = null; try { j = JSON.parse(b); } catch (e) {} resolve({ status: res.statusCode, body: j }); });
+    });
+    req.on('error', (e) => resolve({ status: 0, error: e.code || e.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ status: 0, error: 'timed out' }); });
+    req.end(body);
+  });
+}
+
+// key (number or LID) -> { until, kind }; null when the bridge has no
+// per-chat switch (an older bridge), so the dashboard does not offer one.
+async function takeoverMap() {
+  const r = await bridgeJson('GET', '/takeover');
+  if (r.status !== 200 || !r.body || !(r.body.version >= 2) || !Array.isArray(r.body.paused)) return null;
+  const m = new Map();
+  for (const x of r.body.paused) m.set(String(x.chat), { until: x.until || null, kind: x.kind || 'auto' });
+  return m;
+}
+
+function offFor(off, userId) {
+  if (!off.size || !userId) return null;
+  const u = String(userId).split('@')[0].split(':')[0];
+  return off.get(u) || off.get(String(resolvePhone(userId) || '')) || null;
+}
+
+// Minutes from now to midnight in Pakistan (UTC+5, no daylight saving).
+function minutesToMidnightPK() {
+  const now = Date.now(), H5 = 5 * 3600000;
+  const next = (Math.floor((now + H5) / 86400000) + 1) * 86400000 - H5;
+  return Math.max(1, Math.ceil((next - now) / 60000));
 }
 
 function bridgeSend(chatId, message) {
@@ -361,7 +405,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && url === '/chats') {
-    try { return send(res, 200, { agent: AGENT, chats: listChats() }); }
+    try { return send(res, 200, { agent: AGENT, chats: listChats(await takeoverMap()) }); }
     catch (e) { log('chats failed', e.message); return send(res, 500, { error: 'could not read chats' }); }
   }
 
@@ -411,6 +455,26 @@ const server = http.createServer(async (req, res) => {
     if (r.body.guarded) return send(res, 502, { error: 'the bridge held this message back (reliability guard)' });
     log('sent a dashboard reply to', jid.replace(/\d(?=\d{4})/g, '*'));
     return send(res, 200, { agent: AGENT, sent: true, message_id: r.body.messageId || null, at: new Date().toISOString() });
+  }
+
+  // Dashboard: { session_id, mode: 'hour' | 'today' | 'forever' | 'on' }.
+  if (req.method === 'POST' && url === '/takeover') {
+    let body;
+    try { body = JSON.parse((await readBody(req)) || '{}'); }
+    catch (e) { return send(res, 400, { error: 'bad json' }); }
+    const mode = String(body.mode || '');
+    const ask = { hour: { minutes: 60 }, today: { minutes: minutesToMidnightPK() }, forever: { forever: true }, on: { minutes: 0 } }[mode];
+    if (!ask) return send(res, 400, { error: 'mode must be hour, today, forever or on' });
+    let jid;
+    try { jid = chatJid(String(body.session_id || '')); }
+    catch (e) { return send(res, 500, { error: 'could not read the conversation: ' + e.message }); }
+    if (!jid) return send(res, 404, { error: 'no such conversation' });
+    const r = await bridgeJson('POST', '/takeover', { chatId: jid, ...ask });
+    if (r.status === 404 || (r.status === 200 && !(r.body && 'status' in r.body)))
+      return send(res, 501, { error: 'this agent does not have the Hermes on/off update yet' });
+    if (r.status !== 200 || !r.body) return send(res, 502, { error: 'the WhatsApp bridge did not answer (' + (r.error || 'HTTP ' + r.status) + ')' });
+    log('hermes', mode, 'for', jid.replace(/\d(?=\d{4})/g, '*'));
+    return send(res, 200, { agent: AGENT, hermes_off: r.body.status || null });
   }
 
   if (req.method === 'GET' && url === '/health') {

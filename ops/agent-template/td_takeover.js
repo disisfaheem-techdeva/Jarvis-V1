@@ -1,21 +1,30 @@
 /**
  * TechDeva td_takeover: Hermes keeps quiet in a chat a person is answering (Rafay, 29 Oct 2026).
  *
- * In bot mode every message from the business number that Hermes did not send
- * was typed by a person: on the phone, on WhatsApp Web, or from the dashboard
- * (pairctl's /send carries the internal key). That chat is paused for
- * TD_TAKEOVER_MINUTES (default 1) after the person's latest message:
+ * A chat is stopped three ways:
+ *   * auto:   a message from the business number that Hermes did not send was
+ *             typed by a person (phone, WhatsApp Web, or a dashboard reply:
+ *             pairctl's /send carries the internal key). That chat is paused for
+ *             TD_TAKEOVER_MINUTES (default 1) after the person's latest message.
+ *   * manual: the dashboard stops Hermes in one chat for a while or for good
+ *             (POST /takeover). An auto pause never shortens it.
+ *   * label:  the owner puts a WhatsApp Business label named "No Bot" (or
+ *             "Hermes Off", "Bot Off") on the chat; removing it starts Hermes again.
+ * While a chat is stopped:
  *   * the customer's messages in it are not handed to Hermes;
  *   * a Hermes reply, edit, media or typing for it is held back;
  *   * every other chat carries on as before.
  * A chat is known by its phone number and its LID (both, through the
  * session's lid-mapping files), so one customer is one chat whichever id
- * WhatsApp uses. Pauses survive a bridge restart in $HERMES_HOME/td_takeover.json.
+ * WhatsApp uses. State survives a bridge restart in $HERMES_HOME/td_takeover.json.
  *
  * Hermes' own echo arrives before sock.sendMessage() resolves, so a message
  * from us is judged only after ECHO_WAIT_MS (by then the bridge knows its id),
  * and never while a bridge send to that chat is still in flight. Old messages
  * WhatsApp replays after a reconnect (older than FRESH_S) never pause a chat.
+ * WhatsApp sends a label's name only when it is created or renamed, so a
+ * "No Bot" label made before this bridge first ran is not known by name:
+ * the owner makes a new one.
  */
 import { readFileSync, writeFileSync, renameSync } from 'fs';
 import path from 'path';
@@ -28,6 +37,7 @@ const FRESH_S = 120;
 const ECHO_WAIT_MS = 3000;
 const FILE = process.env.TD_TAKEOVER_FILE
   || path.join(process.env.HERMES_HOME || '/opt/data', 'td_takeover.json');
+const NO_BOT = /^\s*(no\s*-?\s*bot|hermes\s*-?\s*off|bot\s*-?\s*off)\s*$/i;
 
 // Content a person sends. Reactions, deletes, edits, receipts and key
 // exchanges are not a person answering.
@@ -39,7 +49,9 @@ const REAL = new Set([
 const WRAPPERS = ['ephemeralMessage', 'viewOnceMessage', 'viewOnceMessageV2', 'documentWithCaptionMessage'];
 
 let lidMap = () => ({});
-const paused = new Map();   // key -> until (ms)
+const paused = new Map();   // key -> { until: ms | null (for good), kind: 'auto' | 'manual' }
+const labels = new Map();   // label id -> name
+const tagged = new Map();   // label id -> Set of chat jids
 const inflight = new Map(); // key -> sends in progress
 
 function log(event, extra) {
@@ -70,8 +82,10 @@ export function keysOf(jid, alt) {
 
 function save() {
   try {
-    const out = {};
-    for (const [k, until] of paused) out[k] = until;
+    const out = { paused: {}, labels: {}, tagged: {} };
+    for (const [k, v] of paused) out.paused[k] = v;
+    for (const [id, name] of labels) out.labels[id] = name;
+    for (const [id, set] of tagged) if (set.size) out.tagged[id] = [...set];
     const tmp = `${FILE}.tmp`;
     writeFileSync(tmp, JSON.stringify(out));
     renameSync(tmp, FILE);
@@ -80,37 +94,77 @@ function save() {
   }
 }
 
+const active = (v, now = Date.now()) => !!v && (v.until === null || v.until > now);
+
 function prune() {
   const now = Date.now();
   let gone = false;
-  for (const [k, until] of paused) if (until <= now) { paused.delete(k); gone = true; }
+  for (const [k, v] of paused) if (!active(v, now)) { paused.delete(k); gone = true; }
   if (gone) save();
+}
+
+// Keys of every chat that carries a "No Bot" label right now.
+function labelKeys() {
+  const keys = new Set();
+  for (const [id, set] of tagged) {
+    if (!NO_BOT.test(labels.get(id) || '')) continue;
+    for (const jid of set) for (const k of keysOf(jid)) keys.add(k);
+  }
+  return keys;
 }
 
 export function init({ getLidMap } = {}) {
   if (getLidMap) lidMap = getLidMap;
   try {
-    const saved = JSON.parse(readFileSync(FILE, 'utf8'));
-    for (const [k, until] of Object.entries(saved || {})) if (Number(until) > Date.now()) paused.set(k, Number(until));
+    const saved = JSON.parse(readFileSync(FILE, 'utf8')) || {};
+    // The first version kept { key: until } only.
+    const p = saved.paused && typeof saved.paused === 'object' ? saved.paused : saved;
+    for (const [k, v] of Object.entries(p)) {
+      const e = typeof v === 'number' ? { until: v, kind: 'auto' } : v;
+      if (e && (e.until === null || Number(e.until) > Date.now())) paused.set(k, { until: e.until === null ? null : Number(e.until), kind: e.kind === 'manual' ? 'manual' : 'auto' });
+    }
+    for (const [id, name] of Object.entries(saved.labels || {})) labels.set(id, String(name));
+    for (const [id, list] of Object.entries(saved.tagged || {})) tagged.set(id, new Set(list));
   } catch {}
-  log('ready', { minutes: MINUTES, paused: paused.size, file: FILE });
+  log('ready', { minutes: MINUTES, paused: paused.size, labels: labels.size, file: FILE });
 }
 
 export function isPaused(jid, alt) {
   prune();
-  return keysOf(jid, alt).some(k => paused.has(k));
+  const keys = keysOf(jid, alt);
+  if (keys.some(k => paused.has(k))) return true;
+  const lk = labelKeys();
+  return keys.some(k => lk.has(k));
 }
 
+// A person answered: stop Hermes here for MINUTES, never shortening a longer stop.
 export function pause(jid, alt, why, minutes = MINUTES) {
   const keys = keysOf(jid, alt);
   if (!keys.length) return null;
   const until = Date.now() + minutes * 60000;
-  for (const k of keys) paused.set(k, until);
-  save();
-  log('paused', { chat: keys, why, until: new Date(until).toISOString() });
+  let changed = false;
+  for (const k of keys) {
+    const cur = paused.get(k);
+    if (active(cur) && (cur.until === null || cur.until >= until)) continue;
+    paused.set(k, { until, kind: 'auto' });
+    changed = true;
+  }
+  if (changed) { save(); log('paused', { chat: keys, why, until: new Date(until).toISOString() }); }
   return until;
 }
 
+// The dashboard: stop Hermes for `minutes`, or for good when minutes is null.
+export function hold(jid, alt, minutes, why) {
+  const keys = keysOf(jid, alt);
+  if (!keys.length) return null;
+  const until = minutes === null ? null : Date.now() + minutes * 60000;
+  for (const k of keys) paused.set(k, { until, kind: 'manual' });
+  save();
+  log('held', { chat: keys, why, until: until === null ? 'for good' : new Date(until).toISOString() });
+  return { until };
+}
+
+// Hermes may answer again. A "No Bot" label still keeps it quiet until removed.
 export function resume(jid, alt, why) {
   const keys = keysOf(jid, alt);
   let any = false;
@@ -119,9 +173,53 @@ export function resume(jid, alt, why) {
   return any;
 }
 
+export function status(jid, alt) {
+  prune();
+  const keys = keysOf(jid, alt);
+  const lk = labelKeys();
+  if (keys.some(k => lk.has(k))) return { until: null, kind: 'label' };
+  for (const k of keys) {
+    const v = paused.get(k);
+    if (active(v)) return { until: v.until === null ? null : new Date(v.until).toISOString(), kind: v.kind };
+  }
+  return null;
+}
+
+// One row per id (number or LID), so a caller can match either.
 export function list() {
   prune();
-  return [...paused].map(([chat, until]) => ({ chat, until: new Date(until).toISOString() }));
+  const rows = new Map();
+  for (const [k, v] of paused) rows.set(k, { chat: k, until: v.until === null ? null : new Date(v.until).toISOString(), kind: v.kind });
+  for (const k of labelKeys()) rows.set(k, { chat: k, until: null, kind: 'label' });
+  return [...rows.values()];
+}
+
+export function labelEdit(edit) {
+  try {
+    if (!edit || edit.id === undefined) return;
+    const id = String(edit.id);
+    if (edit.deleted) { labels.delete(id); tagged.delete(id); }
+    else if (edit.name !== undefined) labels.set(id, String(edit.name));
+    save();
+    if (NO_BOT.test(String(edit.name || ''))) log('label', { id, name: edit.name, deleted: !!edit.deleted });
+  } catch (err) {
+    log('error', { error: err.message });
+  }
+}
+
+export function labelAssociation(ev) {
+  try {
+    const a = ev?.association;
+    if (!a || a.type !== 'label_jid' || !a.chatId || a.labelId === undefined) return;
+    const id = String(a.labelId);
+    if (!tagged.has(id)) tagged.set(id, new Set());
+    const set = tagged.get(id);
+    if (ev.type === 'add') set.add(String(a.chatId)); else set.delete(String(a.chatId));
+    save();
+    if (NO_BOT.test(labels.get(id) || '')) log(ev.type === 'add' ? 'label_on' : 'label_off', { chat: keysOf(a.chatId) });
+  } catch (err) {
+    log('error', { error: err.message });
+  }
 }
 
 export function sendStart(jid) {

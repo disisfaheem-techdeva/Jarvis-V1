@@ -402,6 +402,47 @@ def make_whatsapp_router():
             raise HTTPException(502, "Not sent. %s" % (reason or ("the WhatsApp service answered HTTP %s" % status)))
         return {"sent": True, "message_id": out.get("message_id"), "at": out.get("at")}
 
+    # T18b: Hermes on/off for one conversation
+    HERMES_MODES = ("hour", "today", "forever", "on")
+
+    @router.post("/chats/{session_id}/hermes")
+    def hermes_switch(session_id: str, body: dict, conn: str | None = None,
+                      x_tenant_id: str | None = Header(None),
+                      x_role: str | None = Header(None),
+                      authorization: str | None = Header(None),
+                      td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """Stop the AI agent in one WhatsApp conversation, or start it again.
+
+        mode: "hour", "today" (until midnight in Pakistan), "forever" or "on".
+        Goes through this tenant's own pairctl (URL from the tenant's row) to
+        the agent's bridge, which then neither hands that customer's messages
+        to the agent nor lets its replies out. A "No Bot" label on the chat in
+        WhatsApp Business keeps it stopped even after "on"."""
+        tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
+        if not re.fullmatch(r"[\w.:@+\-]{1,200}", session_id or ""):
+            raise HTTPException(400, "That is not a conversation id.")
+        mode = str((body or {}).get("mode") or "")
+        if mode not in HERMES_MODES:
+            raise HTTPException(400, "Choose hour, today, forever or on.")
+        with tenant_session(tid, role) as cur:
+            r = _row(cur, tid, conn)
+        err, out = None, {}
+        try:
+            out = _pairctl_json(r["pairctl_url"], "/takeover", "POST", {"session_id": session_id, "mode": mode})
+        except HTTPException as e:
+            err = e
+        with tenant_session(tid, role) as cur:
+            record(cur, action="whatsapp.hermes_switch", resource="whatsapp_messages", resource_id=session_id,
+                   actor=str(uid), actor_type="human", status="error" if err else "ok",
+                   detail={"mode": mode, "hermes_off": out.get("hermes_off")},
+                   error=None if not err else "HTTP %s: %s" % (err.status_code, err.detail))
+        if err:
+            if "(501)" in str(err.detail) or err.status_code == 404:
+                raise HTTPException(409, "Turning the AI agent on or off per chat is not switched on for this "
+                                         "WhatsApp number yet.")
+            raise HTTPException(err.status_code, "Not changed. %s" % err.detail)
+        return {"hermes_off": out.get("hermes_off")}
+
     @router.post("/sync-lessons")
     def sync(x_tenant_id: str | None = Header(None),
              x_role: str | None = Header(None),
