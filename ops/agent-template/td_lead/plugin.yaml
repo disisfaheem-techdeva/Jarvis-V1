@@ -1,0 +1,7 @@
+name: td_lead
+version: 1.0.0
+description: "TechDeva: the WhatsApp agent saves a customer as a lead (save_lead tool); the platform puts it in the business's Leads. Number from the WhatsApp sender, never the model. Groups skipped."
+author: TechDeva
+hooks:
+  - pre_gateway_dispatch
+  - pre_llm_call

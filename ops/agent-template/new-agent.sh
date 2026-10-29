@@ -173,6 +173,10 @@ bash "$HERE/add-td-speed.sh" "$KEY" || die "add-td-speed.sh failed for $KEY"
 #      number pauses Hermes in that chat for 1 minute after their latest message)
 bash "$HERE/add-td-takeover.sh" "$KEY" || die "add-td-takeover.sh failed for $KEY"
 
+# ---- T19: the agent saves a customer as a lead (td_lead: save_lead tool; lead-sync.sh
+#      cron moves it into the business's Leads, source "hermes")
+bash "$HERE/add-td-lead.sh" "$KEY" || die "add-td-lead.sh failed for $KEY"
+
 # ---- tell the platform which agent this tenant uses (TechDeva action)
 if [ $ASSIGN = 1 ]; then
   cd "$PLATFORM"
