@@ -177,6 +177,10 @@ bash "$HERE/add-td-takeover.sh" "$KEY" || die "add-td-takeover.sh failed for $KE
 #      cron moves it into the business's Leads, source "hermes")
 bash "$HERE/add-td-lead.sh" "$KEY" || die "add-td-lead.sh failed for $KEY"
 
+# ---- T20: the agent ends chats that go nowhere (td_close: end_chat closes the chat for 24h
+#      after a goodbye; after 10 minutes with no real interest it is asked to)
+bash "$HERE/add-td-close.sh" "$KEY" || die "add-td-close.sh failed for $KEY"
+
 # ---- tell the platform which agent this tenant uses (TechDeva action)
 if [ $ASSIGN = 1 ]; then
   cd "$PLATFORM"

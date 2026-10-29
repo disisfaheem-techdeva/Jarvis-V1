@@ -3404,6 +3404,8 @@ function hermesOffText(o){
   if (!o) return 'The AI agent is answering this chat.';
   if (o.kind === 'label') return 'Off: this chat has the "No Bot" label in WhatsApp Business. Remove the label to turn the agent on.';
   if (o.kind === 'auto') return 'Quiet for a minute, because a person replied in this chat.';
+  if (o.kind === 'closed') return 'Closed by the AI agent: the customer showed no real interest. ' +
+    (o.until ? 'It answers this customer again after ' + when(o.until) + '.' : '');
   return o.until ? 'Off until ' + when(o.until) + '.' : 'Off until you turn it on.';
 }
 function ibxChat(sid){

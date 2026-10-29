@@ -1,0 +1,7 @@
+name: td_close
+version: 1.0.0
+description: "TechDeva: the WhatsApp agent ends chats that go nowhere (end_chat tool closes the chat for 24h after a goodbye; after 10 minutes with no real interest it is asked to), and signs off without a further question. Saves model calls. Groups skipped."
+author: TechDeva
+hooks:
+  - pre_gateway_dispatch
+  - pre_llm_call

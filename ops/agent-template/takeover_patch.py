@@ -181,7 +181,19 @@ EDITS2 = [
      "  res.json({ status: tdTakeover.status(chatId) });\n"),
 ]
 
-STAGES = [(MARK, EDITS), (MARK2, EDITS2)]
+# T18c: Hermes closes a chat that goes nowhere (td_close's end_chat):
+# POST /takeover { chatId, minutes, kind: "closed" }.
+MARK3 = "// techdeva T18c: kind closed (td_close)"
+
+EDITS3 = [
+    ("  const { chatId, minutes, forever } = req.body || {};\n",
+     "  " + MARK3 + "\n"
+     "  const { chatId, minutes, forever, kind } = req.body || {};\n"),
+    ("  else tdTakeover.hold(chatId, null, m, 'api');\n",
+     "  else tdTakeover.hold(chatId, null, m, kind === 'closed' ? 'end_chat' : 'api', kind === 'closed' ? 'closed' : 'manual');\n"),
+]
+
+STAGES = [(MARK, EDITS), (MARK2, EDITS2), (MARK3, EDITS3)]
 
 
 def main(path):

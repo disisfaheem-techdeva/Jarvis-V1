@@ -8,6 +8,8 @@
  *             TD_TAKEOVER_MINUTES (default 1) after the person's latest message.
  *   * manual: the dashboard stops Hermes in one chat for a while or for good
  *             (POST /takeover). An auto pause never shortens it.
+ *   * closed: Hermes itself closed a chat that went nowhere (td_close's
+ *             end_chat, POST /takeover with kind "closed"), for 24 hours.
  *   * label:  the owner puts a WhatsApp Business label named "No Bot" (or
  *             "Hermes Off", "Bot Off") on the chat; removing it starts Hermes again.
  * While a chat is stopped:
@@ -49,7 +51,8 @@ const REAL = new Set([
 const WRAPPERS = ['ephemeralMessage', 'viewOnceMessage', 'viewOnceMessageV2', 'documentWithCaptionMessage'];
 
 let lidMap = () => ({});
-const paused = new Map();   // key -> { until: ms | null (for good), kind: 'auto' | 'manual' }
+const paused = new Map();   // key -> { until: ms | null (for good), kind: 'auto' | 'manual' | 'closed' }
+const KINDS = new Set(['auto', 'manual', 'closed']);
 const labels = new Map();   // label id -> name
 const tagged = new Map();   // label id -> Set of chat jids
 const inflight = new Map(); // key -> sends in progress
@@ -121,7 +124,7 @@ export function init({ getLidMap } = {}) {
     const p = saved.paused && typeof saved.paused === 'object' ? saved.paused : saved;
     for (const [k, v] of Object.entries(p)) {
       const e = typeof v === 'number' ? { until: v, kind: 'auto' } : v;
-      if (e && (e.until === null || Number(e.until) > Date.now())) paused.set(k, { until: e.until === null ? null : Number(e.until), kind: e.kind === 'manual' ? 'manual' : 'auto' });
+      if (e && (e.until === null || Number(e.until) > Date.now())) paused.set(k, { until: e.until === null ? null : Number(e.until), kind: KINDS.has(e.kind) ? e.kind : 'auto' });
     }
     for (const [id, name] of Object.entries(saved.labels || {})) labels.set(id, String(name));
     for (const [id, list] of Object.entries(saved.tagged || {})) tagged.set(id, new Set(list));
@@ -154,13 +157,20 @@ export function pause(jid, alt, why, minutes = MINUTES) {
 }
 
 // The dashboard: stop Hermes for `minutes`, or for good when minutes is null.
-export function hold(jid, alt, minutes, why) {
+// kind 'closed': Hermes closed the chat itself (td_close); it never replaces a
+// longer stop the owner set.
+export function hold(jid, alt, minutes, why, kind = 'manual') {
   const keys = keysOf(jid, alt);
   if (!keys.length) return null;
+  const k2 = kind === 'closed' ? 'closed' : 'manual';
   const until = minutes === null ? null : Date.now() + minutes * 60000;
-  for (const k of keys) paused.set(k, { until, kind: 'manual' });
+  for (const k of keys) {
+    const cur = paused.get(k);
+    if (k2 === 'closed' && active(cur) && cur.kind === 'manual' && (cur.until === null || cur.until >= until)) continue;
+    paused.set(k, { until, kind: k2 });
+  }
   save();
-  log('held', { chat: keys, why, until: until === null ? 'for good' : new Date(until).toISOString() });
+  log(k2 === 'closed' ? 'closed' : 'held', { chat: keys, why, until: until === null ? 'for good' : new Date(until).toISOString() });
   return { until };
 }
 
