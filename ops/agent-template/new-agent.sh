@@ -169,6 +169,10 @@ bash "$HERE/add-td-memory.sh" "$KEY" || die "add-td-memory.sh failed for $KEY"
 #      gemini-3.5-flash-lite the only fallback)
 bash "$HERE/add-td-speed.sh" "$KEY" || die "add-td-speed.sh failed for $KEY"
 
+# ---- T18: human takeover (td_takeover: a message the owner sends from the business
+#      number pauses Hermes in that chat for 2 minutes after their latest message)
+bash "$HERE/add-td-takeover.sh" "$KEY" || die "add-td-takeover.sh failed for $KEY"
+
 # ---- tell the platform which agent this tenant uses (TechDeva action)
 if [ $ASSIGN = 1 ]; then
   cd "$PLATFORM"
