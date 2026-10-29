@@ -4,7 +4,7 @@
  * In bot mode every message from the business number that Hermes did not send
  * was typed by a person: on the phone, on WhatsApp Web, or from the dashboard
  * (pairctl's /send carries the internal key). That chat is paused for
- * TD_TAKEOVER_MINUTES (default 2) after the person's latest message:
+ * TD_TAKEOVER_MINUTES (default 1) after the person's latest message:
  *   * the customer's messages in it are not handed to Hermes;
  *   * a Hermes reply, edit, media or typing for it is held back;
  *   * every other chat carries on as before.
@@ -21,8 +21,8 @@ import { readFileSync, writeFileSync, renameSync } from 'fs';
 import path from 'path';
 
 const MINUTES = (() => {
-  const m = parseFloat(process.env.TD_TAKEOVER_MINUTES || '2');
-  return Number.isFinite(m) && m > 0 ? m : 2;
+  const m = parseFloat(process.env.TD_TAKEOVER_MINUTES || '1');
+  return Number.isFinite(m) && m > 0 ? m : 1;
 })();
 const FRESH_S = 120;
 const ECHO_WAIT_MS = 3000;

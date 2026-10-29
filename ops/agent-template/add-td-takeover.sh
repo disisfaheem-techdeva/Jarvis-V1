@@ -1,7 +1,7 @@
 #!/bin/bash
 # T18: human takeover. A message from the business number that Hermes did not
 # send (phone, WhatsApp Web, dashboard reply) pauses that chat for
-# TD_TAKEOVER_MINUTES (default 2): the customer's messages do not reach Hermes
+# TD_TAKEOVER_MINUTES (default 1): the customer's messages do not reach Hermes
 # and Hermes' replies to it are held (td_takeover.js, wired in by
 # takeover_patch.py). Tested by Rafay on tech-deva-8e9f58, 29 Oct 2026.
 # new-agent.sh runs this on every new agent.
