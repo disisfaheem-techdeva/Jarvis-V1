@@ -56,6 +56,9 @@ services:
       PLATFORM_WEBHOOK_URL: http://api:8000/storefront/webhook/9c3e853c-568b-4f31-8324-5246e8cfd269
       PLATFORM_WEBHOOK_SECRET: ${IG_PLATFORM_WEBHOOK_SECRET:-}
       OWNER_EMAIL: info@instantgrill.shop
+      # Customer login codes on WhatsApp from the shop number (the agent pairctl /otp).
+      HERMES_OTP_URL: http://hermes-agent-instant-grill-9c3e85:3010/otp
+      HERMES_NOTIFY_KEY: ${IG_HERMES_NOTIFY_KEY:-}
       # New-order WhatsApp alerts: instantgrill_notifier (old site's compose,
       # attached to this network with this alias) relays them via CallMeBot.
       ORDER_WEBHOOK_URL: http://instantgrill-notifier:8080/order-webhook
@@ -79,8 +82,10 @@ services:
       - traefik.http.routers.instantgrill-live.service=instantgrill-new
       - traefik.http.routers.instantgrill-new.service=instantgrill-new
       - traefik.http.services.instantgrill-new.loadbalancer.server.port=3000
+      - traefik.docker.network=techdeva-platform_default
     networks:
       - default
+      - hermes_net
 
 networks:
   hermes_net:

@@ -322,6 +322,78 @@ function writeLessons(lessons) {
   return { count: clean.length };
 }
 
+// ---- alerts from the business's own website -----------------------------
+// POST /notify { text } sends one message from this agent's WhatsApp number to
+// the business's own staff phones (owner, kitchen): new orders and the like.
+// Off unless both are set in this agent's pairctl.env:
+//   PAIRCTL_NOTIFY_KEY  its own key (x-notify-key), so a website that holds it
+//                       cannot pair, log out or read chats
+//   PAIRCTL_NOTIFY_TO   the only numbers it may message, comma separated,
+//                       international format without + (923001234567)
+// The caller never chooses the number, so a leaked key can only ever reach
+// the business's own phones.
+const NOTIFY_KEY = process.env.PAIRCTL_NOTIFY_KEY || '';
+const NOTIFY_TO = (process.env.PAIRCTL_NOTIFY_TO || '')
+  .split(',').map(s => s.replace(/\D/g, '')).filter(s => s.length >= 10 && s.length <= 15);
+
+async function notify(req, res) {
+  if (!NOTIFY_KEY || !NOTIFY_TO.length) return send(res, 503, { error: 'notify is not set up for this agent' });
+  if ((req.headers['x-notify-key'] || '') !== NOTIFY_KEY) return send(res, 401, { error: 'bad notify key' });
+  let body;
+  try { body = JSON.parse((await readBody(req)) || '{}'); }
+  catch (e) { return send(res, 400, { error: 'bad json' }); }
+  const text = String(body.text || '').trim();
+  if (!text || text.length > 4000) return send(res, 400, { error: 'text must be 1 to 4000 characters' });
+  const results = [];
+  for (const n of NOTIFY_TO) {
+    const r = await bridgeSend(n + '@s.whatsapp.net', text);
+    const ok = r.status === 200 && r.body && r.body.success && !r.body.guarded;
+    if (!ok) log('notify to', n.replace(/\d(?=\d{4})/g, '*'), 'failed:', r.error || r.status, (r.body && r.body.error) || r.raw || '');
+    results.push({ to: n.replace(/\d(?=\d{4})/g, '*'), sent: !!ok });
+  }
+  const sent = results.filter(r => r.sent).length;
+  log('notify sent to', sent, 'of', results.length);
+  return send(res, sent ? 200 : 502, { agent: AGENT, sent, results });
+}
+
+// ---- login codes for the business's own website -------------------------
+// POST /otp { to, code } sends ONE fixed message, "<business> login code: 123456",
+// to a customer who asked for it on the website. The caller picks the number but
+// never the words, so the route cannot be used to send anything else. Same key
+// as /notify; off unless PAIRCTL_OTP_NAME (the business name in the message) is set.
+// At most 3 codes per number per 15 minutes and 120 an hour in all, so a leaked
+// key cannot be used to flood people from the business's number.
+const OTP_NAME = (process.env.PAIRCTL_OTP_NAME || '').replace(/[^\p{L}\p{N} &'.-]/gu, '').slice(0, 40).trim();
+const otpSent = new Map(); // number -> [times]
+let otpHour = [];
+
+async function otp(req, res) {
+  if (!NOTIFY_KEY || !OTP_NAME) return send(res, 503, { error: 'login codes are not set up for this agent' });
+  if ((req.headers['x-notify-key'] || '') !== NOTIFY_KEY) return send(res, 401, { error: 'bad notify key' });
+  let body;
+  try { body = JSON.parse((await readBody(req)) || '{}'); }
+  catch (e) { return send(res, 400, { error: 'bad json' }); }
+  const to = String(body.to || '').replace(/\D/g, '');
+  const code = String(body.code || '');
+  if (to.length < 10 || to.length > 15) return send(res, 400, { error: 'to must be a phone number in international format' });
+  if (!/^\d{6}$/.test(code)) return send(res, 400, { error: 'code must be 6 digits' });
+  const now = Date.now();
+  otpHour = otpHour.filter(t => now - t < 3600e3);
+  const mine = (otpSent.get(to) || []).filter(t => now - t < 15 * 60e3);
+  if (mine.length >= 3 || otpHour.length >= 120) return send(res, 429, { error: 'too many codes, try later' });
+  const text = `${OTP_NAME} login code: *${code}*\nIt expires in 10 minutes. Do not share it with anyone.`;
+  const r = await bridgeSend(to + '@s.whatsapp.net', text);
+  const ok = r.status === 200 && r.body && r.body.success && !r.body.guarded;
+  if (!ok) {
+    log('otp to', to.replace(/\d(?=\d{4})/g, '*'), 'failed:', r.error || r.status, (r.body && r.body.error) || r.raw || '');
+    return send(res, 502, { error: 'the code could not be sent' });
+  }
+  otpSent.set(to, [...mine, now]);
+  otpHour.push(now);
+  if (otpSent.size > 5000) for (const [n, ts] of otpSent) if (!ts.some(t => now - t < 15 * 60e3)) otpSent.delete(n);
+  return send(res, 200, { agent: AGENT, sent: true });
+}
+
 function send(res, code, obj) {
   const b = JSON.stringify(obj);
   res.writeHead(code, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(b) });
@@ -332,6 +404,9 @@ const server = http.createServer(async (req, res) => {
   // No key, no service. A pairing code and a logout are both things you only
   // want the platform doing, and this port is reachable by everything on the
   // Docker network.
+  // the website's alerts have their own key and their own fixed recipients (see notify)
+  if (req.method === 'POST' && (req.url || '').split('?')[0] === '/notify') return notify(req, res);
+  if (req.method === 'POST' && (req.url || '').split('?')[0] === '/otp') return otp(req, res);
   if (!KEY) return send(res, 503, { error: 'HERMES_INTERNAL_KEY is not set; refusing to serve' });
   if ((req.headers['x-internal-key'] || '') !== KEY) return send(res, 401, { error: 'bad internal key' });
 
