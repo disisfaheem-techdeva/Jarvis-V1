@@ -166,6 +166,10 @@ app.include_router(make_dashcustom_router())
 from .universal_caption import make_universal_caption_router
 app.include_router(make_universal_caption_router())
 
+# White-label partners: the agencies that resell TechDeva (db/87, app/partners.py)
+from .partners import make_partners_router
+app.include_router(make_partners_router())
+
 # The two client-facing pages. The API image is built from ./app, so web/ is
 # mounted in (see docker-compose.yml) rather than baked into the image; WEB_DIR
 # overrides the location if you serve them from somewhere else entirely.

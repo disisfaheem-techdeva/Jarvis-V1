@@ -122,8 +122,16 @@ def _unb64u(s: str) -> bytes:
 
 
 def issue_token(*, tenant_id: str | None, user_id: str, role: str,
-                ttl: int | None = None) -> str:
-    """Sign a session token. `tenant_id` is None only for techdeva_admin."""
+                ttl: int | None = None, partner_id: str | None = None) -> str:
+    """Sign a session token. `tenant_id` is None for techdeva_admin and partner."""
+    if role == "partner":
+        # A white-label partner is an agency, not a business. A partner token
+        # that also named a business would let one login act as both.
+        if not partner_id:
+            raise AuthError("a partner token must name a partner", 400)
+        tenant_id = None
+    else:
+        partner_id = None
     if role == "techdeva_admin":
         # The founder belongs to no business. A founder token that also named
         # a business would reach the database as "admin + that business", and
@@ -138,6 +146,8 @@ def issue_token(*, tenant_id: str | None, user_id: str, role: str,
         "iat": int(time.time()),
         "j": secrets.token_hex(12),          # this login's id: "Sign out" refuses it (db/62)
     }
+    if partner_id:
+        claims["p"] = str(partner_id)
     payload = _b64u(json.dumps(claims, separators=(",", ":"), sort_keys=True).encode())
     sig = _b64u(hmac.new(_secret(), payload.encode(), hashlib.sha256).digest())
     return f"{payload}.{sig}"
@@ -157,10 +167,14 @@ def verify_token(token: str) -> dict:
         raise AuthError("malformed token")
     if int(claims.get("exp", 0)) < time.time():
         raise AuthError("session expired")
-    if claims.get("r") not in {"techdeva_admin", "owner", "operator"}:
+    if claims.get("r") not in {"techdeva_admin", "owner", "operator", "partner"}:
         raise AuthError("bad role in token")
     if claims.get("r") == "techdeva_admin":
         claims["t"] = None          # tokens issued before the rule above
+    elif claims.get("r") == "partner":
+        claims["t"] = None
+        if not claims.get("p"):
+            raise AuthError("partner token names no partner")
     elif not claims.get("t"):
         raise AuthError("token names no business")
     cut = _valid_after(claims.get("u"))
@@ -265,6 +279,11 @@ def resolve_scope(x_tenant_id: str | None, x_role: str | None,
     token = token_from(authorization, cookie)
     if token:
         claims = verify_token(token)
+        if claims["r"] == "partner":
+            # A partner login is for the partner dashboard only. Every other
+            # route in the platform is a business's or the founder's; letting
+            # a partner token through here would hand it a scope it never had.
+            raise AuthError("this is a partner login; sign in as the business", 403)
         return claims["t"], claims["r"], claims["u"]
 
     if auth_required():
