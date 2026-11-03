@@ -169,6 +169,12 @@ app.include_router(make_universal_caption_router())
 # White-label partners: the agencies that resell TechDeva (db/87, app/partners.py)
 from .partners import make_partners_router
 app.include_router(make_partners_router())
+# The partner network (db/88): money, set-up, pricing, clients, and the partner's
+# own public site (app/partner_engine.py, app/partner_network.py, app/partner_site.py)
+from .partner_network import make_partner_network_router
+from .partner_site import make_partner_site_router
+app.include_router(make_partner_network_router(P))
+app.include_router(make_partner_site_router(P, lambda name: _page(name)))   # _page is defined below
 
 # The two client-facing pages. The API image is built from ./app, so web/ is
 # mounted in (see docker-compose.yml) rather than baked into the image; WEB_DIR

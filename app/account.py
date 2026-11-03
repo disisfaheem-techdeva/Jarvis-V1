@@ -52,15 +52,26 @@ def mail_configured():
     return bool(os.environ.get("SMTP_HOST") and os.environ.get("MAIL_FROM"))
 
 
-def send_mail(to, subject, text, html=None):
+def send_mail(to, subject, text, html=None, from_name=None, reply_to=None):
     """Send one email: plain text, plus an HTML version when given (clients that
-    cannot show HTML show the text). Raises on failure; the caller decides."""
+    cannot show HTML show the text). Raises on failure; the caller decides.
+
+    from_name / reply_to (white-label partners): the mail shows the partner's
+    brand as the sender's name and replies go to the partner's support address.
+    The sending ADDRESS stays MAIL_FROM: sending as the partner's own domain
+    needs that domain's SPF/DKIM, which is a per-partner DNS step."""
     host = os.environ["SMTP_HOST"]
     port = int(os.environ.get("SMTP_PORT") or 587)
     user = os.environ.get("SMTP_USER") or ""
     pw = os.environ.get("SMTP_PASSWORD") or ""
     msg = EmailMessage()
-    msg["From"] = os.environ["MAIL_FROM"]
+    if from_name:
+        from email.utils import formataddr, parseaddr
+        msg["From"] = formataddr((from_name, parseaddr(os.environ["MAIL_FROM"])[1]))
+    else:
+        msg["From"] = os.environ["MAIL_FROM"]
+    if reply_to:
+        msg["Reply-To"] = reply_to
     msg["To"] = to
     msg["Subject"] = subject
     msg.set_content(text)

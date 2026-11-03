@@ -718,7 +718,7 @@ class Persistence:
             return str(cur.fetchone()["id"])
 
     def provision_tenant_from_signup(self, signup_id, owner_name=None,
-                                     password_hash=None) -> str:
+                                     password_hash=None, partner_id=None) -> str:
         """Turn a signup into a live TRIAL tenant: one tenants row + one
         tenant_config row (7-day trial). This is 'industry = configuration' —
         no new build, no new database. Runs as admin (tenants WITH CHECK is_admin).
@@ -726,7 +726,11 @@ class Persistence:
         If `password_hash` is supplied, the client's own owner login is created in
         the same transaction, so they own their dashboard from the moment they sign
         up. Without it the tenant is still provisioned — they simply have no portal
-        login yet (fail closed, never a default password)."""
+        login yet (fail closed, never a default password).
+
+        `partner_id` (white-label, db/87-88): the agency that brought this
+        business. Written in the same INSERT, so a partner's client can never
+        exist for a moment as a TechDeva-direct business."""
         from .db import tenant_session
         with tenant_session(None, "techdeva_admin") as cur:
             cur.execute("""SELECT business_name, industry, website_url, social_links,
@@ -735,9 +739,12 @@ class Persistence:
             s = cur.fetchone()
             if not s:
                 raise ValueError("signup not found")
-            cur.execute("""INSERT INTO tenants (name, industry, status, trial_ends_at, is_test)
-                           VALUES (%s,%s,'trial', now() + make_interval(days => %s), %s) RETURNING id""",
-                        (s["business_name"], s["industry"], TRIAL_DAYS, _looks_like_test(s.get("contact_email"))))
+            cur.execute("""INSERT INTO tenants (name, industry, status, trial_ends_at, is_test,
+                                                partner_id, partner_assigned_at)
+                           VALUES (%s,%s,'trial', now() + make_interval(days => %s), %s,
+                                   %s, CASE WHEN %s::uuid IS NULL THEN NULL ELSE now() END) RETURNING id""",
+                        (s["business_name"], s["industry"], TRIAL_DAYS, _looks_like_test(s.get("contact_email")),
+                         partner_id, partner_id))
             tid = str(cur.fetchone()["id"])
             from .subdomains import assign as _assign_address
             _assign_address(cur, tid, s["business_name"])   # <name>.techdeva.net, no manual step

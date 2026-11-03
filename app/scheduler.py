@@ -126,6 +126,14 @@ class Scheduler:
         except Exception as e:
             print(f"[scheduler] CRM rules skipped: {e}", flush=True)
 
+        # Partner network (app/partner_engine.py): split new payments of partners'
+        # clients, push partner set-ups that are due, gather payouts once a day.
+        try:
+            from .partner_engine import run_due as partners_due
+            emitted += partners_due()
+        except Exception as e:
+            print(f"[scheduler] partner network skipped: {e}", flush=True)
+
         # Trial data retention: warn 3 days before, delete unpaid trials 15 days
         # after the trial ended (hourly inside).
         try:
