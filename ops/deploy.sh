@@ -3,6 +3,9 @@
 #
 #   cd /opt/techdeva-platform/techdeva-platform && bash ops/deploy.sh <branch>
 #
+# The FIRST time (this file is not on the server yet), run it from the branch:
+#   git fetch origin <branch> && git show origin/<branch>:ops/deploy.sh | bash -s -- <branch>
+#
 # Stops BEFORE changing anything unless: the tree is clean, the branch contains
 # everything deployed now (fast-forward only), and a database backup was written.
 # Then: fast-forward the code, apply only the NEW numbered migrations (each must
@@ -10,7 +13,9 @@
 # code changed, wait for /health, and compare the numbers that must not move.
 # Prints the rollback command at the end, and on any failure after the code moved.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+# the repository we are standing in -- works as a file and when piped to bash -s
+cd "$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "STOP: run this inside the platform checkout"; exit 1; }
+[ -f docker-compose.yml ] && [ -d db ] && [ -d app ] || { echo "STOP: $(pwd) is not the platform checkout"; exit 1; }
 
 BR="${1:?usage: bash ops/deploy.sh <branch>}"
 DB="${DB_CONTAINER:-techdeva-platform-db-1}"
