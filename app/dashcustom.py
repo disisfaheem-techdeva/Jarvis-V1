@@ -39,7 +39,8 @@ from .db import tenant_session
 MODULES = [
     ("01", "Dashboard", [("overview", "Overview")]),
     ("02", "Jarvis & AI", [("console", "Jarvis Assistant"), ("ai", "AI Agents"), ("hermes", "Hermes AI"),
-                           ("bizagent", "Business & agent"), ("needshuman", "Approval Queue"),
+                           ("bizagent", "Business & agent"), ("bizprofile", "Business Profile"),
+                           ("needshuman", "Approval Queue"),
                            ("history", "Execution History"), ("tools", "Agents")]),
     ("03", "Chats", [("inbox", "WhatsApp Inbox"), ("socialinbox", "Social Inbox"), ("calls", "Calls")]),
     ("04", "CRM", [("leads", "Leads"), ("sales", "Sales"), ("clientwork", "Client work"), ("customers", "Customers"),
@@ -51,7 +52,7 @@ MODULES = [
                          ("autopilot", "Content Calendar"), ("advisor", "Ads & Growth"), ("analytics", "Analytics"),
                          ("gallery", "Autopilot Gallery")]),
     ("08", "Business", [("services", "Services"), ("products", "Products"), ("packages", "Packages"), ("deals", "Deals"),
-                        ("reports", "Reports"), ("bizprofile", "Business Profile"), ("settings", "Business Settings")]),
+                        ("reports", "Reports"), ("settings", "Business Settings")]),
     ("09", "Finance", [("revenue", "Revenue"), ("invoices", "Invoices"), ("expenses", "Expenses"),
                        ("dayclose", "Day Close"), ("pnl", "Profit & Loss")]),
     ("10", "Administration", [("integrations", "Integrations"), ("whatsapp", "WhatsApp Connection"),
