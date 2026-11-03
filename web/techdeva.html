@@ -173,6 +173,8 @@ const NAV = [
     ['bookings','Bookings'], ['workforce','AI workforce'], ['approvals','Waiting on you']]],
   ['MONEY', [
     ['revenue','My revenue'], ['clientmoney','Client business'], ['invoices','Invoices out']]],
+  ['PARTNER NETWORK', [
+    ['partners','Partners'], ['partnermoney','Partner money']]],
   ['PLATFORM', [
     ['health','Health'], ['incidents','Incidents'], ['aiusage','AI usage & API log'], ['apikeys','API Manager']]]
 ];
@@ -189,6 +191,8 @@ const TITLES = {jarvis:['Jarvis','Pick a client, then say or type what to change
   revenue:['My revenue','What clients have paid TechDeva.'],
   clientmoney:['Client business','Money moving through your clients businesses.'],
   invoices:['Invoices out','Invoices TechDeva has issued to clients, and their status.'],
+  partners:['Partners','Agencies that sell TechDeva under their own brand: approve them, set their split, and watch their set-up.'],
+  partnermoney:['Partner money','Every payment of a partner\'s client, split at that partner\'s terms; refunds, the review queue and payouts.'],
   health:['Health','Queues, workers and the AI chain.'],
   incidents:['Incidents','Anything the monitor has opened.'],
   apikeys:['API Manager','AI keys for any provider, which WhatsApp agent runs on which key and model, and each agent\'s calls and limit hits. Keys are never shown, only their last 4 characters.'],
@@ -510,6 +514,7 @@ function paint(){
   if (v === 'aiusage') wireAiUsage();
   if (v === 'apikeys') wireApiKeys();
   if (v === 'hermes') wireHermes();
+  if (v === 'partners' || v === 'partnermoney') wirePartners();
 }
 
 /* ---- Jarvis voice helpers ----
@@ -715,7 +720,101 @@ function clientRows(rows){
   });
 }
 
+/* ---- Partner network (db/87, db/88; docs/PARTNERS.md) ----
+   Money is shown per currency and never added across currencies. */
+const pm = (v, cur) => { if (v == null || v === '') return '—'; const n = Number(v);
+  if (!isFinite(n)) return '—'; return esc(cur || '') + ' ' + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}); };
+function partnerData(){
+  if (D.pn === undefined) { D.pn = null;
+    api('/techdeva/partner-network').then(d => { D.pn = d; if (['partners','partnermoney'].indexOf(current()) >= 0) paint(); })
+      .catch(e => { D.pn = {error: e.message}; if (['partners','partnermoney'].indexOf(current()) >= 0) paint(); }); }
+  return D.pn;
+}
+function partnerMoneyData(){
+  if (D.pmo === undefined) { D.pmo = null;
+    Promise.all([api('/techdeva/partner-ledger'), api('/techdeva/partner-payouts')])
+      .then(([l, o]) => { D.pmo = {ledger: l.entries || [], payouts: o.payouts || []}; if (current() === 'partnermoney') paint(); })
+      .catch(e => { D.pmo = {error: e.message}; if (current() === 'partnermoney') paint(); }); }
+  return D.pmo;
+}
+const PSTATE = {pending:'waiting for you', active:'active', suspended:'suspended', rejected:'rejected', terminated:'ended'};
+const SETUP = {done:'set up', running:'setting up', pending:'queued', failed:'set-up stopped'};
+
 const VIEWS = {
+  partners(){
+    const d = partnerData();
+    if (!d) return '<div class="empty">Reading the partner network...</div>';
+    if (d.error) return '<div class="empty">Could not read the partner network: ' + esc(d.error) + '</div>';
+    const st = d.partners_by_status || {}, ps = d.partners || [];
+    return '<div class="grid">' +
+      kpi('Active partners', st.active || 0, (st.suspended ? st.suspended + ' suspended' : 'agencies selling now')) +
+      kpi('Waiting for you', st.pending || 0, 'applications to approve or reject') +
+      kpi('Partner clients', d.partner_clients, 'businesses brought by partners') +
+      kpi('Payouts to send', (d.pending_payouts || []).map(x => pm(x.amount, x.currency)).join(' + ') || '—',
+          (d.pending_payouts || []).length ? 'see Partner money' : 'nothing waiting') +
+      '</div>' +
+      '<section><h2>Partners</h2><div class="card" style="padding:6px 8px" tabindex="0" role="region" aria-label="Partners">' +
+      tbl('<th>Partner</th><th>Country</th><th>Status</th><th class="num">Clients</th><th>Set-up</th><th class="num">Their share</th><th></th>',
+        ps.map(p => '<tr><td class="name">' + esc(p.name) + '<div class="dim">' + esc(p.code) + ' · <a href="/p/' + encodeURIComponent(p.slug) + '" target="_blank" rel="noopener">/p/' + esc(p.slug) + '</a></div></td>' +
+          '<td class="dim">' + esc(p.country || '—') + '</td>' +
+          '<td><span class="pill">' + esc(PSTATE[p.status] || p.status) + '</span></td>' +
+          '<td class="num">' + esc(p.clients) + '</td>' +
+          '<td>' + (p.setup ? '<span class="pill">' + esc(SETUP[p.setup] || p.setup) + '</span>' : '<span class="dim">—</span>') + '</td>' +
+          '<td class="num">' + (p.partner_share_pct != null ? esc(Number(p.partner_share_pct)) + '%' : '—') + '</td>' +
+          '<td>' +
+            (p.status === 'pending' || p.status === 'suspended' ? '<button class="tiny primary" data-pok="' + esc(p.id) + '" data-name="' + esc(p.name) + '">' + (p.status === 'pending' ? 'Approve' : 'Reactivate') + '</button> ' : '') +
+            (p.status === 'pending' ? '<button class="tiny" data-pno="' + esc(p.id) + '">Reject</button> ' : '') +
+            (p.status === 'active' ? '<button class="tiny" data-pterms="' + esc(p.id) + '" data-name="' + esc(p.name) + '" data-pct="' + esc(p.partner_share_pct == null ? 55 : Number(p.partner_share_pct)) + '">Set split</button> ' +
+              '<button class="tiny" data-psus="' + esc(p.id) + '" data-name="' + esc(p.name) + '">Suspend</button> ' : '') +
+            (p.setup === 'failed' ? '<button class="tiny" data-pretry="' + esc(p.id) + '">Retry set-up</button> ' : '') +
+            (p.status === 'active' || p.status === 'suspended' ? '<button class="tiny" data-pend="' + esc(p.id) + '" data-name="' + esc(p.name) + '">End</button>' : '') +
+          '</td></tr>')) +
+      '<div class="sub" style="margin-top:6px">Approve sets the agency up by itself: 55/45 terms, brand, packages, a sign-up link, their login and their website. ' +
+      'A step that fails is retried automatically. Suspending locks their dashboard; their clients keep working.</div></div></section>' +
+      '<section><h2>Add a partner</h2><div class="card"><form id="p-add" class="row" style="flex-wrap:wrap;gap:8px">' +
+        '<label class="td-sr-only" for="pa-name">Agency name</label><input class="td-input" id="pa-name" placeholder="Agency name" required>' +
+        '<label class="td-sr-only" for="pa-slug">Web address name</label><input class="td-input" id="pa-slug" placeholder="web-address-name" required>' +
+        '<label class="td-sr-only" for="pa-country">Country</label><input class="td-input" id="pa-country" placeholder="Country (AE, SA, GB…)">' +
+        '<label class="td-sr-only" for="pa-cname">Contact name</label><input class="td-input" id="pa-cname" placeholder="Contact name">' +
+        '<label class="td-sr-only" for="pa-email">Contact email</label><input class="td-input" id="pa-email" type="email" placeholder="Contact email (their login)">' +
+        '<label class="td-sr-only" for="pa-phone">Contact phone</label><input class="td-input" id="pa-phone" placeholder="Contact phone">' +
+        '<button class="primary" type="submit">Add partner</button></form>' +
+        '<div class="sub" id="p-add-msg" role="status" style="margin-top:6px">Added as waiting; approve it above when you are ready.</div></div></section>';
+  },
+  partnermoney(){
+    const n = partnerData(), d = partnerMoneyData();
+    if (!d || !n) return '<div class="empty">Reading partner money...</div>';
+    if (d.error || n.error) return '<div class="empty">Could not read partner money: ' + esc(d.error || n.error) + '</div>';
+    const review = d.ledger.filter(x => x.needs_review), pend = d.payouts.filter(x => x.status === 'pending');
+    const KIND = {payment:'payment', refund:'refund', chargeback:'chargeback', adjustment:'adjustment'};
+    return '<section><h2>By currency</h2><div class="card" style="padding:6px 8px" tabindex="0" role="region" aria-label="Partner money by currency">' +
+      tbl('<th>Currency</th><th class="num">Collected</th><th class="num">Reversed</th><th class="num">Partners earned</th><th class="num">TechDeva earned</th><th class="num">Awaiting payout</th><th class="num">To review</th>',
+        (n.money || []).map(m => '<tr><td class="name">' + esc(m.currency) + '</td><td class="num">' + pm(m.collected, m.currency) + '</td>' +
+          '<td class="num">' + pm(m.reversed || 0, m.currency) + '</td><td class="num">' + pm(m.partner_earned, m.currency) + '</td>' +
+          '<td class="num">' + pm(m.techdeva_earned, m.currency) + '</td><td class="num">' + pm(m.awaiting_payout || 0, m.currency) + '</td>' +
+          '<td class="num">' + esc(m.to_review) + '</td></tr>')) + '</div></section>' +
+      '<section><h2>Payouts to send</h2><div class="card" style="padding:6px 8px" tabindex="0" role="region" aria-label="Payouts to send">' +
+      tbl('<th>Partner</th><th class="num">Amount</th><th>Created</th><th></th>',
+        pend.map(o => '<tr><td class="name">' + esc(o.partner) + '<div class="dim">' + esc(o.code) + '</div></td><td class="num">' + pm(o.amount, o.currency) + '</td>' +
+          '<td class="dim">' + when(o.created_at) + '</td><td><button class="tiny primary" data-opaid="' + esc(o.id) + '">Sent — record reference</button> ' +
+          '<button class="tiny" data-ofail="' + esc(o.id) + '">Failed</button></td></tr>')) +
+      '<div class="row" style="margin-top:8px;gap:8px"><button class="tiny" id="p-gather">Gather payouts now</button>' +
+      '<span class="sub">Gathered automatically once a day from reviewed earnings. Recording one does not move money: send it from the bank first.</span></div></div></section>' +
+      '<section><h2>Waiting for review</h2><div class="card" style="padding:6px 8px" tabindex="0" role="region" aria-label="Payments waiting for review">' +
+      tbl('<th>Partner / business</th><th>When</th><th class="num">Paid</th><th>Why</th><th></th>',
+        review.map(x => '<tr><td class="name">' + esc(x.partner) + '<div class="dim">' + esc(x.business || '') + '</div></td><td class="dim">' + esc(x.occurred_on) + '</td>' +
+          '<td class="num">' + pm(x.gross, x.currency) + '</td><td class="dim">' + esc(x.review_reason || '') + '</td>' +
+          '<td><button class="tiny primary" data-lclear="' + esc(x.id) + '">Checked</button></td></tr>')) +
+      '<div class="sub" style="margin-top:6px">A payment lands here when it could not be split without a guess (no terms on file, or a minimum in another currency). It is not paid out until you mark it checked.</div></div></section>' +
+      '<section><h2>Recent entries</h2><div class="card" style="padding:6px 8px" tabindex="0" role="region" aria-label="Recent partner money entries">' +
+      tbl('<th>Partner / business</th><th>When</th><th>Kind</th><th class="num">Client paid</th><th class="num">Partner</th><th class="num">TechDeva</th><th></th>',
+        d.ledger.slice(0, 40).map(x => '<tr><td class="name">' + esc(x.partner) + '<div class="dim">' + esc(x.business || '') + '</div></td>' +
+          '<td class="dim">' + esc(x.occurred_on) + '</td><td><span class="pill">' + esc(KIND[x.kind] || x.kind) + '</span>' + (x.floor_applied ? '<div class="dim">minimum applied</div>' : '') + '</td>' +
+          '<td class="num">' + pm(x.gross, x.currency) + '</td><td class="num">' + pm(x.partner_amount, x.currency) + '</td><td class="num">' + pm(x.techdeva_amount, x.currency) + '</td>' +
+          '<td>' + (x.kind === 'payment' ? '<button class="tiny" data-lref="' + esc(x.id) + '" data-amt="' + esc(x.gross) + '">Refund</button> ' +
+            '<button class="tiny" data-lcb="' + esc(x.id) + '" data-amt="' + esc(x.gross) + '">Chargeback</button>' : '') + '</td></tr>')) +
+      '</div></section>';
+  },
   /* Hermes: every business's WhatsApp agent, connected ones first, each with
      On/Off (PUT /techdeva/agent-power, applied by ai-keys-sync.sh within a minute).
      Same data as API Manager (GET /techdeva/api-keys). */
@@ -1331,6 +1430,81 @@ function openRequests(){
   return ag.filter(a => a.status === 'requested' || a.status === 'failed').length +
          cl.filter(c => c.status === 'pending').length + rs.filter(r => r.delivered === 'pending').length;
 }
+function wirePartners(){
+  const el = document.getElementById('view');
+  const again = () => { D.pn = undefined; D.pmo = undefined; paint(); };
+  const go = (sel, fn) => el.querySelectorAll(sel).forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try { await fn(b); } catch (e) { alert(e.message); b.disabled = false; }
+  });
+  const post = (path, body) => api(path, {method:'POST', body: JSON.stringify(body || {})});
+  go('[data-pok]', async b => {
+    if (!confirm('Approve ' + b.getAttribute('data-name') + '?\n\nThis sets them up now: 55/45 terms, brand, packages, a sign-up link, their login and their website.')) { b.disabled = false; return; }
+    const r = await post('/techdeva/partners/' + b.getAttribute('data-pok') + '/approve');
+    if (r.provisioning !== 'done') alert('Approved. The set-up stopped at one step and will retry by itself:\n' + ((r.run && r.run.last_error) || ''));
+    again();
+  });
+  go('[data-pno]', async b => {
+    const why = prompt('Why is the application rejected? (kept on record)', '');
+    if (why === null) { b.disabled = false; return; }
+    await post('/techdeva/partners/' + b.getAttribute('data-pno') + '/reject', {reason: why}); again();
+  });
+  go('[data-psus]', async b => {
+    if (!confirm('Suspend ' + b.getAttribute('data-name') + '? Their dashboard and website close; their clients keep working.')) { b.disabled = false; return; }
+    await post('/techdeva/partners/' + b.getAttribute('data-psus') + '/status', {status: 'suspended'}); again();
+  });
+  go('[data-pend]', async b => {
+    const why = prompt('End the partnership with ' + b.getAttribute('data-name') + '. Their clients keep running. Why? (required)', '');
+    if (!why) { b.disabled = false; return; }
+    await post('/techdeva/partners/' + b.getAttribute('data-pend') + '/terminate', {reason: why}); again();
+  });
+  go('[data-pretry]', async b => { await post('/techdeva/partners/' + b.getAttribute('data-pretry') + '/provisioning/retry'); again(); });
+  go('[data-pterms]', async b => {
+    const pct = prompt('Partner\'s share for ' + b.getAttribute('data-name') + ', in % (TechDeva keeps the rest). Applies from today; past payments keep their split.', b.getAttribute('data-pct'));
+    if (pct === null) { b.disabled = false; return; }
+    const floor = prompt('Minimum TechDeva takes from one payment, in USD (leave empty for none):', '');
+    if (floor === null) { b.disabled = false; return; }
+    const body = {partner_share_pct: pct.trim()};
+    if (floor.trim()) { body.min_techdeva_amount = floor.trim(); body.floor_currency = 'USD'; }
+    await post('/techdeva/partners/' + b.getAttribute('data-pterms') + '/terms', body); again();
+  });
+  go('[data-opaid]', async b => {
+    const ref = prompt('Bank / transfer reference of the money you SENT:', '');
+    if (!ref) { b.disabled = false; return; }
+    await post('/techdeva/partner-payouts/' + b.getAttribute('data-opaid') + '/mark', {status: 'paid', reference: ref}); again();
+  });
+  go('[data-ofail]', async b => {
+    const why = prompt('Why did the payout fail? Its earnings go into the next payout.', '');
+    if (!why) { b.disabled = false; return; }
+    await post('/techdeva/partner-payouts/' + b.getAttribute('data-ofail') + '/mark', {status: 'failed', reason: why}); again();
+  });
+  go('#p-gather', async () => { const r = await post('/techdeva/partner-payouts/run'); alert((r.created || []).length + ' payout(s) gathered.'); again(); });
+  go('[data-lclear]', async b => {
+    const note = prompt('What did you check? (kept on record)', '');
+    if (!note) { b.disabled = false; return; }
+    await post('/techdeva/partner-ledger/' + b.getAttribute('data-lclear') + '/clear-review', {note: note}); again();
+  });
+  const reverse = kind => async b => {
+    const amt = prompt((kind === 'refund' ? 'Refund' : 'Chargeback') + ' amount (the client paid ' + b.getAttribute('data-amt') + '):', b.getAttribute('data-amt'));
+    if (amt === null) { b.disabled = false; return; }
+    const fee = kind === 'chargeback' ? prompt('Chargeback fee the bank charged (0 if none):', '0') : '0';
+    if (fee === null) { b.disabled = false; return; }
+    await post('/techdeva/partner-ledger/' + b.getAttribute(kind === 'refund' ? 'data-lref' : 'data-lcb') + '/reverse', {amount: amt, kind: kind, gateway_fee: fee}); again();
+  };
+  go('[data-lref]', reverse('refund'));
+  go('[data-lcb]', reverse('chargeback'));
+  const form = document.getElementById('p-add');
+  if (form) form.onsubmit = async e => {
+    e.preventDefault();
+    const v = id => document.getElementById(id).value.trim(), msg = document.getElementById('p-add-msg');
+    try {
+      await post('/techdeva/partners', {name: v('pa-name'), slug: v('pa-slug').toLowerCase(), country: v('pa-country'),
+        contact_name: v('pa-cname'), contact_email: v('pa-email'), contact_phone: v('pa-phone')});
+      again();
+    } catch (ex) { msg.textContent = ex.message; }
+  };
+}
+
 function wireRequests(){
   const el = document.getElementById('view');
   const go = (sel, fn) => el.querySelectorAll(sel).forEach(b => b.onclick = async () => {

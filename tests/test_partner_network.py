@@ -85,7 +85,12 @@ def net(client, founder):
             cur.execute("DELETE FROM executions WHERE tenant_id = %s", (t,))
             cur.execute("DELETE FROM signups WHERE tenant_id = %s", (t,))
             cur.execute("DELETE FROM tenants WHERE id = %s", (t,))
-        cur.execute("DELETE FROM partners WHERE id = ANY(%s::uuid[]) OR slug LIKE %s", (ids, TAG + "%"))
+        cur.execute("SELECT id FROM partners WHERE id = ANY(%s::uuid[]) OR slug LIKE %s OR contact_email LIKE %s",
+                    (ids, TAG + "%", TAG + "%"))
+        every = [str(r["id"]) for r in cur.fetchall()]
+        for t in ("partner_ledger", "partner_payouts", "partner_client_subscriptions"):
+            cur.execute("DELETE FROM %s WHERE partner_id = ANY(%%s::uuid[])" % t, (every,))
+        cur.execute("DELETE FROM partners WHERE id = ANY(%s::uuid[])", (every,))
 
 
 def _new_client(client, h, name, **extra):
