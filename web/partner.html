@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Partner dashboard — TechDeva</title>
+<meta name="robots" content="noindex">
+<!-- @td-theme:start -->
+<script>
+/* Theme + brand colour, for pages served by FastAPI (web/*.html). Kept free of
+   any product name: it is inlined into white-label partner pages too.
+   sync.py inlines this into each page's <head>, so the saved theme applies
+   before the first paint. Next.js has its own copy of the theme part
+   (the Next.js portal's components/ui/theme.ts); both use the "td-theme" key.
+
+   TD.toggleHTML()  markup for the light/dark switch, for script-rendered
+                    headers. In static markup, <span data-td-theme-slot></span>
+                    is replaced with it. Any [data-td-theme-toggle] works,
+                    even if rendered later.
+   TD.brand(hex)    a business's own accent colour. Works out readable text
+                    on it and a readable text shade of it for the current
+                    theme, so a light brand colour never gives white-on-white
+                    buttons and a dark one never vanishes on the dark canvas. */
+(function () {
+  var KEY = "td-theme", doc = document.documentElement, brandHex = null;
+
+  function theme() { return doc.dataset.theme === "light" ? "light" : "dark"; }
+
+  function rgb(hex) {
+    var h = hex.replace("#", "");
+    if (h.length === 3 || h.length === 4) h = h.replace(/./g, "$&$&");
+    return [0, 2, 4].map(function (i) { return parseInt(h.substr(i, 2), 16); });
+  }
+  function lum(c) {
+    var v = c.map(function (x) { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); });
+    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+  }
+  function contrast(a, b) { var x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  function mix(c, to, t) { return c.map(function (x, i) { return Math.round(x + (to[i] - x) * t); }); }
+  function hex(c) { return "#" + c.map(function (x) { return ("0" + x.toString(16)).slice(-2); }).join(""); }
+
+  function applyBrand() {
+    var props = ["--accent", "--accent-hover", "--accent-ink", "--accent-tint", "--accent-line", "--fg-on-accent", "--ring"];
+    if (!brandHex) { props.forEach(function (p) { doc.style.removeProperty(p); }); return; }
+    var c = rgb(brandHex), white = [255, 255, 255], black = [0, 0, 0];
+    var light = theme() === "light";
+    var bg = light ? white : [10, 10, 15];
+    // text on the accent fill: whichever of white or near-black reads better
+    var on = contrast(c, white) >= contrast(c, [20, 16, 5]) ? white : [20, 16, 5];
+    // the accent as text on the page: step it toward white (dark theme) or
+    // black (light theme) until it reaches 4.5:1
+    var ink = c, t = 0;
+    while (contrast(ink, bg) < 4.5 && t < 1) { t += 0.05; ink = mix(c, light ? black : white, t); }
+    var s = doc.style;
+    s.setProperty("--accent", hex(c));
+    s.setProperty("--accent-hover", hex(mix(c, on === white ? black : white, 0.12)));
+    s.setProperty("--fg-on-accent", hex(on));
+    s.setProperty("--accent-ink", hex(ink));
+    s.setProperty("--ring", hex(ink));
+    s.setProperty("--accent-tint", "rgb(" + c.join(" ") + " / " + (light ? 0.1 : 0.16) + ")");
+    s.setProperty("--accent-line", "rgb(" + c.join(" ") + " / 0.4)");
+  }
+
+  function sync() {
+    var light = theme() === "light";
+    var btns = document.querySelectorAll("[data-td-theme-toggle]");
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].setAttribute("aria-label", light ? "Switch to dark theme" : "Switch to light theme");
+      btns[i].setAttribute("title", light ? "Dark theme" : "Light theme");
+    }
+    var meta = document.querySelector('meta[name="color-scheme"]');
+    if (meta) meta.content = light ? "light" : "dark";
+  }
+
+  function set(next) {
+    if (next === "light") doc.dataset.theme = "light"; else delete doc.dataset.theme;
+    try { localStorage.setItem(KEY, next); } catch (e) { /* storage blocked: lasts this page view */ }
+    applyBrand();
+    sync();
+  }
+
+  try { if (localStorage.getItem(KEY) === "light") doc.dataset.theme = "light"; } catch (e) { /* default dark */ }
+
+  var SUN = '<svg class="td-i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
+  var MOON = '<svg class="td-i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>';
+
+  window.TD = {
+    theme: theme,
+    setTheme: set,
+    brand: function (h) { brandHex = h && /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(h) ? h.slice(0, h.length === 9 ? 7 : h.length) : null; applyBrand(); },
+    toggleHTML: function (cls) {
+      var light = theme() === "light";
+      return '<button type="button" class="td-theme-btn' + (cls ? " " + cls : "") + '" data-td-theme-toggle aria-label="' +
+        (light ? "Switch to dark theme" : "Switch to light theme") + '" title="' + (light ? "Dark theme" : "Light theme") + '">' + SUN + MOON + "</button>";
+    }
+  };
+
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-td-theme-toggle]");
+    if (b) set(theme() === "light" ? "dark" : "light");
+  });
+  document.addEventListener("DOMContentLoaded", function () {
+    // static pages: <span data-td-theme-slot="extra classes"></span> becomes the switch
+    var slots = document.querySelectorAll("[data-td-theme-slot]");
+    for (var i = 0; i < slots.length; i++) slots[i].outerHTML = window.TD.toggleHTML(slots[i].getAttribute("data-td-theme-slot"));
+    sync();
+  });
+})();
+</script>
+<!-- @td-theme:end -->
+<!-- @td-fonts:start -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<!-- @td-fonts:end -->
+<!-- @td-css:start -->
+<link rel="stylesheet" href="/assets/td.css?v=fd39baa266">
+<!-- @td-css:end -->
+</head>
+<body class="td td-grain page-partner min-h-screen bg-bg text-fg">
+<div aria-hidden="true" class="td-ambient pointer-events-none fixed inset-x-0 top-0 h-[420px]"></div>
+<div class="relative mx-auto max-w-6xl px-4 pt-6 pb-24 sm:px-6">
+  <header class="mb-8 flex flex-wrap items-center justify-between gap-3">
+    <div class="flex min-w-0 items-center gap-3">
+      <span class="font-display text-[17px] font-semibold tracking-tight">TechDeva <span class="text-fg-muted">Partner</span></span>
+      <span id="who" class="truncate text-sm text-fg-muted"></span>
+    </div>
+    <div class="flex items-center gap-2"><span data-td-theme-slot></span>
+      <button id="signout" class="td-btn td-btn--secondary" type="button" hidden>Sign out</button></div>
+  </header>
+
+  <main id="main">
+    <section id="v-loading" aria-busy="true"><div class="td-skeleton h-40 rounded-[var(--card-radius)]"></div><span class="sr-only">Loading…</span></section>
+
+    <section id="v-login" class="hidden">
+      <form id="login" class="td-glass td-rim mx-auto max-w-md rounded-[var(--p-radius-xl)] p-6 sm:p-8" novalidate>
+        <h1 class="mb-1 font-display text-2xl font-semibold">Sign in</h1>
+        <p class="mb-6 text-sm text-fg-muted">Your partner account with TechDeva.</p>
+        <div class="field"><label for="l-email">Email</label><input id="l-email" type="email" autocomplete="email" required></div>
+        <div class="field"><label for="l-pw">Password</label><input id="l-pw" type="password" autocomplete="current-password" required></div>
+        <div id="login-msg" class="msg" role="alert"></div>
+        <button id="login-go" class="td-btn td-btn--lg w-full" type="submit">Sign in</button>
+        <p class="mt-6 text-sm text-fg-muted">Not a partner yet? <a class="inline-flex min-h-11 items-center text-accent-ink underline-offset-4 hover:underline" href="https://techdeva.net/">Apply on techdeva.net</a></p>
+      </form>
+    </section>
+
+    <section id="v-welcome" class="hidden">
+      <form id="welcome" class="td-glass td-rim mx-auto max-w-md rounded-[var(--p-radius-xl)] p-6 sm:p-8" novalidate>
+        <h1 class="mb-1 font-display text-2xl font-semibold">Welcome to TechDeva</h1>
+        <p class="mb-6 text-sm text-fg-muted">Choose a password for your partner account.</p>
+        <div class="field"><label for="w-pw">New password</label><input id="w-pw" type="password" autocomplete="new-password" required minlength="8"></div>
+        <div id="welcome-msg" class="msg" role="alert"></div>
+        <button id="welcome-go" class="td-btn td-btn--lg w-full" type="submit">Save password</button>
+      </form>
+    </section>
+
+    <section id="v-error" class="hidden py-12 text-center" role="alert">
+      <h1 class="font-display text-2xl font-semibold">We couldn't reach the server</h1>
+      <p id="error-text" class="mt-3 text-fg-muted">Check your connection and try again. Nothing was changed.</p>
+      <button id="retry" class="td-btn td-btn--secondary mt-6" type="button">Try again</button>
+    </section>
+
+    <section id="v-app" class="hidden">
+      <nav aria-label="Sections" class="mb-8"><ul id="tabs" class="m-0 grid list-none grid-cols-2 gap-2 p-0 sm:grid-cols-6"></ul></nav>
+      <div id="panel" tabindex="-1"></div>
+    </section>
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var VIEWS = ["v-loading", "v-login", "v-welcome", "v-error", "v-app"];
+  function show(id) { VIEWS.forEach(function (v) { $(v).classList.toggle("hidden", v !== id); }); }
+  function el(tag, cls, txt) { var e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = String(txt); return e; }
+  function money(v, cur) {
+    if (v == null || v === "") return "—";
+    var n = Number(v); if (!isFinite(n)) return "—";
+    try { return new Intl.NumberFormat(undefined, { style: "currency", currency: cur || "USD" }).format(n); } catch (e) { return (cur || "") + " " + n.toFixed(2); }
+  }
+  function day(s) { if (!s) return "—"; var d = new Date(s); return isNaN(d) ? String(s) : d.toLocaleDateString(); }
+  function errText(data, status) {
+    var d = data && data.detail;
+    if (typeof d === "string" && d) return d;
+    if (Array.isArray(d) && d.length) return d.map(function (x) { return x && x.msg ? x.msg : String(x); }).join(". ");
+    return "Something went wrong (" + status + "). Nothing was changed.";
+  }
+  function Unreachable(m) { this.message = m; }
+  async function api(path, opts) {
+    opts = opts || {};
+    var r;
+    try {
+      r = await fetch(path, { method: opts.method || "GET", credentials: "same-origin",
+        headers: opts.body ? { "Content-Type": "application/json" } : {}, body: opts.body ? JSON.stringify(opts.body) : undefined });
+    } catch (e) { throw new Unreachable("We couldn't reach the server. Nothing was changed."); }
+    var data = await r.json().catch(function () { return {}; });
+    if (r.status === 401 && path !== "/partner/login") { show("v-login"); $("signout").hidden = true; throw new Error("Please sign in again."); }
+    if (!r.ok) throw new Error(errText(data, r.status));
+    return data;
+  }
+  function say(id, msg, kind) { var m = $(id); m.className = "msg " + (kind || "err"); m.textContent = msg; }
+
+  /* ---------------------------------------------------------------- tables */
+  function table(cols, rows, empty) {
+    if (!rows.length) { var e = el("div", "td-empty"); e.append(el("p", "m-0 text-fg-muted", empty)); return e; }
+    var wrap = el("div", "td-table-wrap"), t = el("table", "td-table"), thead = el("thead"), tr = el("tr");
+    cols.forEach(function (c) { var th = el("th", c.num ? "num" : "", c.label); th.scope = "col"; tr.append(th); });
+    thead.append(tr); t.append(thead);
+    var tb = el("tbody");
+    rows.forEach(function (r) {
+      var row = el("tr");
+      cols.forEach(function (c) {
+        var td = el("td", c.num ? "num" : ""); td.dataset.label = c.label;
+        var v = c.get(r); if (v instanceof Node) td.append(v); else td.textContent = v == null || v === "" ? "—" : String(v);
+        row.append(td);
+      });
+      tb.append(row);
+    });
+    t.append(tb); wrap.append(t); return wrap;
+  }
+  function badge(text, kind) { return el("span", "td-badge td-badge--" + (kind || "info"), text); }
+  function section(title, intro) {
+    var s = el("section", "mb-10"); s.append(el("h2", "mb-2 font-display text-xl font-semibold", title));
+    if (intro) s.append(el("p", "mb-4 max-w-[65ch] text-sm text-fg-muted", intro)); return s;
+  }
+  function field(id, label, opts) {
+    opts = opts || {};
+    var f = el("div", "field"), l = el("label", "", label); l.htmlFor = id; f.append(l);
+    var i = opts.select ? el("select") : opts.area ? el("textarea") : el("input");
+    i.id = id; if (opts.type) i.type = opts.type; if (opts.value != null) i.value = opts.value;
+    if (opts.placeholder) i.placeholder = opts.placeholder;
+    if (opts.options) opts.options.forEach(function (o) { i.append(new Option(o[1], o[0])); });
+    if (opts.value != null && opts.select) i.value = opts.value;
+    f.append(i); if (opts.hint) f.append(el("p", "hint", opts.hint)); return f;
+  }
+  function form(id, fields, button, onSubmit) {
+    var f = el("form", "td-card td-card--pad mb-6"); f.id = id; f.noValidate = true;
+    var grid = el("div", "row"); fields.forEach(function (x) { grid.append(x); }); f.append(grid);
+    var m = el("div", "msg"); m.id = id + "-msg"; m.setAttribute("role", "alert"); f.append(m);
+    var b = el("button", "td-btn", button); b.type = "submit"; f.append(b);
+    f.addEventListener("submit", async function (e) {
+      e.preventDefault(); b.disabled = true;
+      try { await onSubmit(f); } catch (err) { say(id + "-msg", err.message); }
+      finally { b.disabled = false; }
+    });
+    return f;
+  }
+  var v = function (id) { var e = $(id); return e ? e.value.trim() : ""; };
+
+  /* ---------------------------------------------------------------- views */
+  var dash = null;
+  var TABS = [["overview", "Overview"], ["clients", "Clients"], ["packages", "Packages"],
+              ["links", "Sign-up links"], ["brand", "Brand & website"], ["money", "Money"]];
+  var current = "overview";
+
+  function renderTabs() {
+    var ul = $("tabs"); ul.replaceChildren();
+    TABS.forEach(function (t) {
+      var li = el("li"), b = el("button", "tab", t[1]); b.type = "button";
+      if (t[0] === current) b.setAttribute("aria-current", "page");
+      b.addEventListener("click", function () { current = t[0]; renderTabs(); renderPanel(); $("panel").focus(); });
+      li.append(b); ul.append(li);
+    });
+  }
+
+  async function renderPanel() {
+    var p = $("panel"); p.replaceChildren(el("div", "td-skeleton h-32 rounded-[var(--card-radius)]"));
+    try { await ({ overview: overview, clients: clients, packages: packages, links: links, brand: brand, money: moneyTab })[current](p); }
+    catch (e) { p.replaceChildren(); var n = el("div", "td-notice td-notice--warning"); n.append(el("p", "m-0", e.message)); p.append(n); }
+  }
+
+  function metric(label, value, help) {
+    var c = el("div", "td-card td-card--pad"); c.append(el("p", "td-metric__label m-0", label), el("p", "td-metric__value m-0 mt-2 tabular-nums", value));
+    if (help) c.append(el("p", "td-metric__help m-0 mt-1", help)); return c;
+  }
+
+  async function overview(p) {
+    dash = await api("/partner/dashboard");
+    p.replaceChildren();
+    var c = dash.clients || {};
+    var grid = el("div", "mb-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4");
+    grid.append(metric("Clients", c.total == null ? "—" : c.total, (c.active || 0) + " active · " + (c.trial || 0) + " on trial"));
+    var mrr = (dash.mrr || []).map(function (m) { return money(m.mrr, m.currency); }).join(" + ");
+    grid.append(metric("Monthly recurring", mrr || "—", mrr ? "active subscriptions" : "no active subscription yet"));
+    var mon = dash.money || [];
+    grid.append(metric("Your earnings", mon.map(function (m) { return money(m.your_earnings, m.currency); }).join(" + ") || "—",
+      mon.length ? "all time, after refunds" : "no payment collected yet"));
+    grid.append(metric("Awaiting payout", mon.map(function (m) { return money(m.awaiting_payout, m.currency); }).join(" + ") || "—",
+      mon.some(function (m) { return Number(m.under_review) > 0; }) ? "some payments are being checked" : "paid out daily"));
+    p.append(grid);
+
+    var t = dash.terms, s = section("Your agreement");
+    s.append(el("p", "m-0 text-[15px]", t ? "You keep " + Number(t.partner_share_pct) + "% of every payment; TechDeva's share is " +
+      (100 - Number(t.partner_share_pct)) + "%" + (t.min_techdeva_amount ? ", and at least " + money(t.min_techdeva_amount, t.floor_currency) + " per payment" : "") +
+      ". Gateway fees: " + ({ shared: "shared in the same split", partner: "carried by you", techdeva: "carried by TechDeva" })[t.fee_bearer] + "." : "Your agreement is being set up."));
+    p.append(s);
+
+    var w = section("Your website", "Share it with businesses. Everything on it carries your brand only.");
+    var a = el("a", "inline-flex min-h-11 items-center text-accent-ink break-all underline underline-offset-4", dash.website); a.href = dash.website; a.target = "_blank"; a.rel = "noopener";
+    w.append(a); p.append(w);
+  }
+
+  async function clients(p) {
+    var [list, books] = await Promise.all([api("/partner/clients"), api("/partner/price-books")]);
+    p.replaceChildren();
+    var add = section("Add a client", "We create their workspace now and email them an invitation under your brand.");
+    var opts = books.price_books.filter(function (b) { return b.active; }).map(function (b) { return [b.id, b.name + " — " + money(b.price, b.currency) + " / " + b.billing_interval]; });
+    add.append(form("f-client", [
+      field("c-name", "Business name"), field("c-email", "Owner's email", { type: "email" }),
+      field("c-contact", "Owner's name"), field("c-phone", "Phone", { type: "tel" }),
+      field("c-industry", "Industry", { placeholder: "clinic, salon, restaurant…" }),
+      field("c-book", "Package", { select: true, options: opts }), field("c-coupon", "Coupon (optional)")
+    ], "Create client", async function () {
+      var d = await api("/partner/clients", { method: "POST", body: { business_name: v("c-name"), contact_email: v("c-email"),
+        contact_name: v("c-contact"), contact_phone: v("c-phone"), industry: v("c-industry"), price_book_id: v("c-book") || null, coupon_code: v("c-coupon") || null } });
+      var msg = d.invite_emailed ? "Created. " + v("c-email") + " has their invitation." :
+        "Created. We couldn't email the invitation — send them this link (works for 72 hours): " + dash_site() + "/welcome?token=" + d.invite_token;
+      say("f-client-msg", msg, "ok"); await clientsTable(p);
+    }));
+    p.append(add);
+    var holder = el("div"); holder.id = "client-table"; p.append(holder);
+    await clientsTable(p, list);
+  }
+  function dash_site() { return dash ? dash.website : location.origin + "/p/"; }
+  async function clientsTable(p, list) {
+    list = list || await api("/partner/clients");
+    var holder = $("client-table"); holder.replaceChildren();
+    var s = section("Your clients", list.count + (list.count === 1 ? " business" : " businesses"));
+    s.append(table([
+      { label: "Business", get: function (c) { return c.name; } },
+      { label: "Status", get: function (c) { return badge(({ trial: "On trial", active: "Active", paused: "Paused" })[c.status] || c.status, c.status === "active" ? "success" : c.status === "paused" ? "warning" : "info"); } },
+      { label: "Joined", get: function (c) { return day(c.created_at); } },
+      { label: "Trial ends", get: function (c) { return day(c.trial_ends_at); } }
+    ], list.clients, "No clients yet. Add one above, or share your sign-up link."));
+    holder.append(s);
+  }
+
+  async function packages(p) {
+    var [d, cps] = await Promise.all([api("/partner/price-books"), api("/partner/coupons")]);
+    p.replaceChildren();
+    var s = section("Your packages", "What you charge. Each sits on a TechDeva plan, which sets its limits.");
+    s.append(table([
+      { label: "Package", get: function (b) { return b.name; } },
+      { label: "Price", num: true, get: function (b) { return money(b.price, b.currency) + " / " + b.billing_interval; } },
+      { label: "You keep", num: true, get: function (b) { return money(b.you_keep, b.currency); } },
+      { label: "TechDeva", num: true, get: function (b) { return money(b.platform_share, b.currency) + (b.floor_applies ? " (minimum)" : ""); } },
+      { label: "Trial", get: function (b) { return b.trial_days ? b.trial_days + " days" : "None"; } },
+      { label: "Shown", get: function (b) { return badge(b.active ? "On sale" : "Hidden", b.active ? "success" : "warning"); } }
+    ], d.price_books, "No packages yet."));
+    p.append(s);
+    var plans = d.plans.map(function (x) { return [x.key, x.name + " — " + x.max_numbers + (x.max_numbers === 1 ? " number, " : " numbers, ") + Number(x.max_conversations).toLocaleString() + " chats"]; });
+    var a = section("Add a package");
+    a.append(form("f-book", [field("b-name", "Name"), field("b-plan", "TechDeva plan", { select: true, options: plans }),
+      field("b-price", "Price", { type: "number" }), field("b-cur", "Currency", { value: "USD" }),
+      field("b-int", "Billed", { select: true, options: [["month", "Monthly"], ["year", "Yearly"]] }),
+      field("b-trial", "Free trial (days)", { type: "number", value: "7" })], "Add package", async function () {
+      await api("/partner/price-books", { method: "POST", body: { name: v("b-name"), plan_key: v("b-plan"), price: v("b-price"),
+        currency: v("b-cur").toUpperCase(), billing_interval: v("b-int"), trial_days: Number(v("b-trial") || 0) } });
+      await packages(p);
+    }));
+    p.append(a);
+    var c = section("Coupons");
+    c.append(table([{ label: "Code", get: function (x) { return x.code; } },
+      { label: "Discount", get: function (x) { return x.percent_off ? Number(x.percent_off) + "%" : money(x.amount_off); } },
+      { label: "Used", num: true, get: function (x) { return x.uses + (x.max_uses ? " of " + x.max_uses : ""); } },
+      { label: "State", get: function (x) { return badge(x.active ? "Active" : "Off", x.active ? "success" : "warning"); } }], cps.coupons, "No coupons yet."));
+    c.append(form("f-coupon", [field("cp-code", "Code", { placeholder: "LAUNCH20" }), field("cp-pct", "Percent off", { type: "number" }),
+      field("cp-max", "Max uses (optional)", { type: "number" })], "Add coupon", async function () {
+      await api("/partner/coupons", { method: "POST", body: { code: v("cp-code"), percent_off: v("cp-pct") || null, max_uses: v("cp-max") ? Number(v("cp-max")) : null } });
+      await packages(p);
+    }));
+    p.append(c);
+  }
+
+  async function links(p) {
+    var d = await api("/partner/signup-links");
+    p.replaceChildren();
+    var s = section("Sign-up links", "Businesses that register through one of these become your clients automatically.");
+    s.append(table([{ label: "Name", get: function (l) { return l.label || "Link"; } },
+      { label: "Link", get: function (l) { var a = el("a", "inline-flex min-h-11 items-center break-all text-accent-ink", l.url); a.href = l.url; return a; } },
+      { label: "Sign-ups", num: true, get: function (l) { return l.uses; } },
+      { label: "State", get: function (l) { return badge(l.active ? "Active" : "Off", l.active ? "success" : "warning"); } }], d.links, "No links yet."));
+    s.append(form("f-link", [field("l-label", "Name it", { placeholder: "LinkedIn campaign" })], "Create link", async function () {
+      await api("/partner/signup-links", { method: "POST", body: { label: v("l-label") } }); await links(p);
+    }));
+    p.append(s);
+  }
+
+  async function brand(p) {
+    var d = await api("/partner/branding"), b = d.branding || {};
+    p.replaceChildren();
+    var s = section("Brand & website", "Your clients see this name, these colours and this support contact. They never see TechDeva.");
+    s.append(form("f-brand", [field("br-name", "Brand name", { value: b.brand_name }), field("br-head", "Headline", { value: b.headline }),
+      field("br-tag", "Tagline", { value: b.tagline }), field("br-color", "Brand colour", { value: b.primary_color || "", placeholder: "#0E7C66", hint: "A hex colour, e.g. #0E7C66" }),
+      field("br-email", "Support email", { type: "email", value: b.support_email }), field("br-phone", "Support phone", { value: b.support_phone }),
+      field("br-wa", "Support WhatsApp", { value: b.support_whatsapp }), field("br-about", "About you", { area: true, value: b.about }),
+      field("br-pub", "Website", { select: true, value: b.website_published ? "1" : "0", options: [["1", "Published"], ["0", "Hidden"]] })],
+      "Save brand", async function () {
+        await api("/partner/branding", { method: "PUT", body: { brand_name: v("br-name"), headline: v("br-head"), tagline: v("br-tag"),
+          primary_color: v("br-color") || null, support_email: v("br-email"), support_phone: v("br-phone"), support_whatsapp: v("br-wa"),
+          about: v("br-about"), website_published: v("br-pub") === "1" } });
+        say("f-brand-msg", "Saved — your website shows it now.", "ok");
+      }));
+    var logo = el("div", "td-card td-card--pad mb-6"); var ll = el("label", "", "Logo (PNG, JPEG, WebP or SVG, up to 1 MB)"); ll.htmlFor = "br-logo";
+    var li = el("input"); li.type = "file"; li.id = "br-logo"; li.accept = "image/png,image/jpeg,image/webp,image/svg+xml";
+    var lm = el("div", "msg"); lm.id = "logo-msg"; lm.setAttribute("role", "alert");
+    li.addEventListener("change", function () {
+      var f = li.files[0]; if (!f) return;
+      var r = new FileReader(); r.onload = async function () {
+        try { await api("/partner/branding/logo", { method: "PUT", body: { mime: f.type, data_base64: String(r.result).split(",")[1] } }); say("logo-msg", "Logo saved.", "ok"); }
+        catch (e) { say("logo-msg", e.message); }
+      }; r.readAsDataURL(f);
+    });
+    logo.append(ll, li, lm); s.append(logo);
+    var dom = d.domain;
+    var ds = section("Your own domain", dom ? dom.domain + " — " + ({ pending: "waiting for DNS", verified: "connected", failed: "not connected yet" })[dom.status] + (dom.last_error ? ": " + dom.last_error : "") : "Optional. Without one, your website runs at the address on the Overview tab.");
+    ds.append(form("f-domain", [field("d-name", "Domain", { placeholder: "app.youragency.com", value: dom ? dom.domain : "" })], "Request domain", async function () {
+      var r = await api("/partner/domain", { method: "PUT", body: { domain: v("d-name") } }); say("f-domain-msg", r.instructions, "ok");
+    }));
+    if (dom) { var vb = el("button", "td-btn td-btn--secondary", "Check DNS now"); vb.type = "button";
+      vb.addEventListener("click", async function () { try { var r = await api("/partner/domain/verify", { method: "POST" }); say("f-domain-msg", r.status === "verified" ? "Connected." : r.error, r.status === "verified" ? "ok" : "err"); } catch (e) { say("f-domain-msg", e.message); } });
+      ds.append(vb); }
+    p.append(s, ds);
+  }
+
+  async function moneyTab(p) {
+    var [l, o] = await Promise.all([api("/partner/ledger"), api("/partner/payouts")]);
+    p.replaceChildren();
+    var s = section("Payouts", "What TechDeva has paid you, or tried to.");
+    s.append(table([{ label: "Created", get: function (x) { return day(x.created_at); } },
+      { label: "Amount", num: true, get: function (x) { return money(x.amount, x.currency); } },
+      { label: "State", get: function (x) { return badge(({ pending: "Being sent", paid: "Paid", failed: "Failed", cancelled: "Cancelled" })[x.status], x.status === "paid" ? "success" : x.status === "failed" ? "danger" : "info"); } },
+      { label: "Reference", get: function (x) { return x.status === "failed" ? x.failure_reason : x.reference; } }], o.payouts, "No payouts yet. They are gathered once a day from your earnings."));
+    var t = section("Every payment", "Each payment from your clients, split at the terms in force that day. Refunds appear as their own line.");
+    t.append(table([{ label: "Date", get: function (x) { return day(x.occurred_on); } },
+      { label: "Kind", get: function (x) { return ({ payment: "Payment", refund: "Refund", chargeback: "Chargeback", adjustment: "Adjustment" })[x.kind]; } },
+      { label: "Client paid", num: true, get: function (x) { return money(x.gross, x.currency); } },
+      { label: "Fee", num: true, get: function (x) { return money(x.gateway_fee, x.currency); } },
+      { label: "You", num: true, get: function (x) { return money(x.partner_amount, x.currency); } },
+      { label: "TechDeva", num: true, get: function (x) { return money(x.techdeva_amount, x.currency); } },
+      { label: "Note", get: function (x) { return x.needs_review ? badge("Being checked", "warning") : x.payout_id ? badge("Paid out", "success") : ""; } }], l.entries, "No payments yet."));
+    p.append(s, t);
+  }
+
+  /* ---------------------------------------------------------------- start */
+  async function start() {
+    var params = new URLSearchParams(location.search);
+    if (location.pathname === "/partner/welcome" && params.get("token")) { show("v-welcome"); return; }
+    show("v-loading");
+    try {
+      var me = await fetch("/partner/me", { credentials: "same-origin" });
+      if (me.status === 401 || me.status === 403) { show("v-login"); return; }
+      if (!me.ok) throw new Error();
+      var d = await me.json();
+      $("who").textContent = "· " + d.partner.name;
+      $("signout").hidden = false;
+      show("v-app"); renderTabs(); renderPanel();
+    } catch (e) { show("v-error"); }
+  }
+  $("retry").addEventListener("click", start);
+  $("login").addEventListener("submit", async function (e) {
+    e.preventDefault(); var b = $("login-go"); b.disabled = true; $("login-msg").className = "msg";
+    try { await api("/partner/login", { method: "POST", body: { email: $("l-email").value.trim(), password: $("l-pw").value } }); $("l-pw").value = ""; await start(); }
+    catch (err) { say("login-msg", err.message); } finally { b.disabled = false; }
+  });
+  $("welcome").addEventListener("submit", async function (e) {
+    e.preventDefault(); var b = $("welcome-go"); b.disabled = true;
+    try { await api("/partner/set-password", { method: "POST", body: { token: new URLSearchParams(location.search).get("token"), password: $("w-pw").value } });
+      history.replaceState(null, "", "/partner"); show("v-login"); say("login-msg", "Password saved. Sign in now.", "ok"); }
+    catch (err) { say("welcome-msg", err.message); } finally { b.disabled = false; }
+  });
+  $("signout").addEventListener("click", async function () {
+    try { await api("/partner/logout", { method: "POST" }); } catch (e) {}
+    $("signout").hidden = true; $("who").textContent = ""; show("v-login");
+  });
+  start();
+})();
+</script>
+</body>
+</html>

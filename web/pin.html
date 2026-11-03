@@ -8,10 +8,11 @@
 
 <!-- @td-theme:start -->
 <script>
-/* TechDeva theme + brand colour, for pages served by FastAPI (web/*.html).
+/* Theme + brand colour, for pages served by FastAPI (web/*.html). Kept free of
+   any product name: it is inlined into white-label partner pages too.
    sync.py inlines this into each page's <head>, so the saved theme applies
    before the first paint. Next.js has its own copy of the theme part
-   (techdeva-web/src/components/ui/theme.ts); both use the "td-theme" key.
+   (the Next.js portal's components/ui/theme.ts); both use the "td-theme" key.
 
    TD.toggleHTML()  markup for the light/dark switch, for script-rendered
                     headers. In static markup, <span data-td-theme-slot></span>
@@ -114,7 +115,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=d989a08646">
+<link rel="stylesheet" href="/assets/td.css?v=fd39baa266">
 <!-- @td-css:end -->
 </head>
 <body class="td page-pin bg-bg text-fg">

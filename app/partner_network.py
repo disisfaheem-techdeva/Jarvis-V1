@@ -25,7 +25,7 @@ import re
 import socket
 from decimal import Decimal, InvalidOperation
 
-from fastapi import APIRouter, Body, Cookie, Header, HTTPException, Request
+from fastapi import APIRouter, Body, Cookie, Header, HTTPException, Request, Response
 
 from . import partner_engine as eng
 from .audit import record
@@ -476,6 +476,15 @@ def make_partner_network_router(P) -> APIRouter:
                    "subscriptions": subs, "mrr": mrr, "money": money, "payouts": payouts,
                    "terms": dict(terms) if terms else None, "client_growth": growth,
                    "signup_links": links, "website": eng.partner_base_url(me["slug"])})
+
+    @router.post("/partner/logout")
+    def logout(response: Response, authorization: str | None = Header(None),
+               td_partner: str | None = Cookie(None, alias=PARTNER_COOKIE)):
+        """End this partner login on the server too (db/62), not just in the browser."""
+        from .auth import sign_out
+        sign_out(token_from(authorization, td_partner))
+        response.delete_cookie(PARTNER_COOKIE, path="/")
+        return {"ok": True}
 
     # ---------------------------------------------------------------- branding
     @router.get("/partner/branding")

@@ -67,6 +67,12 @@ services:
       GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${GOOGLE_ADS_LOGIN_CUSTOMER_ID:-}
       GOOGLE_ADS_API_VERSION: ${GOOGLE_ADS_API_VERSION:-v21}
       OAUTH_REDIRECT_BASE: ${OAUTH_REDIRECT_BASE:-http://localhost:8000}
+      # Partner network (docs/PARTNERS.md). Defaults are the standard terms; a value
+      # set in .env but not listed here never reaches the process.
+      PARTNER_DEFAULT_SHARE_PCT: ${PARTNER_DEFAULT_SHARE_PCT:-55}
+      PARTNER_AUTO_PAYOUTS: ${PARTNER_AUTO_PAYOUTS:-true}
+      PARTNER_SITE_BASE: ${PARTNER_SITE_BASE:-}
+      PARTNER_DOMAIN_TARGETS: ${PARTNER_DOMAIN_TARGETS:-}
       META_AD_LIBRARY_TOKEN: ${META_AD_LIBRARY_TOKEN:-}
       # --- client portal / auth (Build 2) ---
       # AUTH_REQUIRED=true ignores the X-Tenant-Id / X-Role headers everywhere.
@@ -162,6 +168,12 @@ services:
       GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${GOOGLE_ADS_LOGIN_CUSTOMER_ID:-}
       GOOGLE_ADS_API_VERSION: ${GOOGLE_ADS_API_VERSION:-v21}
       OAUTH_REDIRECT_BASE: ${OAUTH_REDIRECT_BASE:-http://localhost:8000}
+      # Partner network (docs/PARTNERS.md). Defaults are the standard terms; a value
+      # set in .env but not listed here never reaches the process.
+      PARTNER_DEFAULT_SHARE_PCT: ${PARTNER_DEFAULT_SHARE_PCT:-55}
+      PARTNER_AUTO_PAYOUTS: ${PARTNER_AUTO_PAYOUTS:-true}
+      PARTNER_SITE_BASE: ${PARTNER_SITE_BASE:-}
+      PARTNER_DOMAIN_TARGETS: ${PARTNER_DOMAIN_TARGETS:-}
       # --- trial data deletion: the 3-day warning email (only when set) ---
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}

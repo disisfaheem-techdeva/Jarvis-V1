@@ -1,0 +1,33 @@
+/* /p/{slug} -- a partner's white-label website, sign-up and welcome pages.
+   Classes below are rendered by the page's JavaScript or shared across many
+   fields; the rest is utilities in the markup. The partner's colour reaches
+   --accent only through TD.brand(hex), never directly. */
+.page-partner-site {
+  & .skip { @apply sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:inline-flex focus:min-h-11 focus:items-center focus:rounded-[var(--btn-radius)] focus:bg-surface focus:px-4 focus:py-2 focus:text-fg; }
+  & label { @apply mb-1.5 block text-sm font-medium text-fg; }
+  & input:not(.hp), & select {
+    @apply h-[var(--input-h)] w-full rounded-[var(--input-radius)] border border-[var(--input-border)] bg-[var(--input-bg)] px-3.5 text-[15px] text-fg transition-[border-color,box-shadow] placeholder:text-fg-subtle hover:border-accent-line focus:border-[var(--ring)] focus:[box-shadow:0_0_0_3px_var(--accent-tint)] focus:outline-none disabled:opacity-70;
+  }
+  & .hp { @apply absolute -left-[9999px] h-px w-px opacity-0; }
+  & fieldset { @apply m-0 mb-8 border-0 p-0; }
+  & legend { @apply pb-4 text-label font-semibold text-accent-ink uppercase; }
+  & .row { @apply grid gap-4 sm:grid-cols-2; }
+  & .field { @apply mb-4; }
+  & .hint { @apply mt-1.5 text-xs text-fg-subtle; }
+  & .msg { @apply mt-1 mb-4 hidden rounded-[var(--p-radius-md)] p-4 text-sm; }
+  & .msg.err { @apply block border border-warning/40 bg-warning-tint text-warning; }
+  & .msg.ok { @apply block border border-success/30 bg-success-tint text-success; }
+
+  /* package cards (rendered by JS) */
+  & .pkg { @apply flex flex-col gap-4 rounded-[var(--card-radius)] border border-line bg-[var(--card-bg)] p-6; }
+  & .pkg h3 { @apply m-0 font-display text-lg font-semibold text-fg; }
+  & .pkg .price { @apply m-0; }
+  & .pkg .amt { @apply font-display text-[40px] leading-none font-semibold tabular-nums text-fg; }
+  & .pkg .per { @apply text-sm text-fg-muted; }
+  & .pkg ul { @apply m-0 flex flex-1 list-none flex-col gap-2 p-0 text-[15px] text-fg-muted; }
+  & .pkg li { @apply pl-5 [background:linear-gradient(var(--accent-ink),var(--accent-ink))_0_0.6em/8px_2px_no-repeat]; }
+
+  /* contact (rendered by JS) */
+  & .lab { @apply mb-1 block text-label font-semibold text-fg-subtle uppercase; }
+  & .contact-link { @apply inline-flex min-h-11 items-center break-all text-accent-ink underline-offset-4 hover:underline; }
+}

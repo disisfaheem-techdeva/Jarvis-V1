@@ -1,127 +1,128 @@
-# White-label partners — what was built, and how to deploy it
+# White-label partner network
 
-Phase 1 of the partner network (1 Nov 2026): an agency can be approved, given
-wholesale terms and logins, be handed the businesses it brought, and sign in to
-see them. Branding, custom domains, wholesale invoicing and the partner
-dashboard screens are **not** in this phase.
+TechDeva → **partners** (agencies, TechDeva's direct customers) → **partner clients**
+(businesses the partner brings) → each client's own isolated workspace.
 
-## What a partner can and cannot do
+Phase 1 (`db/87`, deployed 3 Nov 2026) added partners, partner logins and the
+partner level of row-level security. Phase 2 (`db/88`, this document) adds the
+money, the automatic set-up, client provisioning, pricing and the two partner
+screens.
 
-| | |
-|---|---|
-| Sees | its own row, its own wholesale terms, and the **list** of businesses it brought (name, industry, status, address, trial end) |
-| Does **not** see | anything inside a customer — no lead, conversation, message, appointment, invoice, revenue row or connected ad account. Not another agency's businesses, logins or rates. Not test businesses. |
-| Cannot | create, rename, delete or take over a business. Cannot reach any other route in the platform: `resolve_scope` refuses a partner token outright. |
+## Deploy
 
-This is enforced in Postgres, not in Python. A partner session sets
-`app.partner_id` and leaves `app.tenant_id` empty, so `is_admin()` is false and
-`current_tenant()` is NULL — every tenant-scoped policy therefore matches no
-rows at all. `app/db.py` makes "both at once" unreachable rather than a rule
-somebody has to remember.
-
-The existing `tenant_self` policy on `tenants` is **not** modified. A second,
-SELECT-only policy sits beside it, and Postgres ORs permissive policies. Every
-business keeps exactly the isolation it has today, and the migration refuses to
-finish if `tenant_self` has gone missing.
-
-## Files
-
-| File | What |
-|---|---|
-| `db/87_partners.sql` | `partners`, `partner_agreements`, `partner_users`, `tenants.partner_id`, `current_partner()`, the policies |
-| `app/partners.py` | founder routes (`/techdeva/partners/...`) and partner routes (`/partner/...`) |
-| `app/db.py` | `tenant_session(..., partner_id=)` sets `app.partner_id`; partner and tenant can never both be set |
-| `app/auth.py` | `issue_token(role="partner", partner_id=...)`, the `p` claim, and `resolve_scope` refusing partner tokens |
-| `app/main.py` | mounts the router |
-| `tests/test_partners.py` | 11 tests |
-
-## Routes
-
-Founder (`techdeva_admin` only):
-
-```
-POST /techdeva/partners                      {name, slug, country, contact_*}
-GET  /techdeva/partners                      list + client counts + terms
-POST /techdeva/partners/{id}/status          {status: pending|active|suspended}
-POST /techdeva/partners/{id}/agreement       {plan_key, wholesale_price, currency, upside_share_pct, effective_from}
-POST /techdeva/partners/{id}/users           {email, name, role} -> set_password_token
-POST /techdeva/partners/{id}/clients         {tenant_id, reassign?}
+```bash
+cd /opt/techdeva-platform/techdeva-platform && bash ops/deploy.sh feat/partner-layer
 ```
 
-Partner:
+`ops/deploy.sh` stops before changing anything unless the tree is clean, the
+branch fast-forwards from what is deployed, and a database backup was written.
+It applies only new migrations (each must print `verify ok`), rebuilds only the
+services whose code changed (**api and worker** this time: the scheduler, which
+splits payments and retries set-ups, runs in the worker), waits for `/health`,
+compares businesses/leads/users/appointments/payments before and after, and
+prints the rollback command.
 
-```
-POST /partner/login                          {email, password}  -> td_partner cookie
-POST /partner/set-password                   {token, password}
-GET  /partner/me
-GET  /partner/clients
-```
+Settings (all optional; listed in `docker-compose.yml` for api and worker, because
+a value only in `.env` never reaches the process):
 
-Two decisions worth knowing:
+| Variable | Default | What |
+|---|---|---|
+| `PARTNER_DEFAULT_SHARE_PCT` | `55` | the partner's share on standard terms |
+| `PARTNER_AUTO_PAYOUTS` | `true` | gather each partner's reviewed earnings into a payout once a day |
+| `PARTNER_SITE_BASE` | `OAUTH_REDIRECT_BASE` | public origin for partner sites and links, e.g. `https://portal.techdeva.net` |
+| `PARTNER_DOMAIN_TARGETS` | — | the server's public IP(s); a partner domain is verified when it resolves to one. Without it, verification says it is not configured |
 
-* **A new wholesale rate is a new row**, never an edit. What a partner was
-  charged last month stays readable next year.
-* **A business already belonging to another agency is not moved** unless the
-  caller sends `reassign: true`. Who owns a customer is what ends up in a
-  dispute, so it never happens by accident, and the move is audited with the
-  previous partner recorded.
+## What happens, automatically
 
-## Evidence (scratch copy, 1 Nov 2026)
+**An agency applies** (`POST /partner/apply`, public) → `pending`, nothing set up.
 
-Postgres 16.15, the app's own `techdeva_app` role (`rolsuper=f`,
-`rolbypassrls=f`), forced RLS, the real API through `TestClient`.
+**TechDeva approves** (`POST /techdeva/partners/{id}/approve`) → a provisioning run,
+six idempotent steps, each with attempts and its last error:
+`revenue_terms` (55/45) → `branding` → `price_books` (one per TechDeva plan with a
+USD price, ready to sell) → `signup_link` → `owner_login` (invite emailed when mail
+is configured) → `website` (published at `/p/{slug}`). A failing step stops the run
+and is retried by the scheduler after 2, 4, 8… minutes (max 6 hours, 6 attempts);
+done steps are never repeated. `GET …/provisioning` shows every step.
 
-* Every migration `00` → `87` applied in order from empty, clean.
-  `db/87` printed `verify ok`.
-* A hand-written SQL proof as `techdeva_app`: **20 checks** — a partner sees one
-  business and not the other agency's; reads zero leads, conversations,
-  appointments and integrations; sees only its own agreements; cannot insert a
-  business (`insufficient_privilege`), cannot rename one, cannot take over
-  another agency's; a direct client and a partner's customer each still see only
-  themselves; a partner session with no partner id sees nothing.
-* `pytest tests/test_partners.py` → **11 passed**.
-* `pytest tests` → **165 passed**, 26 failed, 1 skipped, 35 errors.
-  The same run on the unmodified commit `22c70ef` gives **154 passed, 26 failed,
-  1 skipped, 35 errors** — identical failures and errors, +11 passes. Nothing
-  here broke anything. Those pre-existing failures are this scratch
-  environment (no AI key, Meta stubbed, missing seed), the same ones
-  `docs/SYSTEM-AUDIT-2026-10-24.md` records.
-* The test run leaves no rows behind: partners, agreements and
-  `tenants.partner_id` counts all back to 0 afterwards.
+**A partner adds a client** (`POST /partner/clients`) or **a business registers
+through a partner link** (`/p/{slug}/join/{token}`) → the platform's own signup
+provisioning (`persistence.provision_tenant_from_signup`) with `partner_id` in the
+same INSERT; then the subscription (price, coupon), `client_accounts` (fee and plan,
+so `/billing` shows the real amount and limits follow the package), the partner's
+trial length on `tenants.trial_ends_at`, and a branded invitation or branded
+sign-in code.
 
-**Not verified, and cannot be from a sandbox:** production. Nothing was
-deployed, no production migration was run, the live server was never reached
-(this environment's network policy denies `api.techdeva.net`). Also untested:
-`psycopg` is pinned at `3.2.1` in `app/requirements.txt` and that build is
-unavailable for this Python, so `3.2.2` was used locally.
+**A client pays** — recorded in `client_payments` exactly as for direct clients
+(founder confirms the payment claim). The scheduler splits it into `partner_ledger`.
 
-## Deploy (server Claude)
+## Money rules
 
-1. `git status` must be clean. Back up the database.
-2. Apply **`db/87_partners.sql`** — it is additive and prints `verify ok`.
-   It refuses to finish if any existing business already carries a `partner_id`
-   or if `tenant_self` has been removed.
-3. Rebuild **api only**: `docker compose build api && docker compose up -d api`.
-   The worker is untouched by this change.
-4. Check:
-   * `/health` returns 200;
-   * `GET /techdeva/partners` as the founder returns `{"partners": []}`;
-   * the clinic's lead count is unchanged, its dashboard opens, Hermes containers
-     are still running, Instant Grill is untouched;
-   * `SELECT count(*) FROM tenants WHERE partner_id IS NOT NULL` is **0** —
-     no existing business was handed to anybody.
-5. `pytest tests` on the server, and compare the numbers against the run before
-   the deploy. The difference must be +11 passes and nothing else.
+- The split is the partner's terms **in force on the payment date**, frozen into the
+  row. A renegotiation is a new `partner_revenue_terms` row; history never moves.
+- `min_techdeva_amount` (+ currency): TechDeva never takes less from one payment, so a
+  deep partner discount cannot make a client cost TechDeva money. In another currency
+  it is not converted — the row is held for review.
+- `fee_bearer`: `shared` (fee comes off before the split), `partner`, or `techdeva`.
+- `partner_amount + techdeva_amount = net`, to the cent, enforced by a constraint.
+- Refunds and chargebacks (`POST /techdeva/partner-ledger/{id}/reverse`) are new
+  negative rows at the original payment's terms (its real ratio if a floor applied).
+  More than was paid cannot be reversed. A chargeback fee is a cost on top.
+- Only payments made **after** a business joined the partner are split
+  (`tenants.partner_assigned_at`).
+- No terms on file, or a currency mismatch → recorded, `needs_review`, never paid out
+  until cleared (`…/clear-review` with a note).
+- Payouts: once a day, one per partner and currency, of reviewed unpaid earnings.
+  `paid` needs the transfer reference; `failed` needs a reason and releases its rows
+  into the next payout.
 
-## Next phases
+**Payouts are statements, not transfers.** Moving the money needs a payment provider
+and a TechDeva entity in a country that provider serves (see "Still open").
 
-| | |
-|---|---|
-| P2 | partner branding (colours, email identity) and custom domains |
-| P3 | wholesale invoicing: active customers × the rate in force, per month |
-| P4 | the partner dashboard screens (design system) |
-| P5 | partner-scoped support, reusing the complaints engine |
+## Who can do what (enforced in Postgres)
 
-Open commercial decisions that shape P3: which legal entity invoices the
-partner, and whether the partner collects from its own customers (recommended —
-it removes payment facilitation entirely) or TechDeva collects and pays out.
+| | partner owner | partner staff | business owner | founder |
+|---|---|---|---|---|
+| own clients' list, subscriptions, ledger, payouts | read | read | — | all |
+| a client's leads, chats, bookings, integrations | **no** | **no** | own only | all |
+| terms, ledger, payouts, domain status | read | read | — | write |
+| branding, price books, coupons, sign-up links | write | read | — | write |
+| create a client | yes | yes | — | yes |
+| another partner's anything | **no** | **no** | **no** | all |
+
+A business owner sees its own subscription row and nothing about its agency.
+
+## Screens
+
+- `/partner` — the partner console (TechDeva-branded: the partner is TechDeva's
+  customer): overview, clients, packages and coupons, sign-up links, brand and
+  website, money.
+- `/p/{slug}` — the partner's website, sign-up and welcome pages. One template for
+  every partner; nothing on it, in its data or in its emails names TechDeva.
+
+## Evidence (scratch Postgres 16, `techdeva_app` without BYPASSRLS, 3 Nov 2026)
+
+- Migrations `00`→`88` apply clean from empty; `db/88` twice is harmless.
+- `tests/test_partner_network.py` 20 + `tests/test_partners.py` 11 = **31 passed**.
+- Full suite **185 passed**, 26 failed, 35 errors; the same failures and errors exist
+  on `22c70ef` without this work (no AI key, Meta stubbed on scratch). No new failure.
+- Browser (Chromium, axe-core 4.10 WCAG 2.2 AA): partner site 20 checks and partner
+  console 28 checks at 1440/390 px, dark and light — no violations, no sideways
+  scroll, 44 px targets, no "TechDeva" on the partner site. Self-registration run end
+  to end in the browser.
+- Defects found by these checks and fixed before commit: chargeback fee sign; a
+  self-registered client who could never sign in; a page helper that would have
+  crash-looped the API at import; `hidden` losing to `.td-btn` (a "Sign out" shown
+  while signed out); "wrong password" shown as "sign in again".
+
+## Still open
+
+| | Why | Who |
+|---|---|---|
+| Real money movement (gateway, automatic transfers) | needs a TechDeva entity a provider serves and a provider choice | Faheem |
+| Partner custom domains: TLS + routing | verification is built; Traefik routing per domain is host work (like `ops/setup/sync_subdomains.sh`) | server |
+| Branded business dashboard and login | a partner's client still signs in at `/dashboard`, which is TechDeva-branded | next phase |
+| Branded email sending domain | mail shows the partner's name, but the address is `MAIL_FROM` until the partner's domain has SPF/DKIM | per partner |
+| Meta consent screen says TechDeva | Meta shows the app owner; per-partner apps need their own review | decision |
+| Partner-scoped support | reuse the complaints engine with `partner_id` | next phase |
+| Partner acquisition CRM | use TechDeva's own CRM as a tenant — no second CRM | next phase |
+| `/assets/td.css` contains `.page-techdeva` selectors | one shared stylesheet; visible only to someone reading the CSS | low |

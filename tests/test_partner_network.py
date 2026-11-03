@@ -444,3 +444,17 @@ def test_the_network_overview_adds_up_per_currency(net, founder, client):
         assert Decimal(m["partner_earned"]) + Decimal(m["techdeva_earned"]) == nets[m["currency"]]
     assert d["partner_clients"] >= 1
     assert client.get("/techdeva/partner-network", headers=net["a"]["h"]).status_code in (401, 403)
+
+
+# ============================================================ PAGES AND SIGN-OUT
+def test_pages_are_served_and_sign_out_ends_the_login(net, client):
+    assert client.get("/partner").status_code == 200
+    assert client.get("/partner/welcome").status_code == 200
+    r = client.get("/p/%s-a" % TAG)
+    assert r.status_code == 200 and "techdeva" not in r.text.lower()       # the template itself, too
+    login = client.post("/partner/login", json={"email": "%s-a@agency.test" % TAG, "password": PW})
+    assert login.status_code == 200
+    h = _h(login.json()["token"])
+    assert client.get("/partner/dashboard", headers=h).status_code == 200
+    assert client.post("/partner/logout", headers=h).status_code == 200
+    assert client.get("/partner/dashboard", headers=h).status_code == 401  # refused on the server, not just forgotten

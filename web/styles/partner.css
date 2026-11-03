@@ -1,0 +1,31 @@
+/* /partner -- the partner's own console (an agency reselling TechDeva).
+   Classes below are rendered by the page's JavaScript; the rest is utilities. */
+.page-partner {
+  & label { @apply mb-1.5 block text-sm font-medium text-fg; }
+  & input:not([type=file]), & select, & textarea {
+    @apply w-full rounded-[var(--input-radius)] border border-[var(--input-border)] bg-[var(--input-bg)] px-3.5 text-[15px] text-fg transition-[border-color,box-shadow] placeholder:text-fg-subtle hover:border-accent-line focus:border-[var(--ring)] focus:[box-shadow:0_0_0_3px_var(--accent-tint)] focus:outline-none;
+  }
+  & input:not([type=file]), & select { @apply h-[var(--input-h)]; }
+  & textarea { @apply min-h-28 py-3; }
+  & input[type=file] { @apply block min-h-11 w-full py-2 text-sm text-fg-muted; }
+  & .field { @apply mb-4; }
+  & .row { @apply grid gap-x-4 sm:grid-cols-2; }
+  & .hint { @apply mt-1.5 text-xs text-fg-subtle; }
+  & .msg { @apply mb-4 hidden rounded-[var(--p-radius-md)] p-4 text-sm break-words; }
+  & .msg.err { @apply block border border-warning/40 bg-warning-tint text-warning; }
+  & .msg.ok { @apply block border border-success/30 bg-success-tint text-success; }
+
+  /* section switcher (rendered by JS) */
+  & .tab { @apply inline-flex min-h-11 w-full cursor-pointer items-center justify-center rounded-[var(--btn-radius)] border border-line bg-surface px-3 text-sm font-medium text-fg-muted hover:bg-surface-2 hover:text-fg focus-visible:[box-shadow:var(--focus-ring)] focus-visible:outline-none; }
+  & .tab[aria-current=page] { @apply border-accent-line bg-accent-tint text-accent-ink; }
+  & #panel:focus { @apply outline-none; }
+
+  /* tables become stacked rows on phones (rendered by JS) */
+  & .td-table .num { @apply text-right tabular-nums; }
+  @media (max-width: 639px) {
+    & .td-table thead { @apply sr-only; }
+    & .td-table tr { @apply block border-b border-line py-2; }
+    & .td-table td { @apply flex h-auto min-h-9 items-center justify-between gap-4 border-0 py-1 text-right; }
+    & .td-table td::before { content: attr(data-label); @apply text-left text-xs text-fg-subtle uppercase; }
+  }
+}

@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loading…</title>
+<meta name="robots" content="index,follow">
+<link rel="icon" href="data:,">
+<!-- @td-theme:start -->
+<script>
+/* Theme + brand colour, for pages served by FastAPI (web/*.html). Kept free of
+   any product name: it is inlined into white-label partner pages too.
+   sync.py inlines this into each page's <head>, so the saved theme applies
+   before the first paint. Next.js has its own copy of the theme part
+   (the Next.js portal's components/ui/theme.ts); both use the "td-theme" key.
+
+   TD.toggleHTML()  markup for the light/dark switch, for script-rendered
+                    headers. In static markup, <span data-td-theme-slot></span>
+                    is replaced with it. Any [data-td-theme-toggle] works,
+                    even if rendered later.
+   TD.brand(hex)    a business's own accent colour. Works out readable text
+                    on it and a readable text shade of it for the current
+                    theme, so a light brand colour never gives white-on-white
+                    buttons and a dark one never vanishes on the dark canvas. */
+(function () {
+  var KEY = "td-theme", doc = document.documentElement, brandHex = null;
+
+  function theme() { return doc.dataset.theme === "light" ? "light" : "dark"; }
+
+  function rgb(hex) {
+    var h = hex.replace("#", "");
+    if (h.length === 3 || h.length === 4) h = h.replace(/./g, "$&$&");
+    return [0, 2, 4].map(function (i) { return parseInt(h.substr(i, 2), 16); });
+  }
+  function lum(c) {
+    var v = c.map(function (x) { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); });
+    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+  }
+  function contrast(a, b) { var x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  function mix(c, to, t) { return c.map(function (x, i) { return Math.round(x + (to[i] - x) * t); }); }
+  function hex(c) { return "#" + c.map(function (x) { return ("0" + x.toString(16)).slice(-2); }).join(""); }
+
+  function applyBrand() {
+    var props = ["--accent", "--accent-hover", "--accent-ink", "--accent-tint", "--accent-line", "--fg-on-accent", "--ring"];
+    if (!brandHex) { props.forEach(function (p) { doc.style.removeProperty(p); }); return; }
+    var c = rgb(brandHex), white = [255, 255, 255], black = [0, 0, 0];
+    var light = theme() === "light";
+    var bg = light ? white : [10, 10, 15];
+    // text on the accent fill: whichever of white or near-black reads better
+    var on = contrast(c, white) >= contrast(c, [20, 16, 5]) ? white : [20, 16, 5];
+    // the accent as text on the page: step it toward white (dark theme) or
+    // black (light theme) until it reaches 4.5:1
+    var ink = c, t = 0;
+    while (contrast(ink, bg) < 4.5 && t < 1) { t += 0.05; ink = mix(c, light ? black : white, t); }
+    var s = doc.style;
+    s.setProperty("--accent", hex(c));
+    s.setProperty("--accent-hover", hex(mix(c, on === white ? black : white, 0.12)));
+    s.setProperty("--fg-on-accent", hex(on));
+    s.setProperty("--accent-ink", hex(ink));
+    s.setProperty("--ring", hex(ink));
+    s.setProperty("--accent-tint", "rgb(" + c.join(" ") + " / " + (light ? 0.1 : 0.16) + ")");
+    s.setProperty("--accent-line", "rgb(" + c.join(" ") + " / 0.4)");
+  }
+
+  function sync() {
+    var light = theme() === "light";
+    var btns = document.querySelectorAll("[data-td-theme-toggle]");
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].setAttribute("aria-label", light ? "Switch to dark theme" : "Switch to light theme");
+      btns[i].setAttribute("title", light ? "Dark theme" : "Light theme");
+    }
+    var meta = document.querySelector('meta[name="color-scheme"]');
+    if (meta) meta.content = light ? "light" : "dark";
+  }
+
+  function set(next) {
+    if (next === "light") doc.dataset.theme = "light"; else delete doc.dataset.theme;
+    try { localStorage.setItem(KEY, next); } catch (e) { /* storage blocked: lasts this page view */ }
+    applyBrand();
+    sync();
+  }
+
+  try { if (localStorage.getItem(KEY) === "light") doc.dataset.theme = "light"; } catch (e) { /* default dark */ }
+
+  var SUN = '<svg class="td-i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
+  var MOON = '<svg class="td-i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>';
+
+  window.TD = {
+    theme: theme,
+    setTheme: set,
+    brand: function (h) { brandHex = h && /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(h) ? h.slice(0, h.length === 9 ? 7 : h.length) : null; applyBrand(); },
+    toggleHTML: function (cls) {
+      var light = theme() === "light";
+      return '<button type="button" class="td-theme-btn' + (cls ? " " + cls : "") + '" data-td-theme-toggle aria-label="' +
+        (light ? "Switch to dark theme" : "Switch to light theme") + '" title="' + (light ? "Dark theme" : "Light theme") + '">' + SUN + MOON + "</button>";
+    }
+  };
+
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-td-theme-toggle]");
+    if (b) set(theme() === "light" ? "dark" : "light");
+  });
+  document.addEventListener("DOMContentLoaded", function () {
+    // static pages: <span data-td-theme-slot="extra classes"></span> becomes the switch
+    var slots = document.querySelectorAll("[data-td-theme-slot]");
+    for (var i = 0; i < slots.length; i++) slots[i].outerHTML = window.TD.toggleHTML(slots[i].getAttribute("data-td-theme-slot"));
+    sync();
+  });
+})();
+</script>
+<!-- @td-theme:end -->
+<!-- @td-fonts:start -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<!-- @td-fonts:end -->
+<!-- @td-css:start -->
+<link rel="stylesheet" href="/assets/td.css?v=fd39baa266">
+<!-- @td-css:end -->
+</head>
+<body class="td td-grain page-partner-site min-h-screen bg-bg text-fg">
+<div aria-hidden="true" class="td-ambient pointer-events-none fixed inset-x-0 top-0 h-[560px]"></div>
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="relative mx-auto max-w-5xl px-4 pt-6 pb-20 sm:px-6">
+  <header class="mb-12 flex items-center justify-between gap-4">
+    <a id="home" class="hidden min-h-11 items-center gap-3 rounded-md no-underline" href="#">
+      <span id="logo" class="hidden"></span>
+      <span id="brand" class="font-display text-[17px] font-semibold tracking-tight text-fg">&nbsp;</span>
+    </a>
+    <div class="flex items-center gap-2"><span data-td-theme-slot></span></div>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <!-- loading: reserves the hero's space so nothing jumps -->
+    <section id="v-loading" aria-busy="true" aria-live="polite">
+      <div class="td-skeleton mb-4 h-12 w-3/4 rounded-[var(--p-radius-md)]"></div>
+      <div class="td-skeleton mb-10 h-6 w-1/2 rounded-[var(--p-radius-md)]"></div>
+      <div class="grid gap-4 sm:grid-cols-3">
+        <div class="td-skeleton h-56 rounded-[var(--card-radius)]"></div>
+        <div class="td-skeleton h-56 rounded-[var(--card-radius)]"></div>
+        <div class="td-skeleton h-56 rounded-[var(--card-radius)]"></div>
+      </div>
+      <span class="sr-only">Loading…</span>
+    </section>
+
+    <!-- not found / unreachable -->
+    <section id="v-gone" class="hidden py-16 text-center" role="alert">
+      <h1 id="gone-title" class="font-display text-3xl font-semibold">This page is not available</h1>
+      <p id="gone-text" class="mx-auto mt-3 max-w-lg text-fg-muted">The address may be wrong, or the page is not published yet.</p>
+      <button id="retry" class="td-btn td-btn--secondary mt-6" type="button" hidden>Try again</button>
+    </section>
+
+    <!-- the website -->
+    <section id="v-home" class="hidden">
+      <div class="td-stagger mb-14 text-center">
+        <h1 id="headline" class="font-display text-display font-semibold" style="--i:0"></h1>
+        <p id="tagline" class="mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-fg-muted" style="--i:1"></p>
+        <a id="cta" class="td-btn td-btn--lg mt-8" href="#packages" style="--i:2" hidden>Get started</a>
+      </div>
+      <h2 id="packages" class="mb-5 font-display text-2xl font-semibold">Packages</h2>
+      <p id="no-packages" class="hidden text-fg-muted">Packages are being prepared. Contact us below for a quote.</p>
+      <div id="package-list" class="mb-16 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"></div>
+      <div id="about-wrap" class="mb-16 hidden">
+        <h2 class="mb-4 font-display text-2xl font-semibold">About us</h2>
+        <p id="about" class="max-w-[65ch] whitespace-pre-line text-[16px] leading-relaxed text-fg-muted"></p>
+      </div>
+      <div id="contact-wrap" class="td-glass td-rim hidden rounded-[var(--p-radius-xl)] p-6 sm:p-8">
+        <h2 class="mb-4 font-display text-2xl font-semibold">Talk to us</h2>
+        <ul id="contact" class="m-0 grid list-none gap-3 p-0 sm:grid-cols-3"></ul>
+      </div>
+    </section>
+
+    <!-- self-registration -->
+    <section id="v-join" class="hidden">
+      <h1 class="mb-2 font-display text-[clamp(1.5rem,3vw,1.875rem)] font-semibold">Create your account</h1>
+      <p class="mb-8 text-fg-muted">Your workspace is ready a minute after you sign up.</p>
+      <form id="join" class="td-glass td-rim rounded-[var(--p-radius-xl)] p-5 sm:p-8" novalidate>
+        <input type="text" name="website_hp" id="website_hp" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true">
+        <fieldset>
+          <legend>Your business</legend>
+          <div class="row">
+            <div class="field"><label for="business_name">Business name</label><input id="business_name" required autocomplete="organization"></div>
+            <div class="field"><label for="industry">Industry</label><input id="industry" placeholder="e.g. clinic, salon, restaurant"></div>
+          </div>
+          <div class="field"><label for="package_id">Package</label><select id="package_id"></select>
+            <p id="pkg-hint" class="hint"></p></div>
+          <div class="field"><label for="coupon_code">Coupon <span class="text-fg-subtle">(optional)</span></label><input id="coupon_code" autocapitalize="characters"></div>
+        </fieldset>
+        <fieldset>
+          <legend>You</legend>
+          <div class="row">
+            <div class="field"><label for="contact_name">Your name</label><input id="contact_name" autocomplete="name"></div>
+            <div class="field"><label for="contact_phone">Phone <span class="text-fg-subtle">(optional)</span></label><input id="contact_phone" type="tel" autocomplete="tel"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label for="contact_email">Email</label><input id="contact_email" type="email" required autocomplete="email"></div>
+            <div class="field"><label for="password">Password</label><input id="password" type="password" required minlength="10" autocomplete="new-password">
+              <p class="hint">At least 10 characters, not easy to guess.</p></div>
+          </div>
+        </fieldset>
+        <div id="join-msg" class="msg" role="alert"></div>
+        <button id="join-go" class="td-btn td-btn--lg mt-2" type="submit">Create my account</button>
+      </form>
+
+      <form id="verify" class="td-glass td-rim hidden rounded-[var(--p-radius-xl)] p-5 sm:p-8" novalidate>
+        <h2 class="mb-2 font-display text-2xl font-semibold">Check your email</h2>
+        <p id="verify-text" class="mb-6 text-fg-muted"></p>
+        <div class="field max-w-xs"><label for="code">6-digit code</label><input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}"></div>
+        <div id="verify-msg" class="msg" role="alert"></div>
+        <div class="mt-2 flex flex-wrap gap-3">
+          <button id="verify-go" class="td-btn td-btn--lg" type="submit">Confirm</button>
+          <button id="resend" class="td-btn td-btn--lg td-btn--secondary" type="button">Send a new code</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- an invited client chooses a password -->
+    <section id="v-welcome" class="hidden">
+      <h1 class="mb-2 font-display text-[clamp(1.5rem,3vw,1.875rem)] font-semibold">Welcome</h1>
+      <p class="mb-8 text-fg-muted">Choose a password for your account.</p>
+      <form id="welcome" class="td-glass td-rim max-w-lg rounded-[var(--p-radius-xl)] p-5 sm:p-8" novalidate>
+        <div class="field"><label for="w-password">New password</label><input id="w-password" type="password" required minlength="10" autocomplete="new-password">
+          <p class="hint">At least 10 characters, not easy to guess.</p></div>
+        <div id="welcome-msg" class="msg" role="alert"></div>
+        <button id="welcome-go" class="td-btn td-btn--lg mt-2" type="submit">Save my password</button>
+      </form>
+    </section>
+
+    <!-- done -->
+    <section id="v-done" class="hidden rounded-[var(--p-radius-xl)] border border-success/30 bg-surface px-6 py-12 text-center" role="status">
+      <h1 id="done-title" class="font-display text-3xl font-semibold text-success">✓ You're all set</h1>
+      <p id="done-text" class="mx-auto mt-3 max-w-lg text-[15px] text-fg-muted"></p>
+      <a class="td-btn td-btn--lg mt-6" href="/dashboard">Open my workspace</a>
+    </section>
+  </main>
+
+  <footer id="foot" class="mt-20 hidden border-t border-line pt-6 text-sm text-fg-subtle"></footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var parts = location.pathname.split("/").filter(Boolean);       // p, slug, [join, token | welcome]
+  var slug = parts[1] || "", view = parts[2] || "home", linkToken = parts[3] || "";
+  var site = null;
+  var $ = function (id) { return document.getElementById(id); };
+  var VIEWS = ["v-loading", "v-gone", "v-home", "v-join", "v-welcome", "v-done"];
+  function show(id) { VIEWS.forEach(function (v) { $(v).classList.toggle("hidden", v !== id); }); }
+  function text(el, s) { el.textContent = s == null ? "" : String(s); }
+  function money(v, cur) {
+    var n = Number(v);
+    if (!isFinite(n)) return "—";
+    try { return new Intl.NumberFormat(undefined, { style: "currency", currency: cur, maximumFractionDigits: n % 1 ? 2 : 0 }).format(n); }
+    catch (e) { return cur + " " + n; }
+  }
+  function errText(data, status) {
+    var d = data && data.detail;
+    if (typeof d === "string" && d) return d;
+    if (Array.isArray(d) && d.length) return d.map(function (x) { return x && x.msg ? x.msg : String(x); }).join(". ");
+    return "Something went wrong (" + status + "). Nothing was changed. Please try again.";
+  }
+  function say(id, msg, kind) { var el = $(id); el.className = "msg " + (kind || "err"); text(el, msg); }
+  async function post(url, body) {
+    var r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok) throw new Error(errText(data, r.status));
+    return data;
+  }
+
+  function renderPackages() {
+    var list = $("package-list"), sel = $("package-id") || $("package_id");
+    list.replaceChildren(); sel.replaceChildren();
+    if (!site.packages.length) { $("no-packages").classList.remove("hidden"); return; }
+    site.packages.forEach(function (p) {
+      var per = p.billing_interval === "year" ? "/ year" : "/ month";
+      var card = document.createElement("article");
+      card.className = "pkg";
+      var h = document.createElement("h3"); text(h, p.name);
+      var price = document.createElement("p"); price.className = "price";
+      var amt = document.createElement("span"); amt.className = "amt"; text(amt, money(p.price, p.currency));
+      var unit = document.createElement("span"); unit.className = "per"; text(unit, " " + per);
+      price.append(amt, unit);
+      var ul = document.createElement("ul");
+      [p.max_numbers + (p.max_numbers === 1 ? " WhatsApp number" : " WhatsApp numbers"),
+       Number(p.max_conversations).toLocaleString() + " AI conversations a month",
+       p.trial_days ? p.trial_days + "-day free trial" : null].forEach(function (f) {
+        if (!f) return; var li = document.createElement("li"); text(li, f); ul.append(li);
+      });
+      card.append(h, price, ul);
+      if (site.join_token) {
+        var a = document.createElement("a"); a.className = "td-btn td-btn--secondary w-full";
+        a.href = "/p/" + encodeURIComponent(slug) + "/join/" + encodeURIComponent(site.join_token) + "?package=" + encodeURIComponent(p.id);
+        text(a, "Choose " + p.name); card.append(a);
+      }
+      list.append(card);
+      var o = new Option(p.name + " — " + money(p.price, p.currency) + " " + per + (p.trial_days ? " · " + p.trial_days + " days free" : ""), p.id);
+      sel.append(o);
+    });
+    var want = new URLSearchParams(location.search).get("package");
+    if (want) sel.value = want;
+  }
+
+  function renderBrand() {
+    document.title = site.brand_name + (view === "join" ? " — Create your account" : view === "welcome" ? " — Welcome" : "");
+    text($("brand"), site.brand_name);
+    $("home").href = "/p/" + encodeURIComponent(slug);
+    $("home").classList.remove("hidden"); $("home").classList.add("flex");
+    if (site.has_logo) {
+      var img = document.createElement("img");
+      img.src = "/p/" + encodeURIComponent(slug) + "/logo"; img.alt = ""; img.width = 40; img.height = 40;
+      img.className = "block h-10 w-10 rounded-full object-cover ring-1 ring-line-strong";
+      $("logo").replaceChildren(img); $("logo").classList.remove("hidden");
+      var ic = document.querySelector("link[rel=icon]"); if (ic) ic.href = img.src;
+    }
+    if (site.primary_color && window.TD && TD.brand) TD.brand(site.primary_color);   // readable in both themes
+    text($("headline"), site.headline || site.brand_name);
+    text($("tagline"), site.tagline || "");
+    if (site.about) { text($("about"), site.about); $("about-wrap").classList.remove("hidden"); }
+    var c = $("contact"); c.replaceChildren();
+    [["Email", site.support_email, "mailto:"], ["Phone", site.support_phone, "tel:"],
+     ["WhatsApp", site.support_whatsapp, "https://wa.me/"]].forEach(function (x) {
+      if (!x[1]) return;
+      var li = document.createElement("li"); var lab = document.createElement("span"); lab.className = "lab"; text(lab, x[0]);
+      var a = document.createElement("a"); a.className = "contact-link";
+      a.href = x[2] + (x[0] === "WhatsApp" ? x[1].replace(/[^0-9]/g, "") : x[1]); text(a, x[1]);
+      li.append(lab, a); c.append(li);
+    });
+    if (c.children.length) $("contact-wrap").classList.remove("hidden");
+    if (site.join_token) { $("cta").hidden = false; }
+    text($("foot"), "© " + new Date().getFullYear() + " " + site.brand_name);
+    $("foot").classList.remove("hidden");
+    renderPackages();
+  }
+
+  async function load() {
+    show("v-loading");
+    try {
+      var r = await fetch("/public/partner-site/" + encodeURIComponent(slug));
+      if (r.status === 404) { show("v-gone"); return; }
+      if (!r.ok) throw new Error("status " + r.status);
+      site = await r.json();
+    } catch (e) {
+      text($("gone-title"), "We couldn't reach the server");
+      text($("gone-text"), "Check your connection and try again. Nothing was changed.");
+      $("retry").hidden = false; show("v-gone"); return;
+    }
+    renderBrand();
+    if (view === "join") {
+      try {
+        var lr = await fetch("/public/partner-site/" + encodeURIComponent(slug) + "/link/" + encodeURIComponent(linkToken));
+        if (!lr.ok) {
+          text($("gone-title"), "This sign-up link has expired");
+          text($("gone-text"), "Ask " + site.brand_name + " for a new link." + (site.support_email ? " Write to " + site.support_email + "." : ""));
+          show("v-gone"); return;
+        }
+        var ld = await lr.json();
+        if (ld.package_id) { $("package_id").value = ld.package_id; $("package_id").disabled = true; }
+      } catch (e) { /* the join itself re-checks the link */ }
+      show("v-join"); $("business_name").focus();
+    } else if (view === "welcome") {
+      show("v-welcome"); $("w-password").focus();
+    } else {
+      show("v-home");
+    }
+  }
+  $("retry").addEventListener("click", load);
+  $("cta").addEventListener("click", function (e) {
+    e.preventDefault(); $("packages").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  });
+
+  function goodPassword(pw) { return pw.length >= 10 && new Set(pw).size >= 5; }
+  var joinedEmail = "";
+
+  $("join").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var pw = $("password").value, email = $("contact_email").value.trim();
+    if (!$("business_name").value.trim()) { say("join-msg", "Please give your business name."); $("business_name").focus(); return; }
+    if (!/^\S+@\S+\.\S+$/.test(email)) { say("join-msg", "That email address does not look right."); $("contact_email").focus(); return; }
+    if (!goodPassword(pw)) { say("join-msg", "Your password needs at least 10 characters and should not be easy to guess."); $("password").focus(); return; }
+    var btn = $("join-go"); btn.disabled = true; text(btn, "Creating your account…"); $("join-msg").className = "msg";
+    try {
+      var d = await post("/public/partner-site/" + encodeURIComponent(slug) + "/join/" + encodeURIComponent(linkToken), {
+        business_name: $("business_name").value.trim(), industry: $("industry").value.trim(),
+        contact_name: $("contact_name").value.trim(), contact_phone: $("contact_phone").value.trim(),
+        contact_email: email, password: pw, package_id: $("package_id").value || null,
+        coupon_code: $("coupon_code").value.trim() || null, website_hp: $("website_hp").value
+      });
+      joinedEmail = email;
+      $("join").classList.add("hidden"); $("verify").classList.remove("hidden");
+      text($("verify-text"), d.email_sent ? "We sent a 6-digit code to " + email + ". Enter it to finish."
+        : "Your account is created. We couldn't send the code just now — press “Send a new code” in a minute.");
+      $("code").focus();
+    } catch (err) {
+      say("join-msg", err.message);
+    } finally { btn.disabled = false; text(btn, "Create my account"); }
+  });
+
+  $("verify").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var code = $("code").value.trim();
+    if (!/^[0-9]{6}$/.test(code)) { say("verify-msg", "The code is 6 digits."); $("code").focus(); return; }
+    var btn = $("verify-go"); btn.disabled = true;
+    try {
+      await post("/auth/verify-email", { email: joinedEmail, code: code });
+      text($("done-text"), "Your " + site.brand_name + " workspace is ready. Sign in with " + joinedEmail + ".");
+      show("v-done");
+    } catch (err) { say("verify-msg", "That code is not right or has expired. Check it, or send a new one."); }
+    finally { btn.disabled = false; }
+  });
+
+  $("resend").addEventListener("click", async function () {
+    var btn = $("resend"); btn.disabled = true;
+    try {
+      await post("/public/partner-site/" + encodeURIComponent(slug) + "/resend-code", { email: joinedEmail });
+      say("verify-msg", "If your account is waiting for a code, a new one is on its way.", "ok");
+    } catch (err) { say("verify-msg", err.message); }
+    setTimeout(function () { btn.disabled = false; }, 30000);
+  });
+
+  $("welcome").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var pw = $("w-password").value, token = new URLSearchParams(location.search).get("token") || "";
+    if (!goodPassword(pw)) { say("welcome-msg", "Your password needs at least 10 characters and should not be easy to guess."); $("w-password").focus(); return; }
+    var btn = $("welcome-go"); btn.disabled = true;
+    try {
+      await post("/public/partner-site/" + encodeURIComponent(slug) + "/welcome", { token: token, password: pw });
+      text($("done-text"), "Your password is saved. You can sign in now.");
+      show("v-done");
+    } catch (err) { say("welcome-msg", err.message); }
+    finally { btn.disabled = false; }
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

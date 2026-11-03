@@ -60,6 +60,9 @@ def make_partner_site_router(P, page) -> APIRouter:
     for path in ("/p/{slug}", "/p/{slug}/join/{token}", "/p/{slug}/welcome"):
         router.add_api_route(path, lambda: page("partner_site.html"), methods=["GET"],
                              include_in_schema=False)
+    # the partner's own console (the agency is TechDeva's customer: this one is TechDeva's)
+    for path in ("/partner", "/partner/welcome"):
+        router.add_api_route(path, lambda: page("partner.html"), methods=["GET"], include_in_schema=False)
 
     @router.get("/p/{slug}/logo", include_in_schema=False)
     def logo(slug: str):
@@ -88,6 +91,13 @@ def make_partner_site_router(P, page) -> APIRouter:
         out = {k: s[k] for k in ("slug", "headline", "tagline", "about", "primary_color", "accent_color",
                                  "support_email", "support_phone", "support_whatsapp", "has_logo")}
         out["brand_name"] = s["brand_name"] or s["name"]
+        with tenant_session(None, "techdeva_admin") as cur:      # the link the site's "Get started" uses
+            cur.execute("""SELECT token FROM partner_signup_links WHERE partner_id = %s AND active
+                              AND price_book_id IS NULL AND (expires_at IS NULL OR expires_at > now())
+                              AND (max_uses IS NULL OR uses < max_uses)
+                            ORDER BY created_at LIMIT 1""", (s["id"],))
+            ln = cur.fetchone()
+        out["join_token"] = ln["token"] if ln else None
         out["packages"] = [{**{k: str(v) if k in ("id", "price") else v for k, v in b.items()}} for b in books]
         return out
 
