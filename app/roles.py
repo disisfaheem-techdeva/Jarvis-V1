@@ -81,7 +81,7 @@ PRESETS = {
 SECTION_BY_PATH = [
     # dashboard: overview (Reports sit under Business, 24 Oct 2026)
     ("/portal/summary", "dashboard"), ("/portal/report", "business"), ("/report", "business"), ("/incidents", "dashboard"),
-    ("/attribution", "marketing"), ("/summary", "dashboard"), ("/dashboard", "dashboard"),
+    ("/attribution", "marketing"), ("/summary", "dashboard"), ("/dashboard", "dashboard"), ("/support", "dashboard"),
     # Jarvis and the AI team
     ("/console", "jarvis"), ("/client/request", "jarvis"), ("/speak", "jarvis"), ("/tasks", "jarvis"), ("/portal/deliverables", "jarvis"),
     ("/policies", "admin"), ("/brain", "jarvis"), ("/orchestrator", "jarvis"), ("/ai", "jarvis"), ("/work", "jarvis"),

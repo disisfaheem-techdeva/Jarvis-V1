@@ -87,6 +87,9 @@ from .console import _identity as _console_identity
 app.include_router(make_jarvis_memory_router(_console_identity))
 from .dashboard import make_dashboard_router
 app.include_router(make_dashboard_router(_console_identity))
+from .support_routes import make_support_router, make_founder_support_router
+app.include_router(make_support_router(_console_identity))
+app.include_router(make_founder_support_router())
 from .website_agent import make_business_profile_router
 from .crm import make_crm_router
 app.include_router(make_crm_router(_console_identity))

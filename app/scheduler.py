@@ -102,6 +102,14 @@ class Scheduler:
         except Exception as e:
             print(f"[scheduler] reply checker skipped: {e}", flush=True)
 
+        # Support agent: audits the platform and every live business, fixes on its
+        # own only what reaches nobody, leaves the rest for one click. Every 15 minutes.
+        try:
+            from .support_agent import run_due as support_due
+            emitted += support_due()
+        except Exception as e:
+            print(f"[scheduler] support agent skipped: {e}", flush=True)
+
         # Jarvis reads each business's own Facebook page and website into a setup
         # preview the owner confirms; again only when those sources change.
         try:
