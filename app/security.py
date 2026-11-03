@@ -40,9 +40,9 @@ _SENDS: dict = {}
 
 
 def client_ip(request) -> str:
-    """The visitor's address: Traefik appends it as the last X-Forwarded-For entry."""
-    fwd = [p.strip() for p in (request.headers.get("x-forwarded-for") or "").split(",") if p.strip()]
-    return (fwd[-1] if fwd else (request.client.host if request.client else ""))[:64]
+    """The visitor's address, behind Traefik and Cloudflare (app/client_ip.py)."""
+    from .client_ip import client_ip as real
+    return real(request)
 
 
 def check_password(password, stored):

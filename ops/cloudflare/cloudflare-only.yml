@@ -1,0 +1,41 @@
+# Traefik middleware: only Cloudflare may reach a router that uses it (4 Nov 2026).
+#
+# Copy to /docker/traefik/dynamic/cloudflare-only.yml (Traefik picks it up by
+# itself). Defining it changes nothing; a router opts in with the label
+#     traefik.http.routers.<name>.middlewares=cloudflare-only@file
+# and only AFTER that hostname is proxied (orange cloud): a dns-only hostname
+# behind this middleware would refuse everyone.
+#
+# Per router, not for the whole server: instantgrill.shop and the
+# *.hstgr.cloud dashboards share this Traefik and are not on Cloudflare.
+# Let's Encrypt renewals are not affected (the ACME challenge router is Traefik's own).
+# Ranges: https://www.cloudflare.com/ips (checked 4 Nov 2026); keep in step with
+# CLOUDFLARE_DEFAULT in app/client_ip.py.
+http:
+  middlewares:
+    cloudflare-only:
+      ipAllowList:
+        sourceRange:
+          - 173.245.48.0/20
+          - 103.21.244.0/22
+          - 103.22.200.0/22
+          - 103.31.4.0/22
+          - 141.101.64.0/18
+          - 108.162.192.0/18
+          - 190.93.240.0/20
+          - 188.114.96.0/20
+          - 197.234.240.0/22
+          - 198.41.128.0/17
+          - 162.158.0.0/15
+          - 104.16.0.0/13
+          - 104.24.0.0/14
+          - 172.64.0.0/13
+          - 131.0.72.0/22
+          - 2400:cb00::/32
+          - 2606:4700::/32
+          - 2803:f800::/32
+          - 2405:b500::/32
+          - 2405:8100::/32
+          - 2a06:98c0::/29
+          - 2c0f:f248::/32
+          - 127.0.0.1/32       # the server's own health checks

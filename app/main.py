@@ -597,12 +597,10 @@ def _client_ip(request: Request) -> str:
     own proxy wrote. Taking the leftmost would let anyone bypass this limiter by
     sending a different fake header each time.
     """
-    fwd = request.headers.get("x-forwarded-for", "")
-    if fwd:
-        parts = [p.strip() for p in fwd.split(",") if p.strip()]
-        if parts:
-            return parts[-1]
-    return request.client.host if request.client else "unknown"
+    # behind Cloudflare the rightmost entry is a Cloudflare edge: app/client_ip.py
+    # then takes CF-Connecting-IP, and only from a real Cloudflare address
+    from .client_ip import client_ip
+    return client_ip(request) or "unknown"
 
 
 class SignupIn(BaseModel):

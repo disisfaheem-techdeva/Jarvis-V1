@@ -44,8 +44,9 @@ def _rate_ok(key, limit, window=3600):
 
 
 def _ip(request):
-    fwd = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
-    return fwd[-1] if fwd else (request.client.host if request.client else "?")
+    """The visitor's address, behind Traefik and Cloudflare (app/client_ip.py)."""
+    from .client_ip import client_ip
+    return client_ip(request) or "?"
 
 
 def mail_configured():
