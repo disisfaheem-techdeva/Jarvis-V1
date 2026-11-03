@@ -115,11 +115,21 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=fc28c5a27d">
+<link rel="stylesheet" href="/assets/td.css?v=a6d9443902">
 <!-- @td-css:end -->
 </head>
 <body class="td page-pos bg-bg text-fg">
 <a class="td-sr-only" href="#search">Skip to products</a>
+
+<!-- the customer-facing screen (/pos?display=1 on a second monitor or tablet) -->
+<section id="display" class="cust" hidden aria-live="polite">
+  <div class="cust-biz font-display" id="custBiz"></div>
+  <ul class="cust-lines" id="custLines"></ul>
+  <div class="cust-total"><span>Total</span><span class="td-num" id="custTotal">Rs 0</span></div>
+  <div class="cust-msg" id="custMsg">Welcome</div>
+</section>
+
+<div id="till">
 <header class="bar">
   <div class="flex min-w-0 items-center gap-3">
     <a href="/dashboard" class="td-btn td-btn--ghost td-btn--sm" aria-label="Back to dashboard">←</a>
@@ -128,16 +138,23 @@
       <div class="truncate text-xs text-fg-muted" id="day" role="status"></div>
     </div>
   </div>
-  <div class="flex items-center gap-2">
-    <button type="button" class="td-btn td-btn--secondary td-btn--sm" id="openBtn" aria-haspopup="dialog">Open bills <span class="td-badge" id="openCount">0</span></button>
+  <div class="flex flex-wrap items-center justify-end gap-2">
+    <button type="button" class="chip" id="shiftBtn" aria-haspopup="dialog">Shift</button>
+    <button type="button" class="td-btn td-btn--secondary td-btn--sm" id="openBtn" aria-haspopup="dialog" title="Open bills (F8)">Open bills <span class="td-badge" id="openCount">0</span></button>
+    <button type="button" class="td-btn td-btn--secondary td-btn--sm" id="billsBtn" aria-haspopup="dialog">Bills</button>
+    <button type="button" class="td-btn td-btn--ghost td-btn--sm" id="setupBtn" aria-haspopup="dialog" aria-label="Till setup">⚙</button>
     <span data-td-theme-slot></span>
   </div>
 </header>
+<div class="banner" id="banner" role="alert" hidden></div>
 
 <main id="main">
   <section class="shelf" aria-label="Products">
-    <label for="search" class="td-sr-only">Search or scan a product</label>
-    <input id="search" class="td-input w-full" type="search" autocomplete="off" placeholder="Search, or scan a barcode / SKU and press Enter">
+    <div class="flex gap-2">
+      <label for="search" class="td-sr-only">Search or scan a product</label>
+      <input id="search" class="td-input w-full" type="search" autocomplete="off" placeholder="Search, or scan a barcode (F2)">
+      <button type="button" class="td-btn td-btn--secondary" id="camBtn" aria-label="Scan with the camera">📷</button>
+    </div>
     <div class="cats" id="cats" role="toolbar" aria-label="Categories"></div>
     <div id="grid" class="grid-items" aria-live="polite"><div class="state">Loading your products…</div></div>
   </section>
@@ -145,7 +162,10 @@
   <aside class="bill" aria-label="Current bill">
     <div class="bill-head">
       <h2 class="m-0 font-display text-base font-semibold" id="billTitle">New sale</h2>
-      <button type="button" class="td-btn td-btn--ghost td-btn--sm" id="clearBtn">Clear</button>
+      <div class="flex gap-1">
+        <button type="button" class="td-btn td-btn--ghost td-btn--sm" id="cancelBillBtn" hidden>Cancel bill</button>
+        <button type="button" class="td-btn td-btn--ghost td-btn--sm" id="clearBtn">Clear</button>
+      </div>
     </div>
     <div class="modes" role="radiogroup" aria-label="Sale type" id="modes">
       <button type="button" role="radio" data-mode="counter" aria-checked="true">Counter</button>
@@ -154,25 +174,28 @@
     </div>
     <div class="grid grid-cols-2 gap-2">
       <div class="td-field" id="tableField" hidden><label class="td-label" for="table">Table</label><input id="table" class="td-input" maxlength="40" placeholder="T4"></div>
-      <div class="td-field"><label class="td-label" for="cname">Customer (optional)</label><input id="cname" class="td-input" maxlength="120"></div>
-      <div class="td-field"><label class="td-label" for="cphone">Phone (optional)</label><input id="cphone" class="td-input" inputmode="tel" maxlength="40"></div>
+      <div class="td-field"><label class="td-label" for="cname">Customer</label><input id="cname" class="td-input" maxlength="120" placeholder="Optional"></div>
+      <div class="td-field"><label class="td-label" for="cphone">Phone</label><input id="cphone" class="td-input" inputmode="tel" maxlength="40" placeholder="Optional"></div>
     </div>
     <ul class="lines" id="lines" aria-live="polite"></ul>
     <div class="totals">
       <div class="row"><span>Subtotal</span><span class="td-num" id="sub">Rs 0</span></div>
-      <div class="row" id="discRow" hidden><label for="disc">Discount</label><input id="disc" class="td-input disc td-num" inputmode="decimal" value="0"></div>
+      <div class="row"><button type="button" class="linkbtn" id="discBtn">Discount</button><span class="td-num" id="discShow">—</span></div>
+      <div class="row" id="taxRow" hidden><span id="taxLabel">Tax</span><span class="td-num" id="taxShow"></span></div>
       <div class="row grand"><span>Total</span><span class="td-num" id="total">Rs 0</span></div>
     </div>
     <div class="msg" id="msg" role="alert"></div>
     <div class="actions">
-      <button type="button" class="td-btn td-btn--secondary td-btn--lg" id="holdBtn">Keep open</button>
-      <button type="button" class="td-btn td-btn--lg" id="payBtn">Pay</button>
+      <button type="button" class="td-btn td-btn--secondary td-btn--lg" id="holdBtn" title="F4">Keep open</button>
+      <button type="button" class="td-btn td-btn--lg" id="payBtn" title="F9">Pay</button>
     </div>
+    <div class="text-xs text-fg-subtle">F2 search · F4 keep open · F8 open bills · F9 pay</div>
   </aside>
 </main>
+<div class="mobilebar"><span class="td-num" id="mtotal">Rs 0</span><a class="td-btn" href="#billTitle">View bill</a></div>
+</div>
 
-<div class="mobilebar" id="mobilebar"><span class="td-num" id="mtotal">Rs 0</span><a class="td-btn" href="#billTitle">View bill</a></div>
-
+<!-- ---------------------------------------------------------- dialogs -->
 <dialog id="payDlg" aria-labelledby="payTitle">
   <form method="dialog" class="dlg" id="payForm">
     <h2 id="payTitle" class="m-0 font-display text-xl font-semibold">Take payment</h2>
@@ -180,11 +203,39 @@
     <div id="pays"></div>
     <button type="button" class="td-btn td-btn--ghost td-btn--sm self-start" id="splitBtn">+ Split the bill</button>
     <div class="quick" id="quick" aria-label="Quick cash"></div>
+    <label class="check"><input type="checkbox" id="credit"> Udhaar: the rest is owed by the customer (name and phone needed)</label>
     <div class="change" id="change" role="status"></div>
     <div class="msg" id="payMsg" role="alert"></div>
     <div class="actions">
-      <button type="button" class="td-btn td-btn--secondary td-btn--lg" id="payCancel">Back</button>
+      <button type="button" class="td-btn td-btn--secondary td-btn--lg" data-close>Back</button>
       <button type="submit" class="td-btn td-btn--approve td-btn--lg" id="payGo">Done</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="pinDlg" aria-labelledby="pinTitle">
+  <form method="dialog" class="dlg" id="pinForm">
+    <h2 id="pinTitle" class="m-0 font-display text-xl font-semibold">Manager approval</h2>
+    <p class="m-0 text-sm text-fg-muted" id="pinWhy"></p>
+    <label class="td-label" for="pinIn">Owner or manager PIN</label>
+    <input id="pinIn" class="td-input pinin" type="password" inputmode="numeric" maxlength="6" autocomplete="off">
+    <div class="msg" id="pinMsg" role="alert"></div>
+    <div class="actions">
+      <button type="button" class="td-btn td-btn--secondary" data-close>Cancel</button>
+      <button type="submit" class="td-btn">Approve</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="askDlg" aria-labelledby="askTitle">
+  <form method="dialog" class="dlg" id="askForm">
+    <h2 id="askTitle" class="m-0 font-display text-xl font-semibold"></h2>
+    <label class="td-label" for="askIn" id="askLabel"></label>
+    <input id="askIn" class="td-input" maxlength="300" autocomplete="off">
+    <div class="msg" id="askMsg" role="alert"></div>
+    <div class="actions">
+      <button type="button" class="td-btn td-btn--secondary" data-close>Cancel</button>
+      <button type="submit" class="td-btn" id="askGo">OK</button>
     </div>
   </form>
 </dialog>
@@ -193,305 +244,85 @@
   <div class="dlg">
     <h2 id="openTitle" class="m-0 font-display text-xl font-semibold">Open bills</h2>
     <ul class="openlist" id="openList"></ul>
-    <button type="button" class="td-btn td-btn--secondary" id="openClose">Close</button>
+    <button type="button" class="td-btn td-btn--secondary" data-close>Close</button>
+  </div>
+</dialog>
+
+<dialog id="billsDlg" class="wide" aria-labelledby="billsTitle">
+  <div class="dlg">
+    <h2 id="billsTitle" class="m-0 font-display text-xl font-semibold">Bills</h2>
+    <div class="filters">
+      <label class="td-sr-only" for="bDay">Day</label><input id="bDay" type="date" class="td-input">
+      <label class="td-sr-only" for="bQ">Search bills</label><input id="bQ" class="td-input" type="search" placeholder="Number, name, phone, table">
+      <label class="td-sr-only" for="bStatus">Status</label>
+      <select id="bStatus" class="td-input"><option value="">All</option><option value="paid">Paid</option><option value="open">Open</option><option value="udhaar">Udhaar</option><option value="cancelled">Cancelled</option></select>
+    </div>
+    <ul class="openlist" id="billList"></ul>
+    <div id="billDetail" class="detail" hidden></div>
+    <button type="button" class="td-btn td-btn--secondary" data-close>Close</button>
+  </div>
+</dialog>
+
+<dialog id="refundDlg" aria-labelledby="refundTitle">
+  <form method="dialog" class="dlg" id="refundForm">
+    <h2 id="refundTitle" class="m-0 font-display text-xl font-semibold">Refund</h2>
+    <div id="refundLines"></div>
+    <div class="grid grid-cols-2 gap-2">
+      <div class="td-field"><label class="td-label" for="rfMethod">Give back as</label>
+        <select id="rfMethod" class="td-input"><option value="cash">Cash</option><option value="card">Card</option><option value="bank">Bank</option><option value="online">Online</option><option value="other">Other</option></select></div>
+      <label class="check self-end"><input type="checkbox" id="rfRestock" checked> Put back in stock</label>
+    </div>
+    <label class="td-label" for="rfReason">Reason</label>
+    <input id="rfReason" class="td-input" maxlength="300" placeholder="e.g. damaged, wrong size">
+    <div class="msg" id="rfMsg" role="alert"></div>
+    <div class="actions">
+      <button type="button" class="td-btn td-btn--secondary" data-close>Back</button>
+      <button type="submit" class="td-btn td-btn--danger">Refund</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="shiftDlg" aria-labelledby="shiftTitle">
+  <div class="dlg">
+    <h2 id="shiftTitle" class="m-0 font-display text-xl font-semibold">Shift</h2>
+    <div id="shiftBody"></div>
+    <div class="msg" id="shiftMsg" role="alert"></div>
+  </div>
+</dialog>
+
+<dialog id="setupDlg" class="wide" aria-labelledby="setupTitle">
+  <div class="dlg">
+    <h2 id="setupTitle" class="m-0 font-display text-xl font-semibold">Till setup</h2>
+    <div class="modes" role="tablist" id="setupTabs">
+      <button type="button" role="tab" data-tab="device" aria-selected="true">This till</button>
+      <button type="button" role="tab" data-tab="business" aria-selected="false">Business</button>
+    </div>
+    <div id="setupBody"></div>
+    <div class="msg" id="setupMsg" role="alert"></div>
+  </div>
+</dialog>
+
+<dialog id="camDlg" aria-labelledby="camTitle">
+  <div class="dlg">
+    <h2 id="camTitle" class="m-0 font-display text-xl font-semibold">Scan with the camera</h2>
+    <video id="camVideo" class="cam" playsinline muted></video>
+    <div class="msg" id="camMsg" role="alert"></div>
+    <button type="button" class="td-btn td-btn--secondary" data-close>Close</button>
   </div>
 </dialog>
 
 <dialog id="rcptDlg" aria-labelledby="rcptTitle">
   <div class="dlg">
     <div class="receipt" id="receipt"></div>
-    <div class="actions noprint">
+    <div class="msg" id="rcptMsg" role="status"></div>
+    <div class="actions">
       <button type="button" class="td-btn td-btn--secondary td-btn--lg" id="printBtn">Print</button>
       <button type="button" class="td-btn td-btn--lg" id="nextBtn">New sale</button>
     </div>
   </div>
 </dialog>
 
-<script>
-(function () {
-  "use strict";
-  var $ = function (id) { return document.getElementById(id); };
-  var S = { items: [], cat: "", mode: "counter", cart: [], bill: null, canDiscount: false, methods: [], business: "" };
-
-  function esc(v) { return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
-  function rs(n) { return n == null ? "—" : "Rs " + Number(n).toLocaleString("en-PK", { maximumFractionDigits: 2 }); }
-  function ref() {
-    if (window.crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, "");
-    return Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
-  }
-  function api(method, path, body) {
-    return fetch(path, { method: method, credentials: "include", headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { return { ok: r.ok, status: r.status, data: d }; }); })
-      .catch(function () { return { ok: false, status: 0, data: { detail: "Could not reach the server. Nothing was saved. Check the internet and try again." } }; });
-  }
-  function why(r) { return (r.data && r.data.detail) || "That did not work."; }
-  function signedOut() {
-    document.querySelector("main").innerHTML = '<div class="state mx-auto max-w-md"><h1 class="font-display text-xl">Sign in to use the till</h1>' +
-      '<p class="text-fg-muted">Your login has ended.</p><a class="td-btn" href="/login">Staff login</a> <a class="td-btn td-btn--secondary" href="/dashboard">Owner login</a></div>';
-  }
-
-  // ---------------------------------------------------------------- products
-  function load() {
-    api("GET", "/pos/catalogue").then(function (r) {
-      if (r.status === 401) return signedOut();
-      if (!r.ok) { $("grid").innerHTML = '<div class="state">' + esc(why(r)) + ' <button type="button" class="td-btn td-btn--secondary td-btn--sm" id="retry">Try again</button></div>'; $("retry").onclick = load; return; }
-      S.items = r.data.items || []; S.canDiscount = !!r.data.can_discount; S.methods = r.data.methods || ["cash"];
-      S.business = r.data.business || "";
-      $("biz").textContent = S.business || "Till"; document.title = (S.business ? S.business + " · " : "") + "Till";
-      $("discRow").hidden = !S.canDiscount;
-      cats(); grid(); render();
-    });
-    refreshDay();
-  }
-  function refreshDay() {
-    api("GET", "/pos/today").then(function (r) {
-      if (!r.ok) { $("day").textContent = r.status === 0 ? "Offline: today's figures could not be loaded" : ""; return; }
-      var d = r.data, t = d.sales + " sale" + (d.sales === 1 ? "" : "s") + " today";
-      if (d.money) t += " · " + rs(d.money.collected) + " taken";
-      $("day").textContent = t;
-      $("openCount").textContent = d.open;
-      S.open = d.open_bills || [];
-    });
-  }
-  function cats() {
-    var seen = {}, list = [];
-    S.items.forEach(function (i) { var c = i.category || (i.kind === "service" ? "Services" : ""); if (c && !seen[c]) { seen[c] = 1; list.push(c); } });
-    if (!list.length) { $("cats").innerHTML = ""; return; }
-    $("cats").innerHTML = ['<button type="button" data-cat="" aria-pressed="' + (S.cat === "") + '">All</button>'].concat(list.map(function (c) {
-      return '<button type="button" data-cat="' + esc(c) + '" aria-pressed="' + (S.cat === c) + '">' + esc(c) + "</button>";
-    })).join("");
-  }
-  function shown() {
-    var q = $("search").value.trim().toLowerCase();
-    return S.items.filter(function (i) {
-      var c = i.category || (i.kind === "service" ? "Services" : "");
-      if (S.cat && c !== S.cat) return false;
-      return !q || i.name.toLowerCase().indexOf(q) >= 0 || (i.sku && i.sku.toLowerCase() === q);
-    });
-  }
-  function grid() {
-    if (!S.items.length) { $("grid").innerHTML = '<div class="state">Nothing to sell yet. Add your products and prices on the dashboard (Business › Products). <a class="td-btn td-btn--secondary td-btn--sm" href="/dashboard">Open dashboard</a></div>'; return; }
-    var list = shown();
-    if (!list.length) { $("grid").innerHTML = '<div class="state">No product matches “' + esc($("search").value) + '”.</div>'; return; }
-    $("grid").innerHTML = list.map(function (i) {
-      var stock = i.on_hand == null ? "" : '<span class="stock' + (i.on_hand <= 0 ? " out" : "") + '">' + (i.on_hand <= 0 ? "Out of stock" : i.on_hand + " left") + "</span>";
-      var off = i.price == null;
-      return '<button type="button" class="item" data-id="' + esc(i.id) + '"' + (off ? ' aria-disabled="true" title="No price set"' : "") + ">" +
-        '<span class="name">' + esc(i.name) + '</span><span class="price td-num">' + (off ? "No price" : rs(i.price)) + "</span>" + stock + "</button>";
-    }).join("");
-  }
-  function add(id) {
-    var it = S.items.find(function (i) { return i.id === id; });
-    if (!it) return;
-    if (it.price == null) { say("Set a price for " + it.name + " on the dashboard first."); return; }
-    var line = S.cart.find(function (l) { return l.id === id; });
-    if (line) line.qty += 1; else S.cart.push({ id: id, name: it.name, price: it.price, kind: it.kind, qty: 1 });
-    say(""); render();
-  }
-
-  // ---------------------------------------------------------------- bill
-  function subtotal() {
-    var base = S.bill ? S.bill.subtotal : 0;
-    return Math.round((base + S.cart.reduce(function (s, l) { return s + l.qty * l.price; }, 0)) * 100) / 100;
-  }
-  function discount() {
-    if (S.bill) return S.bill.discount || 0;
-    var d = parseFloat($("disc").value); return S.canDiscount && d > 0 ? d : 0;
-  }
-  function total() { return Math.max(0, Math.round((subtotal() - discount()) * 100) / 100); }
-  function render() {
-    var b = S.bill, html = "";
-    $("billTitle").textContent = b ? (b.number + (b.table ? " · Table " + b.table : "") + (b.mode_label ? " · " + b.mode_label : "")) : "New sale";
-    $("modes").hidden = !!b;
-    ["table", "cname", "cphone", "disc"].forEach(function (k) { $(k).disabled = !!b; });
-    $("tableField").hidden = (b ? b.mode : S.mode) !== "dine_in";
-    if (b) b.items.forEach(function (l) {
-      html += '<li class="line saved"><span class="name">' + esc(l.description) + '</span><span class="qty td-num">' + Number(l.quantity) + ' ×</span><span class="amt td-num">' + rs(l.line_total) + "</span></li>";
-    });
-    S.cart.forEach(function (l, n) {
-      html += '<li class="line"><span class="name">' + esc(l.name) + "</span>" +
-        '<span class="stepper"><button type="button" data-dec="' + n + '" aria-label="One less ' + esc(l.name) + '">−</button>' +
-        '<span class="td-num" aria-label="Quantity">' + l.qty + '</span><button type="button" data-inc="' + n + '" aria-label="One more ' + esc(l.name) + '">+</button></span>' +
-        '<span class="amt td-num">' + rs(l.qty * l.price) + "</span></li>";
-    });
-    $("lines").innerHTML = html || '<li class="empty">Tap a product to add it.</li>';
-    $("sub").textContent = rs(subtotal()); $("total").textContent = rs(total()); $("mtotal").textContent = rs(total());
-    $("holdBtn").textContent = b ? (S.cart.length ? "Add to bill" : "Keep open") : "Keep open";
-    $("holdBtn").disabled = b ? !S.cart.length : !S.cart.length;
-    $("payBtn").disabled = !(S.cart.length || b) || total() <= 0;
-  }
-  function say(t) { $("msg").textContent = t || ""; }
-  function reset() {
-    S.cart = []; S.bill = null; $("table").value = ""; $("cname").value = ""; $("cphone").value = ""; $("disc").value = "0";
-    say(""); render(); $("search").focus();
-  }
-  function cartItems() { return S.cart.map(function (l) { var o = { quantity: l.qty }; o[l.kind === "service" ? "service_id" : "product_id"] = l.id; return o; }); }
-  function saleBody(extra) {
-    var b = { client_ref: S.ref || (S.ref = ref()), mode: S.mode, table: $("table").value, customer_name: $("cname").value,
-              customer_phone: $("cphone").value, items: cartItems(), discount: discount() };
-    for (var k in extra) b[k] = extra[k];
-    return b;
-  }
-  function busy(on) { ["holdBtn", "payBtn", "payGo"].forEach(function (k) { $(k).disabled = on; }); }
-
-  // keep open: a new open bill, or more items on the open one
-  function hold() {
-    if (!S.cart.length) return;
-    busy(true);
-    var p = S.bill ? api("POST", "/pos/bills/" + S.bill.id + "/items", { items: cartItems() }) : api("POST", "/pos/sale", saleBody({ hold: true }));
-    p.then(function (r) {
-      busy(false);
-      if (r.status === 401) return signedOut();
-      if (!r.ok) { say(why(r)); render(); return; }
-      S.ref = null; reset(); say(r.data.number + " kept open" + (r.data.table ? " for table " + r.data.table : "") + ".");
-      refreshDay();
-    });
-  }
-
-  // ---------------------------------------------------------------- pay
-  function payRow(method, amount) {
-    var opts = S.methods.map(function (m) { return '<option value="' + m + '"' + (m === method ? " selected" : "") + ">" + m.charAt(0).toUpperCase() + m.slice(1) + "</option>"; }).join("");
-    var n = $("pays").children.length;
-    var row = document.createElement("div"); row.className = "payrow";
-    row.innerHTML = '<label class="td-sr-only" for="pm' + n + '">Method</label><select id="pm' + n + '" class="td-input">' + opts + "</select>" +
-      '<label class="td-sr-only" for="pa' + n + '">Amount</label><input id="pa' + n + '" class="td-input td-num" inputmode="decimal" value="' + (amount || "") + '">' +
-      '<label class="td-sr-only" for="pr' + n + '">Slip or reference</label><input id="pr' + n + '" class="td-input ref" maxlength="120" placeholder="Slip / ref" hidden>';
-    $("pays").appendChild(row);
-    var sel = row.querySelector("select"), refIn = row.querySelector(".ref");
-    sel.onchange = function () { refIn.hidden = sel.value === "cash"; change(); };
-    refIn.hidden = method === "cash";
-    row.querySelector("input").oninput = change;
-  }
-  function payments() {
-    return Array.prototype.map.call($("pays").children, function (row) {
-      var i = row.querySelectorAll("input");
-      return { method: row.querySelector("select").value, amount: parseFloat(i[0].value), reference: i[1].value };
-    }).filter(function (p) { return p.amount > 0; });
-  }
-  function change() {
-    var t = total(), ps = payments(), cash = 0, other = 0;
-    ps.forEach(function (p) { if (p.method === "cash") cash += p.amount; else other += p.amount; });
-    var left = Math.round((t - other - cash) * 100) / 100;
-    $("payMsg").textContent = "";
-    if (other - t > 0.009) $("change").innerHTML = '<span class="text-danger">Card/bank/online is more than the bill.</span>';
-    else if (left > 0.009) $("change").innerHTML = "Still to pay <strong class='td-num'>" + rs(left) + "</strong>";
-    else $("change").innerHTML = "Change to give <strong class='td-num big'>" + rs(-left) + "</strong>";
-    $("payGo").disabled = left > 0.009 || other - t > 0.009;
-  }
-  function quick() {
-    var t = total(), set = [t], steps = [100, 500, 1000, 5000];
-    steps.forEach(function (s) { var v = Math.ceil(t / s) * s; if (v > t && set.indexOf(v) < 0 && set.length < 5) set.push(v); });
-    $("quick").innerHTML = set.map(function (v, n) { return '<button type="button" class="td-btn td-btn--secondary" data-cash="' + v + '">' + (n ? rs(v) : "Exact") + "</button>"; }).join("");
-  }
-  function openPay() {
-    if (total() <= 0) return;
-    $("due").textContent = rs(total()); $("pays").innerHTML = ""; payRow("cash", ""); quick(); change();
-    $("payDlg").showModal(); $("pays").querySelector("input").focus();
-  }
-  function doPay() {
-    var ps = payments();
-    busy(true); $("payGo").textContent = "Saving…";
-    var go = function (billId) { return api("POST", "/pos/bills/" + billId + "/settle", { payments: ps }); };
-    var p;
-    if (S.bill && S.cart.length) {
-      p = api("POST", "/pos/bills/" + S.bill.id + "/items", { items: cartItems() }).then(function (r) { return r.ok ? go(S.bill.id) : r; });
-    } else if (S.bill) p = go(S.bill.id);
-    else p = api("POST", "/pos/sale", saleBody({ payments: ps }));
-    p.then(function (r) {
-      busy(false); $("payGo").textContent = "Done";
-      if (r.status === 401) { $("payDlg").close(); return signedOut(); }
-      if (!r.ok) { $("payMsg").textContent = why(r); return; }
-      // the sale is saved: empty the bill now, so nothing from it can reach the next one
-      S.ref = null; $("payDlg").close(); reset(); showReceipt(r.data); refreshDay(); load();
-    });
-  }
-
-  // ---------------------------------------------------------------- receipt
-  function showReceipt(b) {
-    var when = new Date(b.recognised_at || b.created_at);
-    var lines = b.items.map(function (l) {
-      return '<tr><td>' + esc(l.description) + '</td><td class="td-num">' + Number(l.quantity) + '</td><td class="td-num">' + rs(l.line_total) + "</td></tr>";
-    }).join("");
-    var pays = (b.payments || []).map(function (p) { return '<div class="row"><span>' + esc(p.method) + (p.reference ? " (" + esc(p.reference) + ")" : "") + '</span><span class="td-num">' + rs(p.amount) + "</span></div>"; }).join("");
-    $("receipt").innerHTML = '<h2 id="rcptTitle" class="m-0 text-center font-display text-lg font-semibold">' + esc(b.business || S.business || "") + "</h2>" +
-      '<div class="text-center text-xs">' + esc(b.number) + " · " + esc(when.toLocaleString("en-PK")) + (b.mode_label ? " · " + esc(b.mode_label) : "") + (b.table ? " · Table " + esc(b.table) : "") + "</div>" +
-      (b.customer_name ? '<div class="text-center text-xs">' + esc(b.customer_name) + "</div>" : "") +
-      '<table><thead><tr><th>Item</th><th>Qty</th><th>Amount</th></tr></thead><tbody>' + lines + "</tbody></table>" +
-      '<div class="row"><span>Subtotal</span><span class="td-num">' + rs(b.subtotal) + "</span></div>" +
-      (b.discount ? '<div class="row"><span>Discount</span><span class="td-num">−' + rs(b.discount) + "</span></div>" : "") +
-      '<div class="row grand"><span>Total</span><span class="td-num">' + rs(b.total) + "</span></div>" + pays +
-      (b.cash_tendered != null ? '<div class="row"><span>Cash given</span><span class="td-num">' + rs(b.cash_tendered) + '</span></div><div class="row"><span>Change</span><span class="td-num">' + rs(b.change_given) + "</span></div>" : "") +
-      '<div class="mt-3 text-center text-xs">' + (b.payment_status === "paid" ? "Paid. Thank you!" : "Not paid yet") + "</div>";
-    $("rcptDlg").showModal(); $("nextBtn").focus();
-  }
-
-  // ---------------------------------------------------------------- open bills
-  function openBills() {
-    api("GET", "/pos/today").then(function (r) {
-      if (r.status === 401) return signedOut();
-      var list = r.ok ? r.data.open_bills : null;
-      $("openList").innerHTML = !r.ok ? '<li class="state">' + esc(why(r)) + "</li>" : !list.length ? '<li class="state">No open bills.</li>' :
-        list.map(function (b) {
-          return '<li><button type="button" class="openbill" data-bill="' + b.id + '"><span><strong>' + esc(b.number) + "</strong>" +
-            (b.table ? " · Table " + esc(b.table) : "") + (b.mode_label ? " · " + esc(b.mode_label) : "") + (b.customer_name ? " · " + esc(b.customer_name) : "") +
-            '</span><span class="td-num">' + rs(b.total) + "</span></button></li>";
-        }).join("");
-      $("openDlg").showModal();
-    });
-  }
-  function loadBill(id) {
-    api("GET", "/pos/bills/" + id).then(function (r) {
-      $("openDlg").close();
-      if (!r.ok) { say(why(r)); return; }
-      S.cart = []; S.bill = r.data; say(""); render();
-    });
-  }
-
-  // ---------------------------------------------------------------- wiring
-  $("grid").onclick = function (e) { var b = e.target.closest(".item"); if (b) add(b.dataset.id); };
-  $("cats").onclick = function (e) { var b = e.target.closest("button"); if (!b) return; S.cat = b.dataset.cat; cats(); grid(); };
-  $("search").oninput = grid;
-  $("search").onkeydown = function (e) {
-    if (e.key !== "Enter") return;
-    var q = this.value.trim().toLowerCase(); if (!q) return;
-    var hit = S.items.filter(function (i) { return i.sku && i.sku.toLowerCase() === q; });
-    var list = hit.length ? hit : shown();
-    if (list.length === 1) { add(list[0].id); this.value = ""; grid(); }
-    else if (!list.length) say("No product with code “" + this.value + "”.");
-  };
-  $("lines").onclick = function (e) {
-    var b = e.target.closest("button"); if (!b) return;
-    if (b.dataset.inc != null) S.cart[+b.dataset.inc].qty += 1;
-    if (b.dataset.dec != null) { var n = +b.dataset.dec; S.cart[n].qty -= 1; if (S.cart[n].qty <= 0) S.cart.splice(n, 1); }
-    render();
-  };
-  $("modes").onclick = function (e) {
-    var b = e.target.closest("[data-mode]"); if (!b) return;
-    S.mode = b.dataset.mode;
-    Array.prototype.forEach.call(this.children, function (x) { x.setAttribute("aria-checked", x === b ? "true" : "false"); });
-    render();
-  };
-  $("disc").oninput = render;
-  $("clearBtn").onclick = reset;
-  $("holdBtn").onclick = hold;
-  $("payBtn").onclick = openPay;
-  $("splitBtn").onclick = function () { payRow("card", ""); change(); };
-  $("quick").onclick = function (e) {
-    var b = e.target.closest("[data-cash]"); if (!b) return;
-    var rows = $("pays").children, i = rows[rows.length - 1].querySelector("input");
-    rows[rows.length - 1].querySelector("select").value = "cash";
-    i.value = b.dataset.cash; change();
-  };
-  $("payCancel").onclick = function () { $("payDlg").close(); };
-  $("payForm").onsubmit = function (e) { e.preventDefault(); doPay(); };
-  $("openBtn").onclick = openBills;
-  $("openClose").onclick = function () { $("openDlg").close(); };
-  $("openList").onclick = function (e) { var b = e.target.closest("[data-bill]"); if (b) loadBill(b.dataset.bill); };
-  $("printBtn").onclick = function () { window.print(); };
-  $("nextBtn").onclick = function () { $("rcptDlg").close(); };
-  $("rcptDlg").addEventListener("close", function () { $("search").focus(); });
-  load();
-})();
-</script>
+<script src="/assets/pos-hw.js"></script>
+<script src="/assets/pos-till.js"></script>
 </body>
 </html>
