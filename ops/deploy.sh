@@ -20,9 +20,13 @@ cd "$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "STOP: run this insi
 BR="${1:?usage: bash ops/deploy.sh <branch>}"
 DB="${DB_CONTAINER:-techdeva-platform-db-1}"
 API="${API_CONTAINER:-techdeva-platform-api-1}"
+# -i only where a file is fed in. `docker exec -i` forwards stdin, and when this
+# script itself arrives on stdin (git show ... | bash -s) it would swallow the
+# rest of the script; every other docker call gets </dev/null for that reason.
 psqlq() { docker exec -i "$DB" psql -v ON_ERROR_STOP=1 -U postgres -d techdeva "$@"; }
+psqlc() { docker exec "$DB" psql -v ON_ERROR_STOP=1 -U postgres -d techdeva "$@" </dev/null; }
 numbers() {
-  psqlq -tA -c "select 'businesses: '||count(*) from tenants where not coalesce(is_test,false)
+  psqlc -tA -c "select 'businesses: '||count(*) from tenants where not coalesce(is_test,false)
     union all select 'leads: '||count(*) from leads
     union all select 'users: '||count(*) from users
     union all select 'appointments: '||count(*) from appointments
@@ -31,7 +35,7 @@ numbers() {
 
 echo "=== 1. guards (nothing changes until all pass) ==="
 [ -z "$(git status --porcelain)" ] || { echo "STOP: uncommitted changes on the server"; git status --short | head; exit 1; }
-git fetch -q origin "$BR"
+git fetch -q origin "$BR" </dev/null
 OLD=$(git rev-parse HEAD)
 NEW=$(git rev-parse "origin/$BR")
 [ "$OLD" != "$NEW" ] || { echo "nothing to deploy: already at $(git log -1 --format='%h %s')"; exit 0; }
@@ -52,7 +56,7 @@ numbers | tee /tmp/td-before.txt
 
 echo; echo "=== 3. backup ==="
 B=~/techdeva-backup-$(date +%F-%H%M%S).sql.gz
-docker exec -i "$DB" pg_dump -U postgres techdeva | gzip > "$B"
+docker exec "$DB" pg_dump -U postgres techdeva </dev/null | gzip > "$B"
 S=$(stat -c%s "$B"); echo "backup: $B ($S bytes)"
 [ "$S" -gt "${MIN_BACKUP_BYTES:-100000}" ] || { echo "STOP: the backup looks too small ($S bytes)"; exit 1; }
 
@@ -78,8 +82,8 @@ done
 
 if [ -n "$SERVICES" ]; then
   echo; echo "=== 6. rebuild: $SERVICES ==="
-  docker compose build $SERVICES
-  docker compose up -d $SERVICES
+  docker compose build $SERVICES </dev/null
+  docker compose up -d $SERVICES </dev/null
 fi
 
 echo; echo "=== 7. verify ==="
