@@ -54,7 +54,7 @@ echo; echo "=== 3. backup ==="
 B=~/techdeva-backup-$(date +%F-%H%M%S).sql.gz
 docker exec -i "$DB" pg_dump -U postgres techdeva | gzip > "$B"
 S=$(stat -c%s "$B"); echo "backup: $B ($S bytes)"
-[ "$S" -gt 100000 ] || { echo "STOP: the backup looks too small"; exit 1; }
+[ "$S" -gt "${MIN_BACKUP_BYTES:-100000}" ] || { echo "STOP: the backup looks too small ($S bytes)"; exit 1; }
 
 rollback() {
   echo; echo "!!! FAILED after the code moved. To roll back the code:"
