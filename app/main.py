@@ -131,6 +131,8 @@ app.include_router(make_categories_router())
 # Orders: products sold (bookings stay appointments); money through invoices/payments
 from .orders import make_orders_router
 app.include_router(make_orders_router())
+from .pos import make_pos_router
+app.include_router(make_pos_router())
 # Voice: the AI phone agent's call log and number settings (calls answered by app/voice_bridge.py)
 from .voice import make_voice_router
 app.include_router(make_voice_router())
@@ -839,6 +841,13 @@ def reset_page():
 def pin_page():
     """Team PIN login: the shared screen's PIN pad, or business code + PIN."""
     return _page("pin.html")
+
+
+@app.get("/pos", include_in_schema=False)
+def pos_page():
+    """The till: counter billing. Like /dashboard it carries no tenant identity;
+    everything comes from /pos/* which resolves the tenant from the signed session."""
+    return _page("pos.html")
 
 
 @app.get("/portal", include_in_schema=False)

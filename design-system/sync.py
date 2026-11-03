@@ -68,6 +68,7 @@ TAILWIND_PAGES = [
     ROOT / "web/reset.html",
     ROOT / "web/partner_site.html",
     ROOT / "web/partner.html",
+    ROOT / "web/pos.html",
 ]
 
 FONTS = (

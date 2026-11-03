@@ -1,0 +1,66 @@
+/* /pos — the till. Calm data only: no ambient motion, big touch targets,
+   numbers in tabular figures. Products left, the bill right; on a phone the
+   bill follows the products and a bottom bar keeps the total in view. */
+.page-pos {
+  @apply min-h-screen;
+  & .bar { @apply sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-line bg-bg px-4 py-2; }
+  & main { @apply grid gap-4 p-4 lg:grid-cols-[1fr_400px]; }
+  & .shelf { @apply flex min-w-0 flex-col gap-3; }
+  & .cats { @apply flex flex-wrap gap-2; }
+  & .cats button { @apply h-11 cursor-pointer rounded-full border border-line-strong bg-surface-2 px-4 text-sm text-fg-muted; }
+  & .cats button[aria-pressed="true"] { @apply border-accent bg-accent-tint text-fg; }
+  & .grid-items { @apply grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4; }
+  & .item { @apply flex min-h-24 cursor-pointer flex-col items-start gap-1 rounded-[var(--card-radius)] border border-line bg-surface p-3 text-left text-fg hover:border-accent-line hover:bg-surface-2; }
+  & .item[aria-disabled="true"] { @apply cursor-not-allowed opacity-50; }
+  & .item .name { @apply text-sm leading-snug font-medium; }
+  & .item .price { @apply mt-auto font-semibold text-accent-ink; }
+  & .item .stock { @apply text-xs text-fg-subtle; }
+  & .item .stock.out { @apply text-warning; }
+  & .state { @apply col-span-full flex flex-col items-start gap-3 rounded-[var(--card-radius)] border border-line bg-surface p-6 text-fg-muted; }
+  & .bill { @apply flex flex-col gap-3 self-start rounded-[var(--card-radius)] border border-line bg-surface p-4 lg:sticky lg:top-16; }
+  & .bill-head { @apply flex items-center justify-between gap-2; }
+  & .modes { @apply grid grid-cols-3 gap-1 rounded-[var(--btn-radius)] bg-surface-2 p-1; }
+  & .modes button { @apply h-11 cursor-pointer rounded-[var(--btn-radius)] border-0 bg-transparent text-sm text-fg-muted; }
+  & .modes button[aria-checked="true"] { @apply bg-accent text-on-accent; }
+  & .lines { @apply m-0 flex max-h-[40vh] list-none flex-col gap-1 overflow-y-auto p-0; }
+  & .line { @apply grid grid-cols-[1fr_auto_auto] items-center gap-2 border-b border-line py-2 text-sm; }
+  & .line.saved { @apply text-fg-muted; }
+  & .line .amt { @apply min-w-20 text-right; }
+  & .line .empty, & .lines .empty { @apply py-6 text-center text-sm text-fg-subtle; }
+  & .stepper { @apply flex items-center gap-1; }
+  & .stepper button { @apply h-11 w-11 cursor-pointer rounded-[var(--btn-radius)] border border-line-strong bg-surface-2 text-lg text-fg; }
+  & .stepper span { @apply min-w-6 text-center; }
+  & .totals { @apply flex flex-col gap-1 border-t border-line-strong pt-2; }
+  & .row { @apply flex items-center justify-between gap-2 text-sm; }
+  & .row.grand { @apply font-display text-2xl font-semibold; }
+  & .disc { @apply h-9 w-28 text-right; }
+  & .msg { @apply min-h-5 text-sm text-danger; }
+  & .actions { @apply grid grid-cols-2 gap-2; }
+  & .mobilebar { @apply sticky bottom-0 flex items-center justify-between gap-3 border-t border-line bg-bg px-4 py-2 font-display text-xl font-semibold lg:hidden; }
+  /* m-auto: the reset zeroes the margin that centres a modal dialog */
+  & dialog { @apply m-auto max-h-[calc(100vh-32px)] w-[min(440px,calc(100vw-32px))] rounded-[var(--card-radius)] border border-line-strong bg-bg-elevated p-0 text-fg backdrop:bg-black/60; }
+  & .dlg { @apply flex flex-col gap-3 p-5; }
+  & .due { @apply text-fg-muted; }
+  & .due strong { @apply font-display text-2xl text-fg; }
+  & .payrow { @apply mb-2 grid grid-cols-[120px_1fr] gap-2; }
+  & .payrow .ref { @apply col-span-2; }
+  & .quick { @apply flex flex-wrap gap-2; }
+  & .change { @apply text-fg-muted; }
+  & .change .big { @apply font-display text-3xl text-success; }
+  & .openlist { @apply m-0 flex max-h-[60vh] list-none flex-col gap-2 overflow-y-auto p-0; }
+  & .openbill { @apply flex min-h-12 w-full cursor-pointer items-center justify-between gap-2 rounded-[var(--btn-radius)] border border-line bg-surface px-3 text-left text-fg hover:bg-surface-2; }
+  & .receipt { @apply flex flex-col gap-1 rounded-[var(--btn-radius)] bg-surface p-4; }
+  & .receipt table { @apply my-2 w-full border-collapse text-sm; }
+  & .receipt th { @apply border-b border-line py-1 text-left text-xs font-medium text-fg-subtle; }
+  & .receipt td { @apply border-b border-line py-1 align-top; }
+  & .receipt th:not(:first-child), & .receipt td:not(:first-child) { @apply text-right; }
+}
+
+/* The receipt prints alone, black on white, at till-printer width. */
+@media print {
+  .page-pos > *:not(#rcptDlg) { display: none !important; }
+  .page-pos #rcptDlg { position: static; border: 0; width: 72mm; padding: 0; background: #fff; color: #000; }
+  .page-pos #rcptDlg .noprint { display: none; }
+  .page-pos .receipt { background: #fff; color: #000; padding: 0; }
+  .page-pos .receipt th, .page-pos .receipt td { border-color: #000; color: #000; }
+}

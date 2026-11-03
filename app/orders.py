@@ -36,7 +36,7 @@ NEXT = {"new": {"confirmed", "cancelled"},
         "confirmed": {"out_for_delivery", "delivered", "cancelled"},
         "out_for_delivery": {"delivered", "cancelled"},
         "delivered": set(), "cancelled": set()}
-SOURCES = ("whatsapp_ai", "website", "facebook", "instagram", "manual", "dashboard", "api")
+SOURCES = ("whatsapp_ai", "website", "facebook", "instagram", "manual", "dashboard", "api", "pos")
 LABEL = {"new": "New", "confirmed": "Confirmed", "out_for_delivery": "Out for delivery",
          "delivered": "Delivered", "cancelled": "Cancelled"}
 MONEY_ROLES = ("owner", "techdeva_admin")
@@ -183,7 +183,7 @@ def create_order(cur, *, items, customer_name="", customer_phone="", fulfilment=
                        VALUES (current_tenant(), %s, %s, %s, %s, %s, %s, %s)""",
                     (oid, c["id"] if c["kind"] == "product" else None, c["id"] if c["kind"] == "service" else None,
                      c["name"], l["qty"], l["price"] or 0, round(l["qty"] * (l["price"] or 0), 2)))
-    who = {"whatsapp_ai": "the WhatsApp agent", "dashboard": "the dashboard", "manual": "by hand"}.get(source, source)
+    who = {"whatsapp_ai": "the WhatsApp agent", "dashboard": "the dashboard", "manual": "by hand", "pos": "the till"}.get(source, source)
     _event(cur, oid, actor, actor_type, "created", "Order placed via %s" % who)
     record(cur, action="order.create", resource="orders", resource_id=oid, actor=str(actor or ""),
            actor_type=actor_type, detail={"number": number, "total": total, "source": source, "items": len(lines)})

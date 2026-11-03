@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Till</title>
+<meta name="robots" content="noindex">
+<!-- @td-theme:start -->
+<script>
+/* Theme + brand colour, for pages served by FastAPI (web/*.html). Kept free of
+   any product name: it is inlined into white-label partner pages too.
+   sync.py inlines this into each page's <head>, so the saved theme applies
+   before the first paint. Next.js has its own copy of the theme part
+   (the Next.js portal's components/ui/theme.ts); both use the "td-theme" key.
+
+   TD.toggleHTML()  markup for the light/dark switch, for script-rendered
+                    headers. In static markup, <span data-td-theme-slot></span>
+                    is replaced with it. Any [data-td-theme-toggle] works,
+                    even if rendered later.
+   TD.brand(hex)    a business's own accent colour. Works out readable text
+                    on it and a readable text shade of it for the current
+                    theme, so a light brand colour never gives white-on-white
+                    buttons and a dark one never vanishes on the dark canvas. */
+(function () {
+  var KEY = "td-theme", doc = document.documentElement, brandHex = null;
+
+  function theme() { return doc.dataset.theme === "light" ? "light" : "dark"; }
+
+  function rgb(hex) {
+    var h = hex.replace("#", "");
+    if (h.length === 3 || h.length === 4) h = h.replace(/./g, "$&$&");
+    return [0, 2, 4].map(function (i) { return parseInt(h.substr(i, 2), 16); });
+  }
+  function lum(c) {
+    var v = c.map(function (x) { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); });
+    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+  }
+  function contrast(a, b) { var x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  function mix(c, to, t) { return c.map(function (x, i) { return Math.round(x + (to[i] - x) * t); }); }
+  function hex(c) { return "#" + c.map(function (x) { return ("0" + x.toString(16)).slice(-2); }).join(""); }
+
+  function applyBrand() {
+    var props = ["--accent", "--accent-hover", "--accent-ink", "--accent-tint", "--accent-line", "--fg-on-accent", "--ring"];
+    if (!brandHex) { props.forEach(function (p) { doc.style.removeProperty(p); }); return; }
+    var c = rgb(brandHex), white = [255, 255, 255], black = [0, 0, 0];
+    var light = theme() === "light";
+    var bg = light ? white : [10, 10, 15];
+    // text on the accent fill: whichever of white or near-black reads better
+    var on = contrast(c, white) >= contrast(c, [20, 16, 5]) ? white : [20, 16, 5];
+    // the accent as text on the page: step it toward white (dark theme) or
+    // black (light theme) until it reaches 4.5:1
+    var ink = c, t = 0;
+    while (contrast(ink, bg) < 4.5 && t < 1) { t += 0.05; ink = mix(c, light ? black : white, t); }
+    var s = doc.style;
+    s.setProperty("--accent", hex(c));
+    s.setProperty("--accent-hover", hex(mix(c, on === white ? black : white, 0.12)));
+    s.setProperty("--fg-on-accent", hex(on));
+    s.setProperty("--accent-ink", hex(ink));
+    s.setProperty("--ring", hex(ink));
+    s.setProperty("--accent-tint", "rgb(" + c.join(" ") + " / " + (light ? 0.1 : 0.16) + ")");
+    s.setProperty("--accent-line", "rgb(" + c.join(" ") + " / 0.4)");
+  }
+
+  function sync() {
+    var light = theme() === "light";
+    var btns = document.querySelectorAll("[data-td-theme-toggle]");
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].setAttribute("aria-label", light ? "Switch to dark theme" : "Switch to light theme");
+      btns[i].setAttribute("title", light ? "Dark theme" : "Light theme");
+    }
+    var meta = document.querySelector('meta[name="color-scheme"]');
+    if (meta) meta.content = light ? "light" : "dark";
+  }
+
+  function set(next) {
+    if (next === "light") doc.dataset.theme = "light"; else delete doc.dataset.theme;
+    try { localStorage.setItem(KEY, next); } catch (e) { /* storage blocked: lasts this page view */ }
+    applyBrand();
+    sync();
+  }
+
+  try { if (localStorage.getItem(KEY) === "light") doc.dataset.theme = "light"; } catch (e) { /* default dark */ }
+
+  var SUN = '<svg class="td-i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
+  var MOON = '<svg class="td-i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>';
+
+  window.TD = {
+    theme: theme,
+    setTheme: set,
+    brand: function (h) { brandHex = h && /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(h) ? h.slice(0, h.length === 9 ? 7 : h.length) : null; applyBrand(); },
+    toggleHTML: function (cls) {
+      var light = theme() === "light";
+      return '<button type="button" class="td-theme-btn' + (cls ? " " + cls : "") + '" data-td-theme-toggle aria-label="' +
+        (light ? "Switch to dark theme" : "Switch to light theme") + '" title="' + (light ? "Dark theme" : "Light theme") + '">' + SUN + MOON + "</button>";
+    }
+  };
+
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-td-theme-toggle]");
+    if (b) set(theme() === "light" ? "dark" : "light");
+  });
+  document.addEventListener("DOMContentLoaded", function () {
+    // static pages: <span data-td-theme-slot="extra classes"></span> becomes the switch
+    var slots = document.querySelectorAll("[data-td-theme-slot]");
+    for (var i = 0; i < slots.length; i++) slots[i].outerHTML = window.TD.toggleHTML(slots[i].getAttribute("data-td-theme-slot"));
+    sync();
+  });
+})();
+</script>
+<!-- @td-theme:end -->
+<!-- @td-fonts:start -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<!-- @td-fonts:end -->
+<!-- @td-css:start -->
+<link rel="stylesheet" href="/assets/td.css?v=fc28c5a27d">
+<!-- @td-css:end -->
+</head>
+<body class="td page-pos bg-bg text-fg">
+<a class="td-sr-only" href="#search">Skip to products</a>
+<header class="bar">
+  <div class="flex min-w-0 items-center gap-3">
+    <a href="/dashboard" class="td-btn td-btn--ghost td-btn--sm" aria-label="Back to dashboard">←</a>
+    <div class="min-w-0">
+      <div class="truncate font-display text-lg font-semibold" id="biz">Till</div>
+      <div class="truncate text-xs text-fg-muted" id="day" role="status"></div>
+    </div>
+  </div>
+  <div class="flex items-center gap-2">
+    <button type="button" class="td-btn td-btn--secondary td-btn--sm" id="openBtn" aria-haspopup="dialog">Open bills <span class="td-badge" id="openCount">0</span></button>
+    <span data-td-theme-slot></span>
+  </div>
+</header>
+
+<main id="main">
+  <section class="shelf" aria-label="Products">
+    <label for="search" class="td-sr-only">Search or scan a product</label>
+    <input id="search" class="td-input w-full" type="search" autocomplete="off" placeholder="Search, or scan a barcode / SKU and press Enter">
+    <div class="cats" id="cats" role="toolbar" aria-label="Categories"></div>
+    <div id="grid" class="grid-items" aria-live="polite"><div class="state">Loading your products…</div></div>
+  </section>
+
+  <aside class="bill" aria-label="Current bill">
+    <div class="bill-head">
+      <h2 class="m-0 font-display text-base font-semibold" id="billTitle">New sale</h2>
+      <button type="button" class="td-btn td-btn--ghost td-btn--sm" id="clearBtn">Clear</button>
+    </div>
+    <div class="modes" role="radiogroup" aria-label="Sale type" id="modes">
+      <button type="button" role="radio" data-mode="counter" aria-checked="true">Counter</button>
+      <button type="button" role="radio" data-mode="dine_in" aria-checked="false">Dine-in</button>
+      <button type="button" role="radio" data-mode="takeaway" aria-checked="false">Takeaway</button>
+    </div>
+    <div class="grid grid-cols-2 gap-2">
+      <div class="td-field" id="tableField" hidden><label class="td-label" for="table">Table</label><input id="table" class="td-input" maxlength="40" placeholder="T4"></div>
+      <div class="td-field"><label class="td-label" for="cname">Customer (optional)</label><input id="cname" class="td-input" maxlength="120"></div>
+      <div class="td-field"><label class="td-label" for="cphone">Phone (optional)</label><input id="cphone" class="td-input" inputmode="tel" maxlength="40"></div>
+    </div>
+    <ul class="lines" id="lines" aria-live="polite"></ul>
+    <div class="totals">
+      <div class="row"><span>Subtotal</span><span class="td-num" id="sub">Rs 0</span></div>
+      <div class="row" id="discRow" hidden><label for="disc">Discount</label><input id="disc" class="td-input disc td-num" inputmode="decimal" value="0"></div>
+      <div class="row grand"><span>Total</span><span class="td-num" id="total">Rs 0</span></div>
+    </div>
+    <div class="msg" id="msg" role="alert"></div>
+    <div class="actions">
+      <button type="button" class="td-btn td-btn--secondary td-btn--lg" id="holdBtn">Keep open</button>
+      <button type="button" class="td-btn td-btn--lg" id="payBtn">Pay</button>
+    </div>
+  </aside>
+</main>
+
+<div class="mobilebar" id="mobilebar"><span class="td-num" id="mtotal">Rs 0</span><a class="td-btn" href="#billTitle">View bill</a></div>
+
+<dialog id="payDlg" aria-labelledby="payTitle">
+  <form method="dialog" class="dlg" id="payForm">
+    <h2 id="payTitle" class="m-0 font-display text-xl font-semibold">Take payment</h2>
+    <div class="due">Bill <strong class="td-num" id="due"></strong></div>
+    <div id="pays"></div>
+    <button type="button" class="td-btn td-btn--ghost td-btn--sm self-start" id="splitBtn">+ Split the bill</button>
+    <div class="quick" id="quick" aria-label="Quick cash"></div>
+    <div class="change" id="change" role="status"></div>
+    <div class="msg" id="payMsg" role="alert"></div>
+    <div class="actions">
+      <button type="button" class="td-btn td-btn--secondary td-btn--lg" id="payCancel">Back</button>
+      <button type="submit" class="td-btn td-btn--approve td-btn--lg" id="payGo">Done</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="openDlg" aria-labelledby="openTitle">
+  <div class="dlg">
+    <h2 id="openTitle" class="m-0 font-display text-xl font-semibold">Open bills</h2>
+    <ul class="openlist" id="openList"></ul>
+    <button type="button" class="td-btn td-btn--secondary" id="openClose">Close</button>
+  </div>
+</dialog>
+
+<dialog id="rcptDlg" aria-labelledby="rcptTitle">
+  <div class="dlg">
+    <div class="receipt" id="receipt"></div>
+    <div class="actions noprint">
+      <button type="button" class="td-btn td-btn--secondary td-btn--lg" id="printBtn">Print</button>
+      <button type="button" class="td-btn td-btn--lg" id="nextBtn">New sale</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var S = { items: [], cat: "", mode: "counter", cart: [], bill: null, canDiscount: false, methods: [], business: "" };
+
+  function esc(v) { return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function rs(n) { return n == null ? "—" : "Rs " + Number(n).toLocaleString("en-PK", { maximumFractionDigits: 2 }); }
+  function ref() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, "");
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+  }
+  function api(method, path, body) {
+    return fetch(path, { method: method, credentials: "include", headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { return { ok: r.ok, status: r.status, data: d }; }); })
+      .catch(function () { return { ok: false, status: 0, data: { detail: "Could not reach the server. Nothing was saved. Check the internet and try again." } }; });
+  }
+  function why(r) { return (r.data && r.data.detail) || "That did not work."; }
+  function signedOut() {
+    document.querySelector("main").innerHTML = '<div class="state mx-auto max-w-md"><h1 class="font-display text-xl">Sign in to use the till</h1>' +
+      '<p class="text-fg-muted">Your login has ended.</p><a class="td-btn" href="/login">Staff login</a> <a class="td-btn td-btn--secondary" href="/dashboard">Owner login</a></div>';
+  }
+
+  // ---------------------------------------------------------------- products
+  function load() {
+    api("GET", "/pos/catalogue").then(function (r) {
+      if (r.status === 401) return signedOut();
+      if (!r.ok) { $("grid").innerHTML = '<div class="state">' + esc(why(r)) + ' <button type="button" class="td-btn td-btn--secondary td-btn--sm" id="retry">Try again</button></div>'; $("retry").onclick = load; return; }
+      S.items = r.data.items || []; S.canDiscount = !!r.data.can_discount; S.methods = r.data.methods || ["cash"];
+      S.business = r.data.business || "";
+      $("biz").textContent = S.business || "Till"; document.title = (S.business ? S.business + " · " : "") + "Till";
+      $("discRow").hidden = !S.canDiscount;
+      cats(); grid(); render();
+    });
+    refreshDay();
+  }
+  function refreshDay() {
+    api("GET", "/pos/today").then(function (r) {
+      if (!r.ok) { $("day").textContent = r.status === 0 ? "Offline: today's figures could not be loaded" : ""; return; }
+      var d = r.data, t = d.sales + " sale" + (d.sales === 1 ? "" : "s") + " today";
+      if (d.money) t += " · " + rs(d.money.collected) + " taken";
+      $("day").textContent = t;
+      $("openCount").textContent = d.open;
+      S.open = d.open_bills || [];
+    });
+  }
+  function cats() {
+    var seen = {}, list = [];
+    S.items.forEach(function (i) { var c = i.category || (i.kind === "service" ? "Services" : ""); if (c && !seen[c]) { seen[c] = 1; list.push(c); } });
+    if (!list.length) { $("cats").innerHTML = ""; return; }
+    $("cats").innerHTML = ['<button type="button" data-cat="" aria-pressed="' + (S.cat === "") + '">All</button>'].concat(list.map(function (c) {
+      return '<button type="button" data-cat="' + esc(c) + '" aria-pressed="' + (S.cat === c) + '">' + esc(c) + "</button>";
+    })).join("");
+  }
+  function shown() {
+    var q = $("search").value.trim().toLowerCase();
+    return S.items.filter(function (i) {
+      var c = i.category || (i.kind === "service" ? "Services" : "");
+      if (S.cat && c !== S.cat) return false;
+      return !q || i.name.toLowerCase().indexOf(q) >= 0 || (i.sku && i.sku.toLowerCase() === q);
+    });
+  }
+  function grid() {
+    if (!S.items.length) { $("grid").innerHTML = '<div class="state">Nothing to sell yet. Add your products and prices on the dashboard (Business › Products). <a class="td-btn td-btn--secondary td-btn--sm" href="/dashboard">Open dashboard</a></div>'; return; }
+    var list = shown();
+    if (!list.length) { $("grid").innerHTML = '<div class="state">No product matches “' + esc($("search").value) + '”.</div>'; return; }
+    $("grid").innerHTML = list.map(function (i) {
+      var stock = i.on_hand == null ? "" : '<span class="stock' + (i.on_hand <= 0 ? " out" : "") + '">' + (i.on_hand <= 0 ? "Out of stock" : i.on_hand + " left") + "</span>";
+      var off = i.price == null;
+      return '<button type="button" class="item" data-id="' + esc(i.id) + '"' + (off ? ' aria-disabled="true" title="No price set"' : "") + ">" +
+        '<span class="name">' + esc(i.name) + '</span><span class="price td-num">' + (off ? "No price" : rs(i.price)) + "</span>" + stock + "</button>";
+    }).join("");
+  }
+  function add(id) {
+    var it = S.items.find(function (i) { return i.id === id; });
+    if (!it) return;
+    if (it.price == null) { say("Set a price for " + it.name + " on the dashboard first."); return; }
+    var line = S.cart.find(function (l) { return l.id === id; });
+    if (line) line.qty += 1; else S.cart.push({ id: id, name: it.name, price: it.price, kind: it.kind, qty: 1 });
+    say(""); render();
+  }
+
+  // ---------------------------------------------------------------- bill
+  function subtotal() {
+    var base = S.bill ? S.bill.subtotal : 0;
+    return Math.round((base + S.cart.reduce(function (s, l) { return s + l.qty * l.price; }, 0)) * 100) / 100;
+  }
+  function discount() {
+    if (S.bill) return S.bill.discount || 0;
+    var d = parseFloat($("disc").value); return S.canDiscount && d > 0 ? d : 0;
+  }
+  function total() { return Math.max(0, Math.round((subtotal() - discount()) * 100) / 100); }
+  function render() {
+    var b = S.bill, html = "";
+    $("billTitle").textContent = b ? (b.number + (b.table ? " · Table " + b.table : "") + (b.mode_label ? " · " + b.mode_label : "")) : "New sale";
+    $("modes").hidden = !!b;
+    ["table", "cname", "cphone", "disc"].forEach(function (k) { $(k).disabled = !!b; });
+    $("tableField").hidden = (b ? b.mode : S.mode) !== "dine_in";
+    if (b) b.items.forEach(function (l) {
+      html += '<li class="line saved"><span class="name">' + esc(l.description) + '</span><span class="qty td-num">' + Number(l.quantity) + ' ×</span><span class="amt td-num">' + rs(l.line_total) + "</span></li>";
+    });
+    S.cart.forEach(function (l, n) {
+      html += '<li class="line"><span class="name">' + esc(l.name) + "</span>" +
+        '<span class="stepper"><button type="button" data-dec="' + n + '" aria-label="One less ' + esc(l.name) + '">−</button>' +
+        '<span class="td-num" aria-label="Quantity">' + l.qty + '</span><button type="button" data-inc="' + n + '" aria-label="One more ' + esc(l.name) + '">+</button></span>' +
+        '<span class="amt td-num">' + rs(l.qty * l.price) + "</span></li>";
+    });
+    $("lines").innerHTML = html || '<li class="empty">Tap a product to add it.</li>';
+    $("sub").textContent = rs(subtotal()); $("total").textContent = rs(total()); $("mtotal").textContent = rs(total());
+    $("holdBtn").textContent = b ? (S.cart.length ? "Add to bill" : "Keep open") : "Keep open";
+    $("holdBtn").disabled = b ? !S.cart.length : !S.cart.length;
+    $("payBtn").disabled = !(S.cart.length || b) || total() <= 0;
+  }
+  function say(t) { $("msg").textContent = t || ""; }
+  function reset() {
+    S.cart = []; S.bill = null; $("table").value = ""; $("cname").value = ""; $("cphone").value = ""; $("disc").value = "0";
+    say(""); render(); $("search").focus();
+  }
+  function cartItems() { return S.cart.map(function (l) { var o = { quantity: l.qty }; o[l.kind === "service" ? "service_id" : "product_id"] = l.id; return o; }); }
+  function saleBody(extra) {
+    var b = { client_ref: S.ref || (S.ref = ref()), mode: S.mode, table: $("table").value, customer_name: $("cname").value,
+              customer_phone: $("cphone").value, items: cartItems(), discount: discount() };
+    for (var k in extra) b[k] = extra[k];
+    return b;
+  }
+  function busy(on) { ["holdBtn", "payBtn", "payGo"].forEach(function (k) { $(k).disabled = on; }); }
+
+  // keep open: a new open bill, or more items on the open one
+  function hold() {
+    if (!S.cart.length) return;
+    busy(true);
+    var p = S.bill ? api("POST", "/pos/bills/" + S.bill.id + "/items", { items: cartItems() }) : api("POST", "/pos/sale", saleBody({ hold: true }));
+    p.then(function (r) {
+      busy(false);
+      if (r.status === 401) return signedOut();
+      if (!r.ok) { say(why(r)); render(); return; }
+      S.ref = null; reset(); say(r.data.number + " kept open" + (r.data.table ? " for table " + r.data.table : "") + ".");
+      refreshDay();
+    });
+  }
+
+  // ---------------------------------------------------------------- pay
+  function payRow(method, amount) {
+    var opts = S.methods.map(function (m) { return '<option value="' + m + '"' + (m === method ? " selected" : "") + ">" + m.charAt(0).toUpperCase() + m.slice(1) + "</option>"; }).join("");
+    var n = $("pays").children.length;
+    var row = document.createElement("div"); row.className = "payrow";
+    row.innerHTML = '<label class="td-sr-only" for="pm' + n + '">Method</label><select id="pm' + n + '" class="td-input">' + opts + "</select>" +
+      '<label class="td-sr-only" for="pa' + n + '">Amount</label><input id="pa' + n + '" class="td-input td-num" inputmode="decimal" value="' + (amount || "") + '">' +
+      '<label class="td-sr-only" for="pr' + n + '">Slip or reference</label><input id="pr' + n + '" class="td-input ref" maxlength="120" placeholder="Slip / ref" hidden>';
+    $("pays").appendChild(row);
+    var sel = row.querySelector("select"), refIn = row.querySelector(".ref");
+    sel.onchange = function () { refIn.hidden = sel.value === "cash"; change(); };
+    refIn.hidden = method === "cash";
+    row.querySelector("input").oninput = change;
+  }
+  function payments() {
+    return Array.prototype.map.call($("pays").children, function (row) {
+      var i = row.querySelectorAll("input");
+      return { method: row.querySelector("select").value, amount: parseFloat(i[0].value), reference: i[1].value };
+    }).filter(function (p) { return p.amount > 0; });
+  }
+  function change() {
+    var t = total(), ps = payments(), cash = 0, other = 0;
+    ps.forEach(function (p) { if (p.method === "cash") cash += p.amount; else other += p.amount; });
+    var left = Math.round((t - other - cash) * 100) / 100;
+    $("payMsg").textContent = "";
+    if (other - t > 0.009) $("change").innerHTML = '<span class="text-danger">Card/bank/online is more than the bill.</span>';
+    else if (left > 0.009) $("change").innerHTML = "Still to pay <strong class='td-num'>" + rs(left) + "</strong>";
+    else $("change").innerHTML = "Change to give <strong class='td-num big'>" + rs(-left) + "</strong>";
+    $("payGo").disabled = left > 0.009 || other - t > 0.009;
+  }
+  function quick() {
+    var t = total(), set = [t], steps = [100, 500, 1000, 5000];
+    steps.forEach(function (s) { var v = Math.ceil(t / s) * s; if (v > t && set.indexOf(v) < 0 && set.length < 5) set.push(v); });
+    $("quick").innerHTML = set.map(function (v, n) { return '<button type="button" class="td-btn td-btn--secondary" data-cash="' + v + '">' + (n ? rs(v) : "Exact") + "</button>"; }).join("");
+  }
+  function openPay() {
+    if (total() <= 0) return;
+    $("due").textContent = rs(total()); $("pays").innerHTML = ""; payRow("cash", ""); quick(); change();
+    $("payDlg").showModal(); $("pays").querySelector("input").focus();
+  }
+  function doPay() {
+    var ps = payments();
+    busy(true); $("payGo").textContent = "Saving…";
+    var go = function (billId) { return api("POST", "/pos/bills/" + billId + "/settle", { payments: ps }); };
+    var p;
+    if (S.bill && S.cart.length) {
+      p = api("POST", "/pos/bills/" + S.bill.id + "/items", { items: cartItems() }).then(function (r) { return r.ok ? go(S.bill.id) : r; });
+    } else if (S.bill) p = go(S.bill.id);
+    else p = api("POST", "/pos/sale", saleBody({ payments: ps }));
+    p.then(function (r) {
+      busy(false); $("payGo").textContent = "Done";
+      if (r.status === 401) { $("payDlg").close(); return signedOut(); }
+      if (!r.ok) { $("payMsg").textContent = why(r); return; }
+      // the sale is saved: empty the bill now, so nothing from it can reach the next one
+      S.ref = null; $("payDlg").close(); reset(); showReceipt(r.data); refreshDay(); load();
+    });
+  }
+
+  // ---------------------------------------------------------------- receipt
+  function showReceipt(b) {
+    var when = new Date(b.recognised_at || b.created_at);
+    var lines = b.items.map(function (l) {
+      return '<tr><td>' + esc(l.description) + '</td><td class="td-num">' + Number(l.quantity) + '</td><td class="td-num">' + rs(l.line_total) + "</td></tr>";
+    }).join("");
+    var pays = (b.payments || []).map(function (p) { return '<div class="row"><span>' + esc(p.method) + (p.reference ? " (" + esc(p.reference) + ")" : "") + '</span><span class="td-num">' + rs(p.amount) + "</span></div>"; }).join("");
+    $("receipt").innerHTML = '<h2 id="rcptTitle" class="m-0 text-center font-display text-lg font-semibold">' + esc(b.business || S.business || "") + "</h2>" +
+      '<div class="text-center text-xs">' + esc(b.number) + " · " + esc(when.toLocaleString("en-PK")) + (b.mode_label ? " · " + esc(b.mode_label) : "") + (b.table ? " · Table " + esc(b.table) : "") + "</div>" +
+      (b.customer_name ? '<div class="text-center text-xs">' + esc(b.customer_name) + "</div>" : "") +
+      '<table><thead><tr><th>Item</th><th>Qty</th><th>Amount</th></tr></thead><tbody>' + lines + "</tbody></table>" +
+      '<div class="row"><span>Subtotal</span><span class="td-num">' + rs(b.subtotal) + "</span></div>" +
+      (b.discount ? '<div class="row"><span>Discount</span><span class="td-num">−' + rs(b.discount) + "</span></div>" : "") +
+      '<div class="row grand"><span>Total</span><span class="td-num">' + rs(b.total) + "</span></div>" + pays +
+      (b.cash_tendered != null ? '<div class="row"><span>Cash given</span><span class="td-num">' + rs(b.cash_tendered) + '</span></div><div class="row"><span>Change</span><span class="td-num">' + rs(b.change_given) + "</span></div>" : "") +
+      '<div class="mt-3 text-center text-xs">' + (b.payment_status === "paid" ? "Paid. Thank you!" : "Not paid yet") + "</div>";
+    $("rcptDlg").showModal(); $("nextBtn").focus();
+  }
+
+  // ---------------------------------------------------------------- open bills
+  function openBills() {
+    api("GET", "/pos/today").then(function (r) {
+      if (r.status === 401) return signedOut();
+      var list = r.ok ? r.data.open_bills : null;
+      $("openList").innerHTML = !r.ok ? '<li class="state">' + esc(why(r)) + "</li>" : !list.length ? '<li class="state">No open bills.</li>' :
+        list.map(function (b) {
+          return '<li><button type="button" class="openbill" data-bill="' + b.id + '"><span><strong>' + esc(b.number) + "</strong>" +
+            (b.table ? " · Table " + esc(b.table) : "") + (b.mode_label ? " · " + esc(b.mode_label) : "") + (b.customer_name ? " · " + esc(b.customer_name) : "") +
+            '</span><span class="td-num">' + rs(b.total) + "</span></button></li>";
+        }).join("");
+      $("openDlg").showModal();
+    });
+  }
+  function loadBill(id) {
+    api("GET", "/pos/bills/" + id).then(function (r) {
+      $("openDlg").close();
+      if (!r.ok) { say(why(r)); return; }
+      S.cart = []; S.bill = r.data; say(""); render();
+    });
+  }
+
+  // ---------------------------------------------------------------- wiring
+  $("grid").onclick = function (e) { var b = e.target.closest(".item"); if (b) add(b.dataset.id); };
+  $("cats").onclick = function (e) { var b = e.target.closest("button"); if (!b) return; S.cat = b.dataset.cat; cats(); grid(); };
+  $("search").oninput = grid;
+  $("search").onkeydown = function (e) {
+    if (e.key !== "Enter") return;
+    var q = this.value.trim().toLowerCase(); if (!q) return;
+    var hit = S.items.filter(function (i) { return i.sku && i.sku.toLowerCase() === q; });
+    var list = hit.length ? hit : shown();
+    if (list.length === 1) { add(list[0].id); this.value = ""; grid(); }
+    else if (!list.length) say("No product with code “" + this.value + "”.");
+  };
+  $("lines").onclick = function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.inc != null) S.cart[+b.dataset.inc].qty += 1;
+    if (b.dataset.dec != null) { var n = +b.dataset.dec; S.cart[n].qty -= 1; if (S.cart[n].qty <= 0) S.cart.splice(n, 1); }
+    render();
+  };
+  $("modes").onclick = function (e) {
+    var b = e.target.closest("[data-mode]"); if (!b) return;
+    S.mode = b.dataset.mode;
+    Array.prototype.forEach.call(this.children, function (x) { x.setAttribute("aria-checked", x === b ? "true" : "false"); });
+    render();
+  };
+  $("disc").oninput = render;
+  $("clearBtn").onclick = reset;
+  $("holdBtn").onclick = hold;
+  $("payBtn").onclick = openPay;
+  $("splitBtn").onclick = function () { payRow("card", ""); change(); };
+  $("quick").onclick = function (e) {
+    var b = e.target.closest("[data-cash]"); if (!b) return;
+    var rows = $("pays").children, i = rows[rows.length - 1].querySelector("input");
+    rows[rows.length - 1].querySelector("select").value = "cash";
+    i.value = b.dataset.cash; change();
+  };
+  $("payCancel").onclick = function () { $("payDlg").close(); };
+  $("payForm").onsubmit = function (e) { e.preventDefault(); doPay(); };
+  $("openBtn").onclick = openBills;
+  $("openClose").onclick = function () { $("openDlg").close(); };
+  $("openList").onclick = function (e) { var b = e.target.closest("[data-bill]"); if (b) loadBill(b.dataset.bill); };
+  $("printBtn").onclick = function () { window.print(); };
+  $("nextBtn").onclick = function () { $("rcptDlg").close(); };
+  $("rcptDlg").addEventListener("close", function () { $("search").focus(); });
+  load();
+})();
+</script>
+</body>
+</html>
