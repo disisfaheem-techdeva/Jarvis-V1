@@ -17,6 +17,7 @@ from .auth import SESSION_COOKIE
 from .db import tenant_session
 from .operations import _identity
 from .orders import MONEY_ROLES, OrderError
+from .security import client_ip
 from . import pos, pos_refund, pos_settings as cfg, pos_shift
 from .pos_refund import RefundError
 from .pos_shift import ShiftError
@@ -83,7 +84,8 @@ def make_pos_router():
     @router.post("/pos/manager-pin")
     def manager_pin(request: Request, body: dict = Body(...), me: dict = Depends(who)):
         """A manager's PIN typed at a cashier's till: a 5-minute approval for one action."""
-        ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "?")
+        # the address our proxy saw, never the caller-written first entry (security.client_ip)
+        ip = client_ip(request) or "?"
         try:
             return cfg.approve(me["tid"], body.get("pin"), str(body.get("action") or ""), ip=ip, asked_by=me["uid"])
         except cfg.PosSettingsError as e:
