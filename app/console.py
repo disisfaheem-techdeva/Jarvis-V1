@@ -18,6 +18,7 @@ and they cannot redecorate the business's dashboard.
 import base64
 import io
 import json
+import os
 import re
 import time
 import uuid
@@ -29,6 +30,7 @@ from fastapi import APIRouter, Body, Cookie, Header, HTTPException, Response
 from . import business as biz
 from . import jarvis_actions as ja
 from .ai import AIUnavailable, CreditsUsedUp, generate_json, fast as ai_fast, last_model as ai_last_model
+from .ai import chain_first as ai_chain_first, parse_chain as ai_parse_chain
 from .audit import record
 from .auth import AuthError, SESSION_COOKIE, resolve_scope
 from .db import tenant_session
@@ -303,8 +305,28 @@ def _dash_rule():
 
 
 # Appended to the classifier so the reply sounds right when spoken.
-LANG_RULE = ("\n\nLanguage: write \"reply\" in the same language and script the owner used "
-             "(English, Urdu script, or Roman Urdu). Keep it short and natural to say aloud.")
+LANG_RULE = ("\n\nLanguage: your DEFAULT is Roman Urdu (Pakistani style, English business words mixed "
+             "in naturally). Use Urdu script only if the owner wrote Urdu script, and English only if the "
+             "owner wrote a full English sentence of four or more words. A greeting like hi, hello or salam, "
+             "or a short or garbled speech-to-text message, gets Roman Urdu. Keep it natural to say aloud.")
+
+# Who Jarvis is (4 Nov 2026: the owner found it robotic, "How can I help you
+# manage your clinic today?"). Personality lives in the wording only: the facts
+# rule below still forbids inventing anything, and actions are unchanged.
+PERSONA_RULE = (
+    "\n\nPersonality: you are a sharp, warm, confident Pakistani assistant, like a smart friend who "
+    "runs the business with the owner. Talk like a person, not a help desk: answer greetings and small "
+    "talk with a little life (a light, friendly line, a bit of desi humour when it fits), then steer to "
+    "the business, e.g. what is waiting today from BUSINESS FACTS. Never use stock lines like \"How can I "
+    "help you manage your business today?\" or \"I am an AI\". Address the owner respectfully (aap). "
+    "Be brief: one to three sentences unless they ask for detail. If the owner is rude or frustrated, "
+    "stay calm, do not lecture, just fix what they need. If asked which AI you run on, say honestly: "
+    "TechDeva's Jarvis, running on Google's Gemini models.")
+
+# Jarvis's own model order, tried before the platform chain (AI_MODEL_CHAIN keeps
+# the cheap model first for background work). JARVIS_MODEL_CHAIN overrides it.
+JARVIS_CHAIN = ai_parse_chain(os.environ.get("JARVIS_MODEL_CHAIN")
+                              or "gemini=gemini-3.6-flash,gemini=gemini-3-flash-preview")
 
 
 def _attached_images(body):
@@ -954,13 +976,13 @@ def make_console_router():
         if attached:
             message += ("\n[The owner attached %d picture%s to this message, for the post or ad campaign they ask for.]"
                         % (len(attached), "" if len(attached) == 1 else "s"))
-        system = CLASSIFY + _dash_rule() + UC_RULE + LANG_RULE + FACTS_RULE + (VOICE_RULE if voice else "")
+        system = CLASSIFY + _dash_rule() + UC_RULE + LANG_RULE + PERSONA_RULE + FACTS_RULE + (VOICE_RULE if voice else "")
         t0 = time.time()
         try:
             # No retry here on purpose. A person is sitting in front of this
             # box: a second full pass through the model chain turns a slow
             # answer into a minute of silence, and silence reads as broken.
-            with ai_fast():
+            with ai_fast(), ai_chain_first(JARVIS_CHAIN):
                 out = generate_json(system, _with_facts(tid, role, message, _history(body.get("history")), uid),
                                     required_keys=("kind",), _retry=False)
             response.headers["Server-Timing"] = "think;dur=%d" % int((time.time() - t0) * 1000)

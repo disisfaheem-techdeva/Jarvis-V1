@@ -164,6 +164,9 @@ def _gemini_fast_thinking(model: str):
     m = (model or "").lower()
     if m.startswith("gemini-2.5") and "pro" not in m:
         return {"thinkingBudget": 0}
+    if m == "gemini-3-flash-preview":
+        # the one Gemini 3 model that takes "minimal" (3.8 refuses it with a 400)
+        return {"thinkingLevel": "minimal"}
     if m.startswith("gemini-3"):
         return {"thinkingLevel": "low"}
     return None
@@ -272,7 +275,44 @@ def providers() -> list:
     return out
 
 
+_FIRST = threading.local()
+
+
+class chain_first:
+    """with ai.chain_first([("gemini", "gemini-3-flash-preview")]): these pairs are
+    tried before the usual chain, on this thread only. Jarvis uses it: a person
+    talking to it notices a weak model, while background work keeps the cheap one."""
+    def __init__(self, entries):
+        self.entries = list(entries or [])
+
+    def __enter__(self):
+        _FIRST.entries = self.entries
+        return self
+
+    def __exit__(self, *exc):
+        _FIRST.entries = None
+        return False
+
+
+def parse_chain(raw: str) -> list:
+    """'gemini=model-a,gemini=model-b' -> [("gemini", "model-a"), ...]; unknown providers dropped."""
+    out = []
+    for item in (raw or "").split(","):
+        prov, _, model = item.strip().partition("=")
+        prov = prov.strip().lower()
+        if prov in ("anthropic", "gemini", "openai"):
+            out.append((prov, model.strip() or None))
+    return out
+
+
 def chain_entries() -> list:
+    """The (provider, model) pairs to try, in order: chain_first's pairs (if any), then the chain."""
+    base = _chain_entries()
+    first = [(p, m) for p, m in (getattr(_FIRST, "entries", None) or []) if p in _TRANSPORT and _key_for(p)]
+    return first + [x for x in base if x not in first]
+
+
+def _chain_entries() -> list:
     """The (provider, model) pairs to try, in order.
 
     A provider is not the only thing that goes out of action -- one model can be
