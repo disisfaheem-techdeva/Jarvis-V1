@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>Till</title>
+<title>TechDeva POS</title>
 <meta name="robots" content="noindex">
 <!-- @td-theme:start -->
 <script>
@@ -115,7 +115,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=a6d9443902">
+<link rel="stylesheet" href="/assets/td.css?v=e23621653f">
 <!-- @td-css:end -->
 </head>
 <body class="td page-pos bg-bg text-fg">
@@ -132,9 +132,9 @@
 <div id="till">
 <header class="bar">
   <div class="flex min-w-0 items-center gap-3">
-    <a href="/dashboard" class="td-btn td-btn--ghost td-btn--sm" aria-label="Back to dashboard">←</a>
+    <a href="/dashboard" id="backDash" class="td-btn td-btn--ghost td-btn--sm" aria-label="Back to dashboard">←</a>
     <div class="min-w-0">
-      <div class="truncate font-display text-lg font-semibold" id="biz">Till</div>
+      <div class="truncate font-display text-lg font-semibold"><span class="posbrand">TechDeva POS</span> <span id="biz"></span></div>
       <div class="truncate text-xs text-fg-muted" id="day" role="status"></div>
     </div>
   </div>

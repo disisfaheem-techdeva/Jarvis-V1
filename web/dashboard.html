@@ -114,7 +114,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=a6d9443902">
+<link rel="stylesheet" href="/assets/td.css?v=e23621653f">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -7830,7 +7830,10 @@ VIEWS.orders = function(){
     });
   }
   var out = '<h1>Orders</h1><p class="sub">Products sold: from WhatsApp, the dashboard or the phone. A sale counts only when an order is delivered <b>and</b> fully paid; stock goes out then. Bookings with a time stay in Appointments.</p>';
-  out += panel('Overview', '<div style="padding:4px 0">' + ordTiles() + '</div>', '<a class="btn" href="/pos">Open till</a> <button class="btn primary" id="ord_new">+ New order</button>');
+  // TechDeva POS is a separate product at its own address, on per business (db/91)
+  if (ORD.pos === undefined) { ORD.pos = null; api('/pos/status').then(function(r){ ORD.pos = r.ok ? r.data : { enabled: false }; if (currentView() === 'orders') renderShell(); }); }
+  var posBtn = ORD.pos && ORD.pos.enabled ? '<a class="btn" href="' + esc(ORD.pos.url) + '/" target="_blank" rel="noopener">Open POS</a> ' : '';
+  out += panel('Overview', '<div style="padding:4px 0">' + ordTiles() + '</div>', posBtn + '<button class="btn primary" id="ord_new">+ New order</button>');
   if (ORD.form) out += panel('New order', ordFormHTML());
   if (ORD.msg) out += '<div class="card-note" style="margin:6px 0;color:' + (ORD.msg.bad ? 'var(--danger)' : 'var(--growth)') + '">' + esc(ORD.msg.text) + '</div>';
   var tabs = [['all', 'All'], ['new', 'New'], ['confirmed', 'Confirmed'], ['out_for_delivery', 'Out for delivery'], ['waiting', 'Waiting for delivery'],

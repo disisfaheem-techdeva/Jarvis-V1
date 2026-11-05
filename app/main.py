@@ -810,16 +810,27 @@ def signup_page(request: Request):
     """The public front door on techdeva.net. On a business's own address
     (drirfan.techdeva.net) the front door is that business's staff login."""
     from .pins import host_tenant
+    if _is_pos_host(request):          # pos.techdeva.net: the till is the front door
+        return _page("pos.html")
     if host_tenant(request):
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login", status_code=302)
     return _page("signup.html")
 
 
+def _is_pos_host(request) -> bool:
+    """A request to the POS's own address (pos.techdeva.net)."""
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",")[0]
+    return host.strip().lower().split(":")[0].startswith("pos.")
+
+
 @app.get("/login", include_in_schema=False)
-def login_page():
+def login_page(request: Request):
     """Staff PIN login: the business is taken from its own address, the
-    PIN-screen device, or the business code."""
+    PIN-screen device, or the business code. On pos.techdeva.net, the POS's
+    own sign-in (PIN or owner email)."""
+    if _is_pos_host(request):
+        return _page("pos-login.html")
     return _page("pin.html")
 
 
@@ -842,10 +853,14 @@ def pin_page():
 
 
 @app.get("/pos", include_in_schema=False)
-def pos_page():
-    """The till: counter billing. Like /dashboard it carries no tenant identity;
-    everything comes from /pos/* which resolves the tenant from the signed session."""
-    return _page("pos.html")
+def pos_page(request: Request):
+    """The till lives at its own address (POS_PUBLIC_URL, pos.techdeva.net); the
+    old /pos on the dashboard's address sends people there."""
+    if _is_pos_host(request):
+        return _page("pos.html")
+    from fastapi.responses import RedirectResponse
+    from .pos_routes import POS_URL
+    return RedirectResponse(POS_URL + "/", status_code=302)
 
 
 @app.get("/portal", include_in_schema=False)

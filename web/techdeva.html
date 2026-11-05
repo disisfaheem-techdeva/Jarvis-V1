@@ -114,7 +114,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=a6d9443902">
+<link rel="stylesheet" href="/assets/td.css?v=e23621653f">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-techdeva min-h-screen bg-bg text-fg">
@@ -2122,4 +2122,35 @@ function pwOpen(){
   };
 }
 document.getElementById('chgpw').onclick = e => { e.preventDefault(); pwOpen(); };
+/* ======================================================== TechDeva POS (5 Nov 2026)
+   A separate product at its own address. TechDeva switches it on per business;
+   off by default. Sales land in that business's own orders and books. */
+NAV.forEach(g => { if (g[0] === 'RUNNING THE BUSINESS' && !g[1].some(x => x[0] === 'pos')) g[1].push(['pos', 'POS']); });
+TITLES.pos = ['TechDeva POS', 'Counter billing as its own product. Turn it on for the businesses that take it; they open it at its own address.'];
+const POSV = { data: undefined };
+function posLoad(){ POSV.data = null; api('/techdeva/pos').then(d => { POSV.data = d; }).catch(e => { POSV.data = {error: e.message}; }).then(() => { if (current() === 'pos') paint(); }); }
+VIEWS.pos = function(){
+  const d = POSV.data;
+  if (d === undefined) { posLoad(); return '<div class="empty">Loading...</div>'; }
+  if (d === null) return '<div class="empty">Loading...</div>';
+  if (d.error) return '<div class="empty">' + esc(d.error) + '</div>';
+  const on = d.businesses.filter(b => b.enabled);
+  let out = '<section><div class="grid" style="margin-top:0;margin-bottom:16px">' +
+    kpi('Businesses with POS', on.length, 'switched on') +
+    kpi('Till sales', on.reduce((n, b) => n + Number(b.sales || 0), 0), 'all time, POS businesses') + '</div>' +
+    '<div class="card" style="margin-bottom:16px"><div class="k-label">Address</div><div style="margin-top:6px"><a href="' + esc(d.url) + '/" target="_blank" rel="noopener" style="color:var(--gold)">' + esc(d.url) + '</a></div>' +
+    '<div class="k-note">Staff sign in there with the business code and their PIN; owners with their email.</div></div>';
+  out += '<div class="card">' + tbl('<th>Business</th><th>Status</th><th>Till sales</th><th>POS</th>',
+    d.businesses.map(b => '<tr><td><b>' + esc(b.name) + '</b><div class="k-note">' + esc(b.industry || '') + '</div></td><td>' + esc(b.status) + '</td><td>' +
+      Number(b.sales || 0) + '</td><td><button data-posset="' + esc(b.id) + '" data-on="' + (b.enabled ? '' : '1') + '"' + (b.enabled ? '' : ' class="primary"') + '>' +
+      (b.enabled ? 'Turn off' : 'Turn on') + '</button>' + (b.enabled ? ' <span class="good">on</span>' : '') + '</td></tr>')) + '</div></section>';
+  setTimeout(() => document.querySelectorAll('[data-posset]').forEach(btn => btn.onclick = async () => {
+    const turnOn = !!btn.getAttribute('data-on');
+    if (!turnOn && !confirm('Turn the POS off for this business? Its staff can no longer open the till. Past sales stay in its books.')) return;
+    btn.disabled = true;
+    try { await api('/techdeva/pos/' + btn.getAttribute('data-posset'), {method: 'PUT', body: JSON.stringify({enabled: turnOn})}); posLoad(); }
+    catch (e) { alert(e.message); btn.disabled = false; }
+  }), 0);
+  return out;
+};
 </script></body></html>

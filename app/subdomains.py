@@ -9,7 +9,8 @@ live (https certificate and routing) within a few minutes.
 import re
 
 RESERVED = {"www", "api", "portal", "crm", "mail", "admin", "app", "dashboard", "login", "pin",
-            "techdeva", "founder", "status", "static", "cdn", "ftp", "smtp", "webmail", "cpanel"}
+            "techdeva", "founder", "status", "static", "cdn", "ftp", "smtp", "webmail", "cpanel", "pos", "sales",
+            "leads", "partner"}
 VALID = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
 
 

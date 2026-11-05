@@ -7,6 +7,7 @@ whole request back, so a half-made sale, refund or close never lands.
 """
 from __future__ import annotations
 
+import os
 import re
 from contextlib import contextmanager
 from datetime import date
@@ -23,6 +24,17 @@ from .pos_refund import RefundError
 from .pos_shift import ShiftError
 
 ERRORS = (OrderError, cfg.PosSettingsError, ShiftError, RefundError)
+# POS is a separate product: its own address, on only for the businesses that
+# take it (db/91). Everything under /pos/* except /pos/status is refused for a
+# business where it is off, so it never shows up half-working.
+POS_URL = (os.environ.get("POS_PUBLIC_URL") or "https://pos.techdeva.net").rstrip("/")
+OFF = "POS is not on for this business. Ask TechDeva to turn it on."
+
+
+def enabled(cur) -> bool:
+    cur.execute("SELECT enabled FROM pos_settings WHERE tenant_id = current_tenant()")
+    r = cur.fetchone()
+    return bool(r and r["enabled"])
 UUID = re.compile(r"^[0-9a-f-]{36}$")
 
 
@@ -35,10 +47,12 @@ def who(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None
 
 
 @contextmanager
-def session(me, approval=None):
+def session(me, approval=None, gate=True):
     """A tenant transaction plus the context every POS function takes."""
     try:
         with tenant_session(me["tid"], me["role"]) as cur:
+            if gate and not enabled(cur):
+                raise HTTPException(403, OFF)
             ctx = {**me, "settings": cfg.get(cur), "approval": approval}
             yield cur, ctx
     except ERRORS as e:
@@ -57,6 +71,52 @@ def _owner(me, what):
 
 def make_pos_router():
     router = APIRouter()
+
+    # ------------------------------------------------------------ on / off
+    @router.get("/pos/status")
+    def status(me: dict = Depends(who)):
+        """For the dashboard: show 'Open POS' only where it is on."""
+        with session(me, gate=False) as (cur, ctx):
+            return {"enabled": enabled(cur), "url": POS_URL}
+
+    @router.get("/techdeva/pos")
+    def founder_list(x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                     authorization: str | None = Header(None),
+                     td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        from .founder import _admin
+        _admin(x_tenant_id, x_role, authorization, td_session)
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("""SELECT t.id::text, t.name, t.status::text AS status, t.industry,
+                                  COALESCE(s.enabled, false) AS enabled, s.enabled_at,
+                                  (SELECT count(*) FROM orders o WHERE o.tenant_id = t.id AND o.source = 'pos') AS sales
+                             FROM tenants t LEFT JOIN pos_settings s ON s.tenant_id = t.id
+                            WHERE NOT COALESCE(t.is_test, false)
+                            ORDER BY COALESCE(s.enabled, false) DESC, t.name""")
+            return {"url": POS_URL, "businesses": [dict(r) for r in cur.fetchall()]}
+
+    @router.put("/techdeva/pos/{tid}")
+    def founder_set(tid: str, body: dict = Body(...), x_tenant_id: str | None = Header(None),
+                    x_role: str | None = Header(None), authorization: str | None = Header(None),
+                    td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """TechDeva turns the POS on or off for one business."""
+        from .audit import record
+        from .founder import _admin
+        uid = _admin(x_tenant_id, x_role, authorization, td_session)
+        if not UUID.match(tid):
+            raise HTTPException(404, "That business does not exist.")
+        on = bool(body.get("enabled"))
+        with tenant_session(None, "techdeva_admin") as cur:
+            cur.execute("SELECT name FROM tenants WHERE id = %s::uuid", (tid,))
+            t = cur.fetchone()
+            if not t:
+                raise HTTPException(404, "That business does not exist.")
+            cur.execute("""INSERT INTO pos_settings (tenant_id, enabled, enabled_by, enabled_at) VALUES (%s, %s, %s, now())
+                           ON CONFLICT (tenant_id) DO UPDATE SET enabled = EXCLUDED.enabled,
+                                  enabled_by = EXCLUDED.enabled_by, enabled_at = EXCLUDED.enabled_at""",
+                        (tid, on, str(uid or "") or None))
+            record(cur, action="pos.enable" if on else "pos.disable", resource="pos_settings", resource_id=tid,
+                   actor=str(uid or ""), detail={"business": t["name"]}, tenant_id=tid)
+        return {"id": tid, "enabled": on}
 
     # ------------------------------------------------------------ setup
     @router.get("/pos/catalogue")

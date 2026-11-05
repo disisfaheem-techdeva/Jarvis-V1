@@ -6,6 +6,8 @@
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
   var HW = window.PosHW;
+  // the POS has its own address (pos.techdeva.net); the dashboard lives on api.
+  var DASH = location.hostname.indexOf("pos.") === 0 ? location.origin.replace("//pos.", "//api.") + "/dashboard" : "/dashboard";
   var S = { items: [], cat: "", mode: "counter", cart: [], bill: null, settings: {}, isOwner: false, methods: ["cash"],
             business: "", me: "", shift: null, device: HW.device(), ref: null, discount: 0, approvals: {}, payFor: null };
 
@@ -36,7 +38,14 @@
   }
   function signedOut() {
     $("main").innerHTML = '<div class="state"><h1 class="font-display text-xl">Sign in to use the till</h1>' +
-      '<p>Your login has ended.</p><a class="td-btn" href="/login">Staff login</a> <a class="td-btn td-btn--secondary" href="/dashboard">Owner login</a></div>';
+      '<p>Sign in with your staff PIN or the owner email.</p><a class="td-btn" href="/login">Sign in</a></div>';
+  }
+  // a business without the POS: one honest screen, nothing half-working
+  function posOff() {
+    ["shiftBtn", "openBtn", "billsBtn", "setupBtn"].forEach(function (k) { $(k).hidden = true; });
+    $("main").innerHTML = '<div class="state"><h1 class="font-display text-xl">POS is not on for your business</h1>' +
+      '<p>TechDeva POS is a separate product. Ask TechDeva to turn it on for you; your sales then go straight into your dashboard.</p>' +
+      '<a class="td-btn td-btn--secondary" href="' + DASH + '">Back to dashboard</a></div>';
   }
   function guard(r) { if (r.status === 401) { closeAll(); signedOut(); return false; } return true; }
   function closeAll() { Array.prototype.forEach.call(document.querySelectorAll("dialog[open]"), function (d) { d.close(); }); }
@@ -80,12 +89,13 @@
   function load() {
     return api("GET", "/pos/catalogue").then(function (r) {
       if (!guard(r)) return;
+      if (r.status === 403 && /not on/i.test(why(r))) { posOff(); return; }
       if (!r.ok) { $("grid").innerHTML = '<div class="state">' + esc(why(r)) + ' <button type="button" class="td-btn td-btn--secondary td-btn--sm" id="retry">Try again</button></div>'; $("retry").onclick = load; return; }
       var d = r.data;
       S.items = d.items || []; S.isOwner = !!d.is_owner; S.methods = d.methods || ["cash"]; S.settings = d.settings || {};
       S.business = d.business || ""; S.me = d.me || "";
       if ((S.settings.registers || []).indexOf(S.device.register) < 0) S.device.register = (S.settings.registers || ["Till 1"])[0];
-      $("biz").textContent = S.business || "Till"; document.title = (S.business ? S.business + " · " : "") + "Till";
+      $("biz").textContent = S.business || "Till"; document.title = (S.business ? S.business + " · " : "") + "TechDeva POS";
       cats(); grid(); render();
       return loadShift();
     });
@@ -127,7 +137,7 @@
     });
   }
   function grid() {
-    if (!S.items.length) { $("grid").innerHTML = '<div class="state">Nothing to sell yet. Add products and prices on the dashboard (Business › Products). <a class="td-btn td-btn--secondary td-btn--sm" href="/dashboard">Open dashboard</a></div>'; return; }
+    if (!S.items.length) { $("grid").innerHTML = '<div class="state">Nothing to sell yet. Add products and prices on the dashboard (Business › Products). <a class="td-btn td-btn--secondary td-btn--sm" href="' + DASH + '">Open dashboard</a></div>'; return; }
     var list = shown();
     if (!list.length) { $("grid").innerHTML = '<div class="state">No product matches “' + esc($("search").value) + '”.</div>'; return; }
     $("grid").innerHTML = list.map(function (i) {
@@ -708,5 +718,6 @@
 
   if (/[?&]display=1\b/.test(location.search)) { customerScreen(); return; }
   wire();
+  $("backDash").href = DASH;
   HW.reconnect(S.device).then(load);
 })();

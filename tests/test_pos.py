@@ -34,6 +34,8 @@ def client():
     with tenant_session(None, "techdeva_admin") as cur:
         cur.execute("INSERT INTO tenants (id, name, industry, is_test) VALUES (%s, 'POS Test Shop', 'retail', true),"
                     " (%s, 'POS Other Shop', 'retail', true)", (T, T2))
+        # POS is off unless TechDeva turns it on (db/91)
+        cur.execute("INSERT INTO pos_settings (tenant_id, enabled) VALUES (%s, true), (%s, true)", (T, T2))
         for k, tid, role in (("owner", T, "owner"), ("staff", T, "operator"), ("other", T2, "owner")):
             cur.execute("INSERT INTO users (id, tenant_id, name, email, role, pin_hash) VALUES (%s, %s, %s, %s, %s, %s)",
                         (U[k], tid, k.title(), "%s@postest.local" % U[k][:8], role,

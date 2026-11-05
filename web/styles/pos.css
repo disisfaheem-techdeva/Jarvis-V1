@@ -93,3 +93,14 @@
   & .cust-total { @apply flex justify-between font-display text-6xl font-semibold; }
   & .cust-msg { @apply text-center text-2xl text-success; }
 }
+
+/* TechDeva POS as its own product (pos.techdeva.net): brand mark and sign-in */
+.page-pos .posbrand { @apply mr-1 rounded-[var(--badge-radius)] bg-accent px-2 py-0.5 text-xs font-semibold tracking-wide text-on-accent uppercase; }
+.page-poslogin {
+  & .loginwrap { @apply flex min-h-screen items-center justify-center p-4; }
+  & .logincard { @apply flex w-full max-w-sm flex-col gap-4 rounded-[var(--card-radius)] border border-line-strong bg-surface p-6; }
+  & .posmark { @apply flex h-14 w-14 items-center justify-center rounded-[var(--card-radius)] bg-accent font-display text-lg font-bold text-on-accent; }
+  & .modes { @apply grid-cols-2; }
+  & .codein { @apply tracking-[0.25em] uppercase; }
+  & .msg a { @apply text-accent-ink underline; }
+}
