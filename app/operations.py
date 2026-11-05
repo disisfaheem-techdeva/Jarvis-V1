@@ -333,6 +333,12 @@ def make_operations_router():
         cur.execute("SELECT method, COALESCE(SUM(amount), 0) AS amount, COUNT(*) AS n "
                     "FROM payments WHERE " + where + " GROUP BY method", tuple(args))
         by_method = {r["method"]: float(r["amount"]) for r in cur.fetchall()}
+        if not location_id:
+            # cash handed back at the till left the drawer: expect that much less
+            cur.execute("SELECT method, COALESCE(SUM(amount), 0) AS amount FROM pos_refunds "
+                        "WHERE created_at::date = %s GROUP BY method", (on_day,))
+            for r in cur.fetchall():
+                by_method[r["method"]] = round(by_method.get(r["method"], 0.0) - float(r["amount"]), 2)
         ewhere = "spent_on = %s"
         eargs = [on_day]
         if location_id:
@@ -424,6 +430,13 @@ def make_operations_router():
                         (start, end) + extra)
             row = cur.fetchone()
             collected, payment_count = float(row["a"] or 0), row["n"]
+            refunded = {}
+            if not location_id:
+                # till refunds: money that came in and went back out (pos_refund.py)
+                cur.execute("SELECT method, COALESCE(SUM(amount), 0) AS a FROM pos_refunds "
+                            "WHERE created_at::date BETWEEN %s AND %s GROUP BY method", (start, end))
+                refunded = {r["method"]: float(r["a"]) for r in cur.fetchall()}
+            collected -= sum(refunded.values())
             cur.execute("SELECT COALESCE(SUM(total), 0) AS a, COUNT(*) AS n FROM invoices "
                         "WHERE issued_on BETWEEN %s AND %s AND voided_at IS NULL" + loc_p,
                         (start, end) + extra)
@@ -440,7 +453,7 @@ def make_operations_router():
             cur.execute("SELECT method, COALESCE(SUM(amount), 0) AS a FROM payments "
                         "WHERE paid_at::date BETWEEN %s AND %s" + loc_p +
                         " GROUP BY method ORDER BY a DESC", (start, end) + extra)
-            by_method = [{"method": r["method"], "amount": float(r["a"])}
+            by_method = [{"method": r["method"], "amount": round(float(r["a"]) - refunded.get(r["method"], 0.0), 2)}
                          for r in cur.fetchall()]
             cur.execute("SELECT COALESCE(SUM(i.total), 0) - COALESCE(("
                         "SELECT SUM(p.amount) FROM payments p JOIN invoices i2 ON i2.id = p.invoice_id "
@@ -449,6 +462,7 @@ def make_operations_router():
             outstanding = float(cur.fetchone()["a"] or 0)
         return {"start": start, "end": end,
                 "collected": round(collected, 2), "payment_count": payment_count,
+                "refunded": round(sum(refunded.values()), 2),
                 "invoiced": round(invoiced, 2), "invoice_count": invoice_count,
                 "expenses": round(expenses, 2),
                 "net": round(collected - expenses, 2),

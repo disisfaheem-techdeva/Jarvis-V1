@@ -36,7 +36,7 @@ NEXT = {"new": {"confirmed", "cancelled"},
         "confirmed": {"out_for_delivery", "delivered", "cancelled"},
         "out_for_delivery": {"delivered", "cancelled"},
         "delivered": set(), "cancelled": set()}
-SOURCES = ("whatsapp_ai", "website", "facebook", "instagram", "manual", "dashboard", "api")
+SOURCES = ("whatsapp_ai", "website", "facebook", "instagram", "manual", "dashboard", "api", "pos")
 LABEL = {"new": "New", "confirmed": "Confirmed", "out_for_delivery": "Out for delivery",
          "delivered": "Delivered", "cancelled": "Cancelled"}
 MONEY_ROLES = ("owner", "techdeva_admin")
@@ -139,7 +139,7 @@ def create_order(cur, *, items, customer_name="", customer_phone="", fulfilment=
                 raise OrderError(400, "The price for %s must be a number." % c["name"])
             if price < 0:
                 raise OrderError(400, "A price cannot be negative.")
-        lines.append({"c": c, "qty": qty, "price": price})
+        lines.append({"c": c, "qty": qty, "price": price, "note": str(it.get("note") or "").strip()[:200] or None})
     if not lines:
         raise OrderError(400, "None of these items are on your list: %s." % ", ".join(unknown))
     if unknown and actor_type != "agent":
@@ -179,11 +179,12 @@ def create_order(cur, *, items, customer_name="", customer_phone="", fulfilment=
     oid = cur.fetchone()["id"]
     for l in lines:
         c = l["c"]
-        cur.execute("""INSERT INTO order_items (tenant_id, order_id, product_id, service_id, description, quantity, unit_price, line_total)
-                       VALUES (current_tenant(), %s, %s, %s, %s, %s, %s, %s)""",
+        cur.execute("""INSERT INTO order_items (tenant_id, order_id, product_id, service_id, description, quantity, unit_price,
+                                                line_total, note)
+                       VALUES (current_tenant(), %s, %s, %s, %s, %s, %s, %s, %s)""",
                     (oid, c["id"] if c["kind"] == "product" else None, c["id"] if c["kind"] == "service" else None,
-                     c["name"], l["qty"], l["price"] or 0, round(l["qty"] * (l["price"] or 0), 2)))
-    who = {"whatsapp_ai": "the WhatsApp agent", "dashboard": "the dashboard", "manual": "by hand"}.get(source, source)
+                     c["name"], l["qty"], l["price"] or 0, round(l["qty"] * (l["price"] or 0), 2), l["note"]))
+    who = {"whatsapp_ai": "the WhatsApp agent", "dashboard": "the dashboard", "manual": "by hand", "pos": "the till"}.get(source, source)
     _event(cur, oid, actor, actor_type, "created", "Order placed via %s" % who)
     record(cur, action="order.create", resource="orders", resource_id=oid, actor=str(actor or ""),
            actor_type=actor_type, detail={"number": number, "total": total, "source": source, "items": len(lines)})
@@ -275,9 +276,10 @@ def _ensure_invoice(cur, o, actor):
     """The order's invoice, made from its lines the first time money or delivery needs it."""
     if o["invoice_id"]:
         return str(o["invoice_id"])
-    cur.execute("""INSERT INTO invoices (tenant_id, customer_id, number, discount, notes)
-                   VALUES (current_tenant(), %s, %s, %s, %s) RETURNING id""",
-                (o["customer_id"], _next_invoice_number(cur), o["discount"], "Order %s" % o["number"]))
+    cur.execute("""INSERT INTO invoices (tenant_id, customer_id, number, discount, tax, notes)
+                   VALUES (current_tenant(), %s, %s, %s, %s, %s) RETURNING id""",
+                (o["customer_id"], _next_invoice_number(cur), o["discount"],
+                 o.get("tax") or 0 if o.get("tax_mode") == "exclusive" else 0, "Order %s" % o["number"]))
     inv = cur.fetchone()["id"]
     cur.execute("SELECT product_id, service_id, description, quantity, unit_price, line_total FROM order_items "
                 "WHERE order_id = %s", (o["id"],))
@@ -510,6 +512,14 @@ def summary(cur, role):
               COALESCE(sum(total) FILTER (WHERE recognised_at >= date_trunc('month', now())), 0) AS sales_month
             FROM orders""")
         m = {k: _money(v) for k, v in cur.fetchone().items()}
+        # money handed back at the till (pos_refund.py) is not a sale
+        cur.execute("""SELECT COALESCE(sum(amount) FILTER (WHERE created_at >= date_trunc('day', now())), 0) AS d,
+                              COALESCE(sum(amount) FILTER (WHERE created_at >= date_trunc('month', now())), 0) AS mo
+                         FROM pos_refunds""")
+        rf = cur.fetchone()
+        m["sales_today"] = round(m["sales_today"] - _money(rf["d"]), 2)
+        m["sales_month"] = round(m["sales_month"] - _money(rf["mo"]), 2)
+        m["refunded_month"] = _money(rf["mo"])
         cur.execute("""SELECT COALESCE(sum(o.total - COALESCE(p.paid, 0)), 0) AS outstanding,
                               count(*) AS n
                          FROM orders o LEFT JOIN (SELECT invoice_id, sum(amount) AS paid FROM payments GROUP BY invoice_id) p
@@ -519,7 +529,7 @@ def summary(cur, role):
         m["outstanding"], m["outstanding_orders"] = _money(r["outstanding"]), int(r["n"])
         cur.execute("""SELECT COALESCE(sum(p.amount), 0) AS a FROM payments p JOIN orders o ON o.invoice_id = p.invoice_id
                         WHERE p.paid_at >= date_trunc('day', now())""")
-        m["collected_today"] = _money(cur.fetchone()["a"])
+        m["collected_today"] = round(_money(cur.fetchone()["a"]) - _money(rf["d"]), 2)
         out["money"] = m
     return out
 

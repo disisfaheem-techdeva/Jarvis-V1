@@ -131,6 +131,8 @@ app.include_router(make_categories_router())
 # Orders: products sold (bookings stay appointments); money through invoices/payments
 from .orders import make_orders_router
 app.include_router(make_orders_router())
+from .pos_routes import make_pos_router
+app.include_router(make_pos_router())
 # Voice: the AI phone agent's call log and number settings (calls answered by app/voice_bridge.py)
 from .voice import make_voice_router
 app.include_router(make_voice_router())
@@ -839,6 +841,13 @@ def pin_page():
     return _page("pin.html")
 
 
+@app.get("/pos", include_in_schema=False)
+def pos_page():
+    """The till: counter billing. Like /dashboard it carries no tenant identity;
+    everything comes from /pos/* which resolves the tenant from the signed session."""
+    return _page("pos.html")
+
+
 @app.get("/portal", include_in_schema=False)
 def portal_page():
     """The client's trial dashboard: report, deliverables, approvals."""
@@ -880,6 +889,18 @@ def design_system_css():
                                  f"Run design-system/sync.py.")
     return FileResponse(path, media_type="text/css",
                         headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
+@app.get("/assets/{name}.js", include_in_schema=False)
+def pos_script(name: str):
+    """The till's own scripts: pos-hw.js (printer, cash drawer, scanner) and
+    pos-till.js (the till screen). Only these two names; nothing else in web/."""
+    if name not in ("pos-hw", "pos-till"):
+        raise HTTPException(404, "Not found.")
+    path = WEB_DIR / "assets" / (name + ".js")
+    if not path.is_file():
+        raise HTTPException(503, f"{name}.js is not available on this server.")
+    return FileResponse(path, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/techdeva", include_in_schema=False)

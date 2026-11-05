@@ -93,7 +93,7 @@ SECTION_BY_PATH = [
     ("/leads", "crm"), ("/crm", "crm"), ("/sales", "crm"), ("/customers", "crm"), ("/business/customers", "crm"), ("/appointments", "crm"),
     ("/operations/appointments", "crm"), ("/calendar", "crm"), ("/business/appointments", "crm"),
     # operations
-    ("/orders", "operations"), ("/operations/inventory", "operations"), ("/business/stock_movements", "operations"),
+    ("/orders", "operations"), ("/pos", "operations"), ("/operations/inventory", "operations"), ("/business/stock_movements", "operations"),
     ("/storefront/connect", "admin"), ("/storefront", "operations"),
     # team
     ("/team/logins", "admin"), ("/team/device", "admin"), ("/team/roles", "admin"), ("/team", "team"),
@@ -126,7 +126,7 @@ ALWAYS_EXACT = {"/me", "/console/prefs", "/business-profile", "/categories", "/b
                 "/console", "/console/speak"}
 ALWAYS_PREFIX = ("/auth/", "/public/", "/media/", "/assets/", "/console/conversations")
 PAGES = ("/", "/dashboard", "/login", "/pin", "/reset", "/portal", "/onboarding", "/techdeva", "/signup",
-         "/orders-view", "/storefront-view", "/plans")
+         "/orders-view", "/storefront-view", "/plans", "/pos")
 APPROVE_WORDS = ("approve", "reject", "publish", "launch", "resume", "pause", "approve-week", "void", "dismiss", "apply")
 MANAGE_WORDS = ("settings", "connect", "disconnect", "prefs", "sync", "type")
 _CACHE: dict = {}
