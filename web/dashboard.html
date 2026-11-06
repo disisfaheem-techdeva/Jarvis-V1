@@ -368,12 +368,12 @@ var PREFS = {};
 
 function applyBrand(){
   var root = document.documentElement;
-  var accent = PREFS.accent || BRAND.accent;
+  var accent = (typeof THEME !== 'undefined' && THEME && THEME.accent) || PREFS.accent || BRAND.accent;
   if (accent && /^#[0-9a-fA-F]{3,8}$/.test(accent)) {
     /* TD.brand also sets readable text on the colour and a readable shade of
        it for text, so a light brand colour never gives white-on-white buttons */
     if (window.TD) TD.brand(accent); else root.style.setProperty('--accent', accent);
-  }
+  } else if (window.TD) TD.brand(null);
   var wanted = PREFS.show_logo_background !== false;
   var el = document.getElementById('brandbg');
   if (!el) {
@@ -11980,6 +11980,128 @@ function galConfirmApprove(){
     if (confirm('You have unsaved dashboard changes. Leave without saving?')) { CZ.dirty = false; CZ.draft = null; }
     else history.back();
   });
+})();
+
+/* =====================================================================
+   Themes (6 Nov 2026): like Windows > Personalization > Themes. Each person
+   picks a theme for their own dashboard: a wallpaper behind the screen, an
+   accent colour and light or dark. "Business default" keeps the business's
+   own brand colour. Saved per login (users.ui_theme, /me/theme) and kept in
+   this browser so it shows before the page has asked the server.
+   The ids must match app/ui_theme.py THEMES.
+   ===================================================================== */
+var THEMES = [
+  { id: 'business', name: 'Business default', mode: null, accent: null,
+    wall: 'radial-gradient(circle at 80% 15%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 55%)' },
+  { id: 'bloom-light', name: 'Bloom', mode: 'light', accent: '#0067c0',
+    wall: 'radial-gradient(circle at 70% 30%, rgba(0,103,192,.28), transparent 50%), radial-gradient(circle at 20% 90%, rgba(76,194,255,.25), transparent 55%), linear-gradient(160deg, #eaf4ff, #cfe5fb)' },
+  { id: 'bloom-dark', name: 'Bloom night', mode: 'dark', accent: '#4cc2ff',
+    wall: 'radial-gradient(circle at 70% 35%, rgba(0,103,192,.45), transparent 50%), radial-gradient(circle at 25% 85%, rgba(76,194,255,.18), transparent 55%), linear-gradient(160deg, #04112b, #0a1f4d)' },
+  { id: 'glow', name: 'Glow', mode: 'dark', accent: '#c239b3',
+    wall: 'radial-gradient(circle at 75% 80%, rgba(194,57,179,.45), transparent 50%), radial-gradient(circle at 30% 20%, rgba(91,33,182,.35), transparent 55%), linear-gradient(160deg, #12021f, #24063a)' },
+  { id: 'flow', name: 'Flow', mode: 'dark', accent: '#e81123',
+    wall: 'radial-gradient(circle at 65% 40%, rgba(232,17,35,.35), transparent 45%), radial-gradient(circle at 35% 70%, rgba(255,140,0,.22), transparent 50%), linear-gradient(160deg, #0b0b0f, #1a0a12)' },
+  { id: 'lagoon', name: 'Lagoon', mode: 'light', accent: '#038387',
+    wall: 'radial-gradient(circle at 60% 25%, rgba(255,255,255,.7), transparent 45%), linear-gradient(180deg, #cfe9ec 0%, #a9d6db 55%, #6fb3ba 100%)' },
+  { id: 'mist', name: 'Mist', mode: 'light', accent: '#4a5a6a',
+    wall: 'radial-gradient(circle at 70% 30%, rgba(149,170,196,.45), transparent 50%), linear-gradient(160deg, #f1f4f8, #dde4ec)' },
+  { id: 'violet', name: 'TechDeva violet', mode: 'dark', accent: '#8b5cf6',
+    wall: 'radial-gradient(circle at 80% 10%, rgba(139,92,246,.35), transparent 50%), linear-gradient(160deg, #07060d, #140f24)' },
+  { id: 'emerald', name: 'Emerald', mode: 'dark', accent: '#10b981',
+    wall: 'radial-gradient(circle at 25% 20%, rgba(16,185,129,.30), transparent 50%), radial-gradient(circle at 80% 90%, rgba(6,95,70,.35), transparent 55%), linear-gradient(160deg, #03110c, #072219)' }
+];
+var THEME = null, THEME_SAVED = 'business';
+var THEME_KEY = 'td-ui-theme';
+
+function themeById(id){ for (var i = 0; i < THEMES.length; i++) if (THEMES[i].id === id) return THEMES[i]; return THEMES[0]; }
+
+/* Put a theme on the screen (does not save). */
+function applyTheme(id){
+  var t = themeById(id);
+  THEME = t.id === 'business' ? null : t;
+  if (t.mode && window.TD && TD.theme() !== t.mode) TD.setTheme(t.mode);
+  if (typeof applyBrand === 'function') applyBrand();
+  var el = document.getElementById('themebg');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'themebg';
+    el.setAttribute('aria-hidden', 'true');
+    el.style.cssText = 'position:fixed;inset:0;z-index:0;pointer-events:none;transition:opacity .3s';
+    document.body.insertBefore(el, document.body.firstChild);
+  }
+  el.style.background = t.wall;
+  el.style.opacity = t.id === 'business' ? '1' : '0.9';
+}
+
+function loadTheme(){
+  var local = null;
+  try { local = localStorage.getItem(THEME_KEY); } catch (e) { /* storage blocked */ }
+  if (local) { THEME_SAVED = local; applyTheme(local); }
+  api('/me/theme').then(function(r){
+    if (!r.ok || !r.data) return;
+    THEME_SAVED = r.data.theme || 'business';
+    try { localStorage.setItem(THEME_KEY, THEME_SAVED); } catch (e) { /* storage blocked */ }
+    if (THEME_SAVED !== local) applyTheme(THEME_SAVED);
+  });
+}
+
+/* (data-th, not data-theme: <html data-theme="light"> would match too)
+   Settings > Themes: a preview of the current theme and a card per theme.
+   A click previews; Save keeps it for this login on every device. */
+var TH = { pick: null, msg: '' };
+function themeCard(t, on){
+  var accent = t.accent || 'var(--accent)';
+  var win = t.mode === 'light' ? 'rgba(255,255,255,.92)' : t.mode === 'dark' ? 'rgba(20,20,28,.88)' : 'var(--surface)';
+  return '<button type="button" class="th-card" data-th="' + t.id + '" aria-pressed="' + on + '" title="' + esc(t.name) + '" ' +
+    'style="all:unset;cursor:pointer;display:flex;flex-direction:column;gap:6px;width:150px">' +
+    '<span style="position:relative;display:block;height:96px;border-radius:10px;overflow:hidden;background:' + t.wall + ',var(--bg);' +
+    'outline:' + (on ? '3px solid var(--accent)' : '1px solid var(--line)') + ';outline-offset:2px">' +
+    '<span style="position:absolute;right:10px;bottom:10px;width:46px;height:40px;border-radius:6px;background:' + win + ';box-shadow:0 2px 8px rgba(0,0,0,.25)">' +
+    '<span style="position:absolute;left:8px;right:8px;bottom:8px;height:6px;border-radius:3px;background:' + accent + '"></span></span></span>' +
+    '<span style="font-size:13px;color:var(--fg)">' + esc(t.name) + (t.mode ? ' <span style="color:var(--fg-subtle)">· ' + t.mode + '</span>' : '') + '</span></button>';
+}
+function themesPanel(){
+  var cur = TH.pick || (THEME ? THEME.id : THEME_SAVED) || 'business', t = themeById(cur);
+  var preview = '<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">' +
+    '<div style="position:relative;width:230px;height:140px;border-radius:12px;overflow:hidden;border:6px solid #000;background:' + t.wall + ',var(--bg)">' +
+    '<div style="position:absolute;right:14px;top:14px;bottom:14px;width:110px;border-radius:6px;background:' + (t.mode === 'light' ? 'rgba(255,255,255,.92)' : 'rgba(20,20,28,.88)') + '">' +
+    '<div style="margin:12px 10px;height:3px;background:var(--fg-subtle);opacity:.5"></div><div style="margin:6px 10px;height:3px;background:var(--fg-subtle);opacity:.5"></div>' +
+    '<div style="position:absolute;right:10px;bottom:10px;width:30px;height:8px;border-radius:4px;background:' + (t.accent || 'var(--accent)') + '"></div></div></div>' +
+    '<div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:14px">' +
+    '<span style="color:var(--fg-subtle)">Theme</span><b>' + esc(t.name) + '</b>' +
+    '<span style="color:var(--fg-subtle)">Colour</span><span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;background:' + (t.accent || 'var(--accent)') + '"></span> ' + (t.accent ? esc(t.accent) : 'your business colour') + '</span>' +
+    '<span style="color:var(--fg-subtle)">Mode</span><span>' + (t.mode || 'as you set it') + '</span></div></div>';
+  var cards = '<div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:16px">' + THEMES.map(function(x){ return themeCard(x, x.id === cur); }).join('') + '</div>';
+  var dirty = cur !== THEME_SAVED;
+  var actions = '<div style="display:flex;gap:10px;align-items:center;margin-top:16px">' +
+    '<button class="btn primary" id="th-save"' + (dirty ? '' : ' disabled') + '>Save</button>' +
+    (dirty ? '<button class="btn" id="th-cancel">Cancel</button>' : '') +
+    '<span class="card-note" id="th-msg" role="status">' + esc(TH.msg || (dirty ? 'Previewing. Save to keep it.' : 'Your theme, on every device you sign in on.')) + '</span></div>';
+  setTimeout(wireThemes, 0);
+  return panel('Themes', '<div style="padding:4px 2px">' + preview + cards + actions + '</div>');
+}
+function wireThemes(){
+  Array.prototype.forEach.call(document.querySelectorAll('.th-card[data-th]'), function(b){
+    b.onclick = function(){ TH.pick = b.getAttribute('data-th'); TH.msg = ''; applyTheme(TH.pick); renderShell(); };
+  });
+  var c = document.getElementById('th-cancel');
+  if (c) c.onclick = function(){ TH.pick = null; TH.msg = 'Back to your saved theme.'; applyTheme(THEME_SAVED); renderShell(); };
+  var s = document.getElementById('th-save');
+  if (s) s.onclick = function(){
+    var id = TH.pick || THEME_SAVED;
+    s.disabled = true;
+    api('/me/theme', { method: 'PUT', body: { theme: id } }).then(function(r){
+      if (!r.ok) { TH.msg = (r.data && r.data.detail) || 'Could not save. Nothing changed on the server.'; renderShell(); return; }
+      THEME_SAVED = id; TH.pick = null; TH.msg = 'Saved.';
+      try { localStorage.setItem(THEME_KEY, id); } catch (e) { /* storage blocked */ }
+      renderShell();
+    });
+  };
+}
+(function(){
+  var _thSettings = VIEWS.settings;
+  VIEWS.settings = function(){ return themesPanel() + _thSettings.apply(this, arguments); };
+  loadTheme();
 })();
 
 boot();

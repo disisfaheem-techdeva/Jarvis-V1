@@ -133,6 +133,8 @@ from .orders import make_orders_router
 app.include_router(make_orders_router())
 from .pos_routes import make_pos_router
 app.include_router(make_pos_router())
+from .ui_theme import make_ui_theme_router
+app.include_router(make_ui_theme_router())
 # Voice: the AI phone agent's call log and number settings (calls answered by app/voice_bridge.py)
 from .voice import make_voice_router
 app.include_router(make_voice_router())

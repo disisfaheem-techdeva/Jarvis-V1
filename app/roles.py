@@ -119,7 +119,7 @@ SECTION_BY_PATH.sort(key=lambda x: -len(x[0]))
 # open to every signed-in login whatever its role: who am I, signing in and out,
 # the business's name and look, and what the dashboard needs to draw itself
 ALWAYS_EXACT = {"/me", "/console/prefs", "/business-profile", "/categories", "/brand", "/brand/logo", "/portal/config",
-                "/health", "/team/roles/mine",
+                "/health", "/team/roles/mine", "/me/theme",
                 # talking to Jarvis: open to every login; what Jarvis shows and does is
                 # limited to the person's role inside it (console._facts_for, _role_may,
                 # and its actions go through this same check)
