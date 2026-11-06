@@ -733,6 +733,27 @@ _TTS_MODELS = ("gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts",
 TTS_TIMEOUT = 8
 TTS_BUDGET = 12
 _TTS_CACHE = {}          # text -> wav, last 64 phrases ("Done.", repeated answers)
+# Gemini voice for Jarvis (Kore, Sulafat, Charon, ...); samples in RE/docs/jarvis-voice-samples
+JARVIS_VOICE = (os.environ.get("JARVIS_VOICE") or "Kore").strip()
+# Short on purpose: a long instruction gets read out loud by the speech model.
+URDU_STYLE = "Say in a warm, natural Pakistani Urdu accent: "
+ENGLISH_STYLE = "Say in a warm, friendly, clear voice: "
+# Jarvis answers in Roman Urdu by default (4 Nov 2026), in Latin letters. The
+# dashboard asks for an English voice unless its Urdu switch is on, so Roman
+# Urdu was read with an English accent (or, when the server voice failed, by
+# the browser's en-US voice). These words tell Roman Urdu from English.
+_ROMAN_URDU = frozenset("""hai hain hoon hun ho tha thi the aap ap tum main mein mai ka ki ke ko se ne nahi nahin
+na kya kyun kaise kis kab kahan kitna kitne kitni yeh ye woh wo is us aur bhi abhi aaj kal theek thik acha achha
+ji haan han shukriya salam assalam walaikum karo karein kar diya diye raha rahi rahe hoga hogi chahiye batayein
+bataiye bata sunayein dekh dekhna wala wali wale waqt din kaam liye lein dein deta deti hum hamare aapke apne""".split())
+
+
+def is_roman_urdu(text: str) -> bool:
+    words = re.findall(r"[a-z]+", str(text or "").lower())
+    if not words:
+        return False
+    hits = sum(1 for w in words if w in _ROMAN_URDU)
+    return hits >= 2 and hits / len(words) >= 0.15
 
 
 def _pcm_to_wav(pcm: bytes, rate: int) -> bytes:
@@ -756,8 +777,7 @@ def _tts(text: str, urdu: bool) -> bytes:
     why = usage.check()
     if why:
         raise HTTPException(402, why)
-    style = ("Read this aloud in natural, warm Pakistani Urdu, like a friendly assistant: "
-             if urdu else "Read this aloud in a warm, friendly, clear voice: ")
+    style = URDU_STYLE if urdu else ENGLISH_STYLE
     last = "no model tried"
     started = time.time()
     for m in _TTS_MODELS:
@@ -772,7 +792,7 @@ def _tts(text: str, urdu: bool) -> bytes:
                       "generationConfig": {
                           "responseModalities": ["AUDIO"],
                           "speechConfig": {"voiceConfig": {
-                              "prebuiltVoiceConfig": {"voiceName": "Kore"}}}}},
+                              "prebuiltVoiceConfig": {"voiceName": JARVIS_VOICE}}}}},
                 timeout=(4, TTS_TIMEOUT))
             if r.status_code >= 400:
                 last = "%s_%s" % (m, r.status_code)
@@ -1296,7 +1316,8 @@ def make_console_router():
         text = (body.get("text") or "").strip()[:600]
         if not text:
             raise HTTPException(400, "Nothing to say.")
-        urdu = body.get("lang") == "ur" or any("\u0600" <= c <= "\u06ff" for c in text)
+        urdu = (body.get("lang") == "ur" or any("\u0600" <= c <= "\u06ff" for c in text)
+                or is_roman_urdu(text))
         t0 = time.time()
         key = ("ur:" if urdu else "en:") + text
         wav = _TTS_CACHE.get(key)
