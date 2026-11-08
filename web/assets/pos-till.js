@@ -97,6 +97,7 @@
       if ((S.settings.registers || []).indexOf(S.device.register) < 0) S.device.register = (S.settings.registers || ["Till 1"])[0];
       $("biz").textContent = S.business || "Till"; document.title = (S.business ? S.business + " · " : "") + "TechDeva POS";
       cats(); grid(); render();
+      $("jvBtn").hidden = false;      // the till works, so Jarvis can bill on it
       return loadShift();
     });
   }
@@ -648,8 +649,165 @@
     });
   }
 
+  // ---------------------------------------------------------------- Jarvis
+  // (8 Nov 2026; docs/JARVIS-API.md, app/jarvis_pos.py) Say or type a bill or a
+  // stock question. The bill and its total are read back by the server from the
+  // shop's own list; the till only shows them. Yes makes the sale on THIS till
+  // (its register goes with every message), then the ordinary receipt prints.
+  // Saying "haan" / "nahi" while a bill waits is the same as pressing Yes / No,
+  // inside this signed-in till session.
+  var JV = { conv: null, token: null, action: null, rec: null, listening: false, busy: false, audio: null };
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var YES = /^\s*(haan|han|haa|ha|ji|jee|ji haan|yes|ok|okay|theek|theek hai|thik hai|kar do|bana do|final|ہاں|جی)\b/i;
+  var NO = /^\s*(nahi|nahin|nai|na|no|cancel|rehne do|mat|نہیں)\b/i;
+  function jvPref(k, v) {
+    try {
+      if (v === undefined) return localStorage.getItem("td-pos-jv-" + k);
+      localStorage.setItem("td-pos-jv-" + k, v);
+    } catch (e) { /* storage blocked: the choice lasts this page view */ }
+    return null;
+  }
+  JV.lang = jvPref("lang") === "en" ? "en" : "ur";
+  JV.speak = jvPref("speak") !== "0";
+  function jvErr(r) { var d = r.data || {}; return (d.error && d.error.message) || why(r); }
+  function jvStopVoice() {
+    if (JV.audio) { try { JV.audio.pause(); } catch (e) { /* already stopped */ } JV.audio = null; }
+  }
+  function jvVoice(text) {
+    jvStopVoice();
+    if (!JV.speak || !text) return;
+    // Jarvis's own voice (Gemini, Urdu or English); silence if it cannot be had, the words are on screen
+    fetch("/jarvis/v1/speech", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ text: text.slice(0, 600), lang: JV.lang }) })
+      .then(function (r) { return r.ok ? r.blob() : null; })
+      .then(function (b) {
+        if (!b) return;
+        var a = new Audio(URL.createObjectURL(b)); JV.audio = a;
+        a.play().catch(function () { /* the browser refused sound: the reply is still shown */ });
+      }).catch(function () { /* no voice: the reply is still shown */ });
+  }
+  function jvShow(text, ask) {
+    $("jvReply").hidden = !text; $("jvReply").textContent = text || "";
+    $("jvReply").classList.toggle("ask", !!ask);
+    jvVoice(text);
+  }
+  function jvBusy(on, label) {
+    JV.busy = on;
+    ["jvMic", "jvSend", "jvYes", "jvNo"].forEach(function (k) { $(k).disabled = on; });
+    $("jvMicLbl").textContent = label || (JV.listening ? "Listening… press to stop" : "Speak");
+  }
+  function jvPending(on) {
+    $("jvConfirm").hidden = !on;
+    if (!on) { JV.token = null; JV.action = null; }
+  }
+  function jvSend(text, spoken) {
+    text = String(text || "").trim();
+    if (!text || JV.busy) return;
+    if (JV.token && YES.test(text)) return jvYes();
+    if (JV.token && NO.test(text)) return jvNo();
+    jvPending(false);
+    $("jvHeard").textContent = "You: " + text; $("jvMsg").textContent = ""; $("jvIn").value = "";
+    jvBusy(true, "Thinking…");
+    api("POST", "/jarvis/v1/messages", { text: text, conversation_id: JV.conv, voice: !!spoken,
+                                         context: { register: S.device.register } }).then(function (r) {
+      jvBusy(false);
+      if (!guard(r)) return;
+      var d = r.data || {};
+      if (d.conversation_id) JV.conv = d.conversation_id;
+      if (!r.ok) { $("jvMsg").textContent = jvErr(r); return; }
+      if (d.kind === "confirm" && d.confirmation) {
+        JV.token = d.confirmation.token; JV.action = d.confirmation.action;
+        $("jvYes").textContent = JV.action === "pos_bill" ? "Yes, make the bill" : "Yes";
+        jvShow(d.reply); jvPending(true); JV.token = d.confirmation.token; $("jvYes").focus();
+        return;
+      }
+      jvShow(d.reply, d.kind === "answer" || (d.action && d.action.ok === false));
+    });
+  }
+  function jvYes() {
+    if (!JV.token || JV.busy) return;
+    var token = JV.token;
+    jvPending(false); jvBusy(true, "Making the bill…");
+    api("POST", "/jarvis/v1/confirmations", { token: token, said: "Yes", conversation_id: JV.conv }).then(function (r) {
+      jvBusy(false);
+      if (!guard(r)) return;
+      var d = r.data || {};
+      if (!r.ok) { $("jvMsg").textContent = jvErr(r); return; }
+      if (d.action && d.action.ok === false) { jvShow(d.reply, true); return; }
+      var sale = d.data && d.data.sale;
+      if (!sale || !sale.id) { jvShow(d.reply); return; }
+      jvShow(d.reply);
+      // the sale is saved: show and print its receipt exactly as a sale made by hand
+      api("GET", "/pos/bills/" + sale.id).then(function (b) {
+        refreshDay(); load();
+        if (!b.ok) { $("jvMsg").textContent = "The bill is made" + (sale.number ? " (" + sale.number + ")" : "") + ", but its receipt did not open: " + why(b) + " Find it under Bills."; return; }
+        $("jvDlg").close();
+        showReceipt(b.data, { autoPrint: true, cash: true });
+        HW.showCustomer({ business: S.business, total: b.data.total, lines: [], msg: "Thank you!" });
+      });
+    });
+  }
+  function jvNo() {
+    jvPending(false);
+    jvShow("OK, no bill was made.");
+  }
+  function jvListen() {
+    if (!SR || JV.busy) return;
+    if (JV.listening) { try { JV.rec.stop(); } catch (e) { /* already stopped */ } return; }
+    jvStopVoice();
+    var rec;
+    try { rec = new SR(); } catch (e) { $("jvMic").hidden = true; return; }
+    JV.rec = rec;
+    rec.lang = JV.lang === "en" ? "en-PK" : "ur-PK";
+    rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+    var heard = "";
+    rec.onresult = function (ev) {
+      var t = "", fin = "";
+      for (var i = ev.resultIndex; i < ev.results.length; i++) {
+        var x = ev.results[i][0] ? ev.results[i][0].transcript : "";
+        if (ev.results[i].isFinal) fin += x; else t += x;
+      }
+      if (fin) heard += fin;
+      $("jvHeard").textContent = "Hearing: " + (heard + " " + t).trim();
+    };
+    rec.onerror = function (ev) {
+      var m = { "not-allowed": "The microphone is blocked. Allow it from the lock icon in the address bar, then press Speak.",
+                "service-not-allowed": "The microphone is blocked. Allow it from the lock icon in the address bar, then press Speak.",
+                "no-speech": "I did not hear anything. Press Speak and try again.",
+                "audio-capture": "No microphone was found on this till.",
+                "network": "Speech needs the internet. Type it instead." }[ev.error];
+      if (m) $("jvMsg").textContent = m;
+    };
+    rec.onend = function () {
+      JV.listening = false; $("jvMic").setAttribute("aria-pressed", "false"); jvBusy(false);
+      if (heard.trim()) jvSend(heard, true);
+    };
+    try {
+      rec.start(); JV.listening = true; $("jvMsg").textContent = "";
+      $("jvMic").setAttribute("aria-pressed", "true"); jvBusy(false);
+    } catch (e) { JV.listening = false; }
+  }
+  function jvOpen() {
+    $("jvLang").value = JV.lang; $("jvSpeak").checked = JV.speak;
+    $("jvMic").hidden = !SR;
+    $("jvMsg").textContent = SR ? "" : "This browser cannot listen. Type it, or use Chrome for speaking.";
+    if (!$("jvDlg").open) $("jvDlg").showModal();
+    if (SR) $("jvMic").focus(); else $("jvIn").focus();
+  }
+
   // ---------------------------------------------------------------- wiring
   function wire() {
+    $("jvBtn").onclick = jvOpen;
+    $("jvMic").onclick = jvListen;
+    $("jvForm").onsubmit = function (e) { e.preventDefault(); jvSend($("jvIn").value, false); };
+    $("jvYes").onclick = jvYes;
+    $("jvNo").onclick = jvNo;
+    $("jvLang").onchange = function () { JV.lang = this.value === "en" ? "en" : "ur"; jvPref("lang", JV.lang); };
+    $("jvSpeak").onchange = function () { JV.speak = this.checked; jvPref("speak", JV.speak ? "1" : "0"); if (!JV.speak) jvStopVoice(); };
+    $("jvDlg").addEventListener("close", function () {
+      if (JV.listening && JV.rec) { try { JV.rec.abort(); } catch (e) { /* already stopped */ } }
+      jvStopVoice();
+    });
     $("grid").onclick = function (e) { var b = e.target.closest(".item"); if (b) add(b.dataset.id); };
     $("cats").onclick = function (e) { var b = e.target.closest("button"); if (!b) return; S.cat = b.dataset.cat; cats(); grid(); };
     $("search").oninput = grid;
@@ -710,7 +868,8 @@
     window.addEventListener("online", function () { banner(""); load(); });
     document.addEventListener("keydown", function (e) {
       if (document.querySelector("dialog[open]")) return;
-      var k = { F2: function () { $("search").focus(); $("search").select(); }, F4: hold, F8: openBills, F9: function () { if (!$("payBtn").disabled) openPay(null); } }[e.key];
+      var k = { F2: function () { $("search").focus(); $("search").select(); }, F4: hold, F8: openBills, F9: function () { if (!$("payBtn").disabled) openPay(null); },
+                F6: function () { if (!$("jvBtn").hidden) jvOpen(); } }[e.key];
       if (k) { e.preventDefault(); k(); }
     });
     HW.listenScanner(addByCode);

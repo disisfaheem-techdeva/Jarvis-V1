@@ -115,7 +115,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=e23621653f">
+<link rel="stylesheet" href="/assets/td.css?v=5af7551531">
 <!-- @td-css:end -->
 </head>
 <body class="td page-pos bg-bg text-fg">
@@ -139,6 +139,7 @@
     </div>
   </div>
   <div class="flex flex-wrap items-center justify-end gap-2">
+    <button type="button" class="td-btn td-btn--sm" id="jvBtn" aria-haspopup="dialog" title="Jarvis (F6)" hidden><span aria-hidden="true">🎤</span> Jarvis</button>
     <button type="button" class="chip" id="shiftBtn" aria-haspopup="dialog">Shift</button>
     <button type="button" class="td-btn td-btn--secondary td-btn--sm" id="openBtn" aria-haspopup="dialog" title="Open bills (F8)">Open bills <span class="td-badge" id="openCount">0</span></button>
     <button type="button" class="td-btn td-btn--secondary td-btn--sm" id="billsBtn" aria-haspopup="dialog">Bills</button>
@@ -189,7 +190,7 @@
       <button type="button" class="td-btn td-btn--secondary td-btn--lg" id="holdBtn" title="F4">Keep open</button>
       <button type="button" class="td-btn td-btn--lg" id="payBtn" title="F9">Pay</button>
     </div>
-    <div class="text-xs text-fg-subtle">F2 search · F4 keep open · F8 open bills · F9 pay</div>
+    <div class="text-xs text-fg-subtle">F2 search · F4 keep open · F6 Jarvis · F8 open bills · F9 pay</div>
   </aside>
 </main>
 <div class="mobilebar"><span class="td-num" id="mtotal">Rs 0</span><a class="td-btn" href="#billTitle">View bill</a></div>
@@ -308,6 +309,36 @@
     <video id="camVideo" class="cam" playsinline muted></video>
     <div class="msg" id="camMsg" role="alert"></div>
     <button type="button" class="td-btn td-btn--secondary" data-close>Close</button>
+  </div>
+</dialog>
+
+<!-- Jarvis at the till: say or type a bill or a stock question (app/jarvis_pos.py) -->
+<dialog id="jvDlg" aria-labelledby="jvTitle">
+  <div class="dlg">
+    <div class="jv-head">
+      <h2 id="jvTitle" class="m-0 font-display text-xl font-semibold">Jarvis</h2>
+      <label class="td-sr-only" for="jvLang">Language you speak</label>
+      <select id="jvLang" class="td-input jv-lang">
+        <option value="ur">Urdu / Roman Urdu</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+    <p class="m-0 text-sm text-fg-muted">Say a bill or ask about stock, e.g. “do kilo cheeni aur ek sabun ka bill bana do” or “kitni cheeni baqi hai?”</p>
+    <button type="button" class="jv-mic" id="jvMic" aria-pressed="false"><span aria-hidden="true">🎤</span> <span id="jvMicLbl">Speak</span></button>
+    <form class="jv-type" id="jvForm">
+      <label class="td-sr-only" for="jvIn">Or type it</label>
+      <input id="jvIn" class="td-input" maxlength="2000" autocomplete="off" placeholder="Or type it here">
+      <button type="submit" class="td-btn td-btn--secondary" id="jvSend">Send</button>
+    </form>
+    <div class="jv-heard" id="jvHeard" aria-live="polite"></div>
+    <div class="jv-reply" id="jvReply" role="status" aria-live="polite" hidden></div>
+    <div class="actions" id="jvConfirm" hidden>
+      <button type="button" class="td-btn td-btn--secondary td-btn--lg" id="jvNo">No</button>
+      <button type="button" class="td-btn td-btn--approve td-btn--lg" id="jvYes">Yes, make the bill</button>
+    </div>
+    <label class="check"><input type="checkbox" id="jvSpeak" checked> Read Jarvis’s answer out loud</label>
+    <div class="msg" id="jvMsg" role="alert"></div>
+    <button type="button" class="td-btn td-btn--ghost td-btn--sm self-start" data-close>Close</button>
   </div>
 </dialog>
 

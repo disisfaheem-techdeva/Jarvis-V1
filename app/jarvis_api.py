@@ -122,6 +122,9 @@ def make_jarvis_api_router():
         for k in ("conversation_id", "tenant_id", "image_urls"):
             if body.get(k) is not None:
                 legacy[k] = body[k]
+        ctx = body.get("context") if isinstance(body.get("context"), dict) else {}
+        if isinstance(ctx.get("register"), str) and ctx["register"].strip():
+            legacy["till_register"] = ctx["register"].strip()[:40]     # a bill said at a till goes on that till
         return turn(request, response, legacy, x_tenant_id, x_role, authorization, td_session)
 
     @router.post("/confirmations")

@@ -35,10 +35,12 @@ do by hand.
 { "text": "4200 bijli ka bill likh do",
   "conversation_id": "optional, to continue one",
   "voice": false,
-  "image_urls": ["optional, links this platform issued"] }
+  "image_urls": ["optional, links this platform issued"],
+  "context": { "register": "optional: the till this was said at, e.g. Till 1" } }
 ```
 
-`text` is required, at most 2,000 characters.
+`text` is required, at most 2,000 characters. A bill said at a till goes on that
+till's open shift (`context.register`), unless the person names another till.
 
 ## Response (messages and confirmations)
 
@@ -101,5 +103,5 @@ stops if a price changed, and sells it once. Code: `app/jarvis_pos.py`.
 
 ## Not in v1 yet
 
-Speech-to-text on the server (clients send text; the dashboard uses the browser's),
-udhaar by voice, a Jarvis button on the till screen.
+Speech-to-text on the server (clients send text; the dashboard and the till use the
+browser's), udhaar by voice.

@@ -9,6 +9,7 @@ fixed when the bill was read out.
 
 Runs against a SCRATCH database only. Makes its own businesses and deletes them.
 """
+import copy
 import os
 import uuid
 
@@ -71,7 +72,8 @@ def client():
 @pytest.fixture()
 def ai(monkeypatch):
     said = {"out": {"kind": "question", "reply": "Hello"}}
-    monkeypatch.setattr(console, "generate_json", lambda system, prompt, required_keys=(), _retry=True: dict(said["out"]))
+    # a fresh answer each call, as a real model's JSON is: the platform fills args in place
+    monkeypatch.setattr(console, "generate_json", lambda system, prompt, required_keys=(), _retry=True: copy.deepcopy(said["out"]))
     console._FACTS_CACHE.clear()
     return said
 
@@ -131,6 +133,9 @@ def test_yes_sells_once_and_takes_stock_once(client, ai):
     assert r.status_code == 200, r.text
     out = r.json()
     assert out["kind"] == "done" and out["action"]["ok"] and "Rs 180" in out["reply"]
+    sale = out["data"]["sale"]
+    assert sale["id"] and sale["number"] and sale["number"] in out["reply"]      # the till opens this receipt
+    assert client.get("/pos/bills/" + sale["id"], headers=OWNER).json()["total"] == 180
     assert _till_sales() == n + 1 and _stock(client)["Sugar"] == before["Sugar"] - 1
     again = _yes(client, d)                                  # double tap
     assert again.status_code == 409
@@ -205,7 +210,7 @@ def test_a_cashier_can_bill_by_voice(client, ai):
     n = _till_sales()
     _bill(ai, [{"said": "sabun", "qty": 1}])
     d = _say(client, "ek sabun", CASHIER).json()
-    assert d["kind"] == "confirm"
+    assert d["kind"] == "confirm", d["reply"]
     assert _yes(client, d, CASHIER).status_code == 200 and _till_sales() == n + 1
 
 
@@ -219,6 +224,28 @@ def test_no_open_shift_is_said(client, ai):
     _bill(ai, [{"said": "cheeni", "qty": 1}], register="Till 2")
     d = _say(client, "ek kilo cheeni").json()
     assert d["kind"] == "answer" and "shift" in d["reply"].lower()
+
+
+def test_a_bill_said_at_a_till_goes_on_that_till(client, ai):
+    """The till sends its register with each message (context.register)."""
+    _bill(ai, [{"said": "cheeni", "qty": 1}])
+    d = client.post("/jarvis/v1/messages", headers=OWNER,
+                    json={"text": "ek kilo cheeni", "context": {"register": "Till 2"}}).json()
+    assert d["kind"] == "answer" and "Till 2" in d["reply"]          # Till 2 has no shift open
+    d = client.post("/jarvis/v1/messages", headers=OWNER,
+                    json={"text": "ek kilo cheeni", "context": {"register": "Till 1"}}).json()
+    assert d["kind"] == "confirm", d["reply"]
+    # a register the model heard wins over the till's own
+    _bill(ai, [{"said": "cheeni", "qty": 1}], register="Till 2")
+    d = client.post("/jarvis/v1/messages", headers=OWNER,
+                    json={"text": "till 2 pe ek kilo cheeni", "context": {"register": "Till 1"}}).json()
+    assert d["kind"] == "answer" and "Till 2" in d["reply"]
+
+
+def test_the_till_address_reaches_jarvis(client, ai):
+    _bill(ai, [{"said": "sabun", "qty": 1}])
+    r = client.post("/jarvis/v1/messages", headers=dict(OWNER, host="pos.techdeva.net"), json={"text": "ek sabun"})
+    assert r.status_code == 200 and r.json()["kind"] == "confirm"
 
 
 # ---------------------------------------------------------------- stock question

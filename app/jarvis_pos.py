@@ -155,13 +155,14 @@ def sell(tid, role, uid, args):
     out = ja._call(tid, role, uid, "POST", "/pos/sale", {
         "client_ref": b["client_ref"], "register": b.get("register"), "items": b["items"],
         "payments": [{"method": "cash", "amount": q["total"]}]})
-    return {"navigate": None, "refresh": ["orders", "inventory"],
-            "sale": {k: out.get(k) for k in ("id", "number", "total", "status", "duplicate")}}, None
+    sale = {k: out.get(k) for k in ("id", "number", "total", "status", "duplicate")}
+    return {"navigate": None, "refresh": ["orders", "inventory"], "sale": sale}, (
+        "Done, bill %s for %s is made" % (sale.get("number") or "", _rs(sale.get("total") or q["total"])))
 
 
 def done_text(args):
     b = args.get("_bill") or {}
-    return "Done, the bill for %s is made. Print it from the till." % _rs(b.get("total") or 0)
+    return "Done, the bill for %s is made." % _rs(b.get("total") or 0)
 
 
 def stock(tid, role, uid, args):

@@ -94,6 +94,22 @@
   & .cust-msg { @apply text-center text-2xl text-success; }
 }
 
+/* Jarvis at the till (8 Nov 2026): one big button to speak, a typed fallback,
+   and the bill read back by the platform with Yes / No under it. */
+.page-pos {
+  & .jv-head { @apply flex items-center justify-between gap-3; }
+  & .jv-lang { @apply h-9 w-auto py-0 text-sm; }
+  & .jv-mic { @apply flex min-h-16 w-full cursor-pointer items-center justify-center gap-2 rounded-[var(--btn-radius)] border-2 border-accent-line bg-accent-tint font-display text-lg font-semibold text-fg; }
+  & .jv-mic:hover { @apply border-accent; }
+  & .jv-mic[aria-pressed="true"] { @apply border-accent bg-accent text-on-accent; }
+  & .jv-mic:disabled { @apply cursor-not-allowed opacity-50; }
+  & .jv-type { @apply flex gap-2; }
+  & .jv-type .td-input { @apply min-w-0 flex-1; }
+  & .jv-heard { @apply min-h-5 text-sm text-fg-subtle; }
+  & .jv-reply { @apply rounded-[var(--btn-radius)] border border-line bg-surface p-3 text-base leading-relaxed text-fg; }
+  & .jv-reply.ask { @apply border-warning bg-warning-tint; }
+}
+
 /* TechDeva POS as its own product (pos.techdeva.net): brand mark and sign-in */
 .page-pos .posbrand { @apply mr-1 rounded-[var(--badge-radius)] bg-accent px-2 py-0.5 text-xs font-semibold tracking-wide text-on-accent uppercase; }
 .page-poslogin {

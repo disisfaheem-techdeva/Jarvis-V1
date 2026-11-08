@@ -1053,6 +1053,8 @@ def make_console_router():
                 v = str(args.get(k) or "").strip().lower()
                 if v and not any(w in heard for w in re.findall(r"[a-z0-9\u0600-\u06ff]{3,}", v)):
                     args.pop(k, None)
+            if action == "pos_bill" and not args.get("register") and body.get("till_register"):
+                args["register"] = str(body["till_register"])[:40]       # said at a till: that till's shift
             if action == "write_campaign":
                 args["image_urls"] = attached
             if action == "schedule_post":
