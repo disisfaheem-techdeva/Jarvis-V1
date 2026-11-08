@@ -113,6 +113,7 @@ SECTION_BY_PATH = [
     ("/revenue", "finance"), ("/business/executions", "jarvis"),
     ("/ledger", "finance"),                     # udhaar ledger (app/ledger.py, db/94)
     ("/purchases", "finance"),                  # suppliers and purchases (app/purchases.py, db/95)
+    ("/shop", "finance"),                       # shop intelligence (app/shopintel.py)
     # administration
     ("/integrations", "admin"), ("/oauth", "admin"), ("/connect", "admin"), ("/disconnect", "admin"),
     ("/billing", "admin"), ("/plan", "admin"), ("/usage", "admin"),

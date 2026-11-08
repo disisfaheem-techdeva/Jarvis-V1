@@ -65,6 +65,9 @@ PURCHASE = {"record_purchase", "supplier_payment", "supplier_balance"}
 ACTIONS |= PURCHASE
 CONFIRM |= {"record_purchase", "supplier_payment"}
 SERVER_WORDED |= PURCHASE
+# The shop's figures (app/jarvis_shop.py): read only, answered at once, worded from the records.
+ACTIONS |= {"shop_report"}
+SERVER_WORDED |= {"shop_report"}
 _HHMM = re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -325,6 +328,9 @@ def run(tid, role, uid, action, args, founder=False):
     if action in PURCHASE:
         from . import jarvis_purchase
         return jarvis_purchase.run(tid, role, uid, action, args)
+    if action == "shop_report":
+        from . import jarvis_shop
+        return jarvis_shop.run(tid, role, uid, args)
     if action == "universal_caption":
         from fastapi import HTTPException as _H
         from .universal_caption import save, write_options

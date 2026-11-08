@@ -105,7 +105,9 @@ Fields:
             supplier_payment (money paid to a supplier: "Bilal Traders ko
                 5000 de diye"),
             supplier_balance (what the shop owes a supplier, or all of them:
-                "Bilal Traders ka kitna dena hai?")
+                "Bilal Traders ka kitna dena hai?"),
+            shop_report (the shop's figures: "aaj dukaan ka kya haal hai?",
+                "aaj kitna profit hua?", "kya kam hai?", "kya mangwana hai?")
   "args": if kind is action, an object:
             navigate: section (a section id from the list below)
             book_appointment: name, phone, date (YYYY-MM-DD), time (HH:MM
@@ -166,6 +168,9 @@ Fields:
             supplier_payment: supplier, amount, method, note.
             supplier_balance: supplier (empty for all suppliers). For all
                 three never say a total or what is owed in reply.
+            shop_report: topic (summary, profit, best_sellers, low_stock,
+                reorder or stock_value), period (today, week or month, if
+                said). Never say a figure in reply: the platform answers.
           order_id must be the "id" of one of orders.recent_and_open in BUSINESS
           FACTS (match the customer's name, phone or order number). Questions
           about orders, sales or what is owed are kind "question", answered
