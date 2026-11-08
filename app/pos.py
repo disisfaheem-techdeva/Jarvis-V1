@@ -91,20 +91,58 @@ def _retotal(cur, oid):
     cur.execute("""SELECT COALESCE((SELECT sum(line_total) FROM order_items WHERE order_id = o.id), 0) AS sub,
                           o.discount, o.delivery_fee, o.tax_rate, o.tax_mode FROM orders o WHERE o.id = %s""", (oid,))
     r = cur.fetchone()
-    sub, disc, fee = _money(r["sub"]), _money(r["discount"]), _money(r["delivery_fee"])
-    if disc - sub > 0.009:
-        raise PosError(400, "The discount is more than the bill.")
-    base = round(max(0.0, sub - disc), 2)
-    rate = float(r["tax_rate"] or 0)
-    tax = 0.0
-    if r["tax_mode"] == "exclusive":
-        tax = round(base * rate / 100, 2)
-    elif r["tax_mode"] == "inclusive":
-        tax = round(base - base / (1 + rate / 100), 2)
-    total = round(base + fee + (tax if r["tax_mode"] == "exclusive" else 0), 2)
+    sub = _money(r["sub"])
+    tax, total = tax_and_total(sub, r["discount"], r["delivery_fee"], r["tax_mode"], r["tax_rate"])
     cur.execute("UPDATE orders SET subtotal = %s, tax = %s, total = %s, updated_at = now() WHERE id = %s",
                 (sub, tax, total, oid))
     return total
+
+
+def tax_and_total(sub, discount, fee, tax_mode, tax_rate):
+    """(tax, total) for a bill. The one place this sum is done: a sale (_retotal)
+    and a price read out before one (quote) cannot disagree."""
+    sub, disc, fee = _money(sub), _money(discount), _money(fee)
+    if disc - sub > 0.009:
+        raise PosError(400, "The discount is more than the bill.")
+    base = round(max(0.0, sub - disc), 2)
+    rate = float(tax_rate or 0)
+    tax = 0.0
+    if tax_mode == "exclusive":
+        tax = round(base * rate / 100, 2)
+    elif tax_mode == "inclusive":
+        tax = round(base - base / (1 + rate / 100), 2)
+    return tax, round(base + fee + (tax if tax_mode == "exclusive" else 0), 2)
+
+
+def quote(cur, items, *, ctx):
+    """What a bill for these items would cost now, priced exactly as a sale would
+    be (list prices, the shop's tax), with stock on hand. Writes nothing.
+    items: [{product_id, quantity}]. Used by Jarvis before it asks "shall I?"."""
+    if not isinstance(items, list) or not items:
+        raise PosError(400, "Add at least one item.")
+    if len(items) > MAX_ITEMS:
+        raise PosError(400, "Too many items on one bill (max %d)." % MAX_ITEMS)
+    by_id = {c["id"]: c for c in till_catalogue(cur)}
+    lines = []
+    for it in items:
+        c = by_id.get(str((it or {}).get("product_id") or (it or {}).get("service_id") or ""))
+        if not c:
+            raise PosError(400, "That item is not on your list any more.")
+        try:
+            qty = float(it.get("quantity") or 1)
+        except (TypeError, ValueError):
+            qty = 0
+        if not 0 < qty <= 10000:
+            raise PosError(400, "Quantity for %s must be between 1 and 10000." % c["name"])
+        if c["price"] is None:
+            raise PosError(400, "No price on your list for: %s. Set the price first." % c["name"])
+        lines.append({"id": c["id"], "kind": c["kind"], "name": c["name"], "unit": c["unit"], "quantity": qty,
+                      "price": c["price"], "line_total": round(qty * c["price"], 2), "on_hand": c["on_hand"]})
+    s = ctx["settings"]
+    mode = s["tax_mode"] if s["tax_mode"] != "off" else None
+    sub = round(sum(l["line_total"] for l in lines), 2)
+    tax, total = tax_and_total(sub, 0, 0, mode, s["tax_rate"] if mode else None)
+    return {"lines": lines, "subtotal": sub, "tax": tax, "tax_mode": mode, "total": total}
 
 
 def _tag_shift(cur, oid, shift):

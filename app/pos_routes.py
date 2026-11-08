@@ -207,6 +207,15 @@ def make_pos_router():
         with session(me) as (cur, ctx):
             return {"bills": pos.bills(cur, day=day, q=(q or "").strip() or None, status=status)}
 
+    @router.post("/pos/quote")
+    def quote(body: dict = Body(...), me: dict = Depends(who)):
+        """The price of a bill before it is made (Jarvis reads it out first). Writes nothing."""
+        with session(me) as (cur, ctx):
+            q = pos.quote(cur, body.get("items"), ctx=ctx)
+            open_ = pos_shift.current(cur, body.get("register")) is not None
+            return {**q, "register": pos_shift._register(body.get("register")),
+                    "can_sell": open_ or not ctx["settings"].get("require_shift", True)}
+
     @router.post("/pos/sale")
     def sale(body: dict = Body(...), me: dict = Depends(who)):
         with session(me, body.get("approval")) as (cur, ctx):

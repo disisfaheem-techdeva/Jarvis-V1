@@ -89,7 +89,11 @@ Fields:
             update_order (confirm / out for delivery / delivered),
             record_order_payment, cancel_order,
             publish_post (post a draft that is already made: "post it",
-            "post kar do", "publish it", with no new post content)
+            "post kar do", "publish it", with no new post content),
+            pos_bill (make a till bill for a customer at the counter now:
+                "do kilo cheeni aur ek sabun ka bill bana do"),
+            stock_check (how much of one product is left: "kitni cheeni
+                baqi hai?")
   "args": if kind is action, an object:
             navigate: section (a section id from the list below)
             book_appointment: name, phone, date (YYYY-MM-DD), time (HH:MM
@@ -122,6 +126,16 @@ Fields:
                 (cash, bank, online, card, other)
             cancel_order: order_id, reason
             publish_post: nothing (the latest draft is posted)
+            pos_bill: items (a list, one per item said, each {"said": the
+                item's words exactly as spoken, e.g. "cheeni", "aata",
+                "cooking oil"; "qty": a number, "dhai" = 2.5, "aadha" = 0.5,
+                "sawa" = 1.25, "derh" = 1.5, "do" = 2; "unit": kg, g, litre,
+                ml, piece, dozen or pack if said, else empty}), register (the
+                till's name, only if said). NEVER work out prices or a total
+                and never put them in args or reply: the platform reads the
+                bill back from the shop's own list.
+            stock_check: item (the product's words exactly as said). Never
+                say a stock figure in reply: the platform answers from stock.
           order_id must be the "id" of one of orders.recent_and_open in BUSINESS
           FACTS (match the customer's name, phone or order number). Questions
           about orders, sales or what is owed are kind "question", answered
@@ -869,6 +883,9 @@ def _done_text(action, args):
         return "Done, the payment is recorded."
     if action == "cancel_order":
         return "Done, that order is cancelled."
+    if action == "pos_bill":
+        from .jarvis_pos import done_text
+        return done_text(args)
     if action == "navigate":
         return "Here you go."
     return "Done."
@@ -910,6 +927,10 @@ def _do_action(tid, role, uid, action, args, founder, reply):
     # questioning (or missing) reply is replaced by what actually happened.
     if not reply or reply.rstrip().endswith(("?", "\u061f")):
         reply = _done_text(action, args)
+    if action in ja.SERVER_WORDED:
+        # money and stock: only what the platform found is said
+        return dict(result, kind="action", action=action, ok=True,
+                    reply=(note.rstrip(".") + ".") if note else _done_text(action, args))
     if action == "publish_post":
         # only what Facebook / Instagram confirmed: a post id back means it is out
         reply = _published_text(result.get("post_status"), result.get("post_results") or {})
@@ -1044,11 +1065,12 @@ def make_console_router():
                     args["caption"] = _tidy_caption(args["caption"])
             if action in ja.CONFIRM:
                 try:
-                    question = ja.describe(tid, role, action, args, founder)
+                    question = ja.describe(tid, role, action, args, founder, uid=uid)
                 except ja.ActionError as e:
                     return {"kind": "question", "reply": _sentence(e)}
+                server = action in ja.SERVER_WORDED       # a bill is read out by the platform, never the model
                 return {"kind": "confirm", "action": action, "summary": question,
-                        "reply": reply if reply.rstrip().endswith("?") else question,
+                        "reply": reply if reply.rstrip().endswith("?") and not server else question,
                         "confirm": ja.seal(tid, uid, role, action, args)}
             return _do_action(tid, role, uid, action, args, founder, reply)
         if kind in ("teach", "dashboard", "post", "business"):
