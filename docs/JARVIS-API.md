@@ -91,7 +91,15 @@ Every error has one shape and the HTTP status of the problem:
 | 410 | The confirmation expired |
 | 503 | The AI or the voice could not be reached; nothing was changed |
 
+## At the till
+
+`pos_bill` (cash bill, asked first) and `stock_check` (answered at once) are listed in
+capabilities. For both, `reply` and the confirmation summary are written by the
+platform from the shop's own price list and stock, never by the model. The
+confirmation carries the bill and a sale reference: a yes prices the bill again,
+stops if a price changed, and sells it once. Code: `app/jarvis_pos.py`.
+
 ## Not in v1 yet
 
 Speech-to-text on the server (clients send text; the dashboard uses the browser's),
-POS, stock and udhaar actions (phases 4 to 6 of the Jarvis plan).
+udhaar by voice, a Jarvis button on the till screen.
