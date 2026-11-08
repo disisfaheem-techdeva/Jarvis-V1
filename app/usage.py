@@ -36,7 +36,10 @@ MODE = os.environ.get("AI_CREDITS_MODE", "count").strip().lower()
 CUSTOMER_FACING = {"social_inbox", "hermes", "whatsapp"}
 PKT = dt.timezone(dt.timedelta(hours=5))
 # the address a web request came in on -> the agent doing the work
-AGENT_BY_PATH = (("/console", "jarvis"), ("/autopilot/caption", "marketing"), ("/autopilot", "content"),
+# (/jarvis/v1 and /ledger/imports added 9 Nov 2026: without them their AI calls were
+#  logged unattributed, so they were never counted against the business's credits)
+AGENT_BY_PATH = (("/console", "jarvis"), ("/jarvis/v1", "jarvis"), ("/ledger/imports", "register"),
+                 ("/autopilot/caption", "marketing"), ("/autopilot", "content"),
                  ("/adpilot", "ads"), ("/advisor", "advisor"), ("/social/ai-picture", "design"),
                  ("/social-inbox", "social_inbox"), ("/business-profile", "setup"), ("/social", "marketing"))
 _METER: contextvars.ContextVar = contextvars.ContextVar("td_ai_meter", default=None)

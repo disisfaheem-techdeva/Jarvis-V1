@@ -78,6 +78,11 @@ def shape(out: dict, conversation_id=None) -> dict:
     return res
 
 
+def _speech_caps():
+    from .speech import capabilities
+    return capabilities()
+
+
 def make_jarvis_api_router():
     router = APIRouter(prefix="/jarvis/v1", tags=["jarvis"])
 
@@ -106,7 +111,8 @@ def make_jarvis_api_router():
                 "actions": sorted(ja.ACTIONS),
                 "confirm_first": sorted(ja.CONFIRM & ja.ACTIONS),
                 "languages": ["roman-urdu", "ur", "en"],
-                "speech": {"input": "client", "output": "audio/wav"},
+                # input "server": send recordings to /transcribe; "client": use the browser's own hearing
+                "speech": _speech_caps(),
                 "limits": {"text_max": TEXT_MAX, "confirmation_ttl_seconds": CONFIRM_TTL}}
 
     @router.post("/messages")
@@ -142,6 +148,25 @@ def make_jarvis_api_router():
             if body.get(k) is not None:
                 legacy[k] = body[k]
         return turn(request, response, legacy, x_tenant_id, x_role, authorization, td_session)
+
+    @router.post("/transcribe")
+    def transcribe(body: dict = Body(...),
+                   x_tenant_id: str | None = Header(None), x_role: str | None = Header(None),
+                   authorization: str | None = Header(None),
+                   td_session: str | None = Cookie(None, alias=SESSION_COOKIE)):
+        """What was said in a recording (data URL audio), when this server hears
+        (app/speech.py). 501 when the browser's own hearing is used instead."""
+        from .console import _identity
+        from . import speech as sp
+        try:
+            _identity(x_tenant_id, x_role, authorization, td_session)
+        except HTTPException as e:
+            return _error(e)
+        try:
+            out = sp.transcribe(body.get("audio"), str(body.get("lang") or "")[:5] or None)
+        except sp.SpeechError as e:
+            return _error(HTTPException(e.status, e.message))
+        return {"api": API, "text": out["text"]}
 
     @router.post("/speech")
     def speech(request: Request, body: dict = Body(...),

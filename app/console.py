@@ -1381,7 +1381,8 @@ def make_console_router():
         key = ("ur:" if urdu else "en:") + text
         wav = _TTS_CACHE.get(key)
         if wav is None:
-            wav = _tts(text, urdu)
+            from .speech import tts as _speech_tts      # the speech gateway (app/speech.py): Gemini unless set otherwise
+            wav = _speech_tts(text, urdu)
             if len(_TTS_CACHE) >= 64:
                 _TTS_CACHE.pop(next(iter(_TTS_CACHE)))
             _TTS_CACHE[key] = wav

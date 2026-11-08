@@ -138,8 +138,9 @@ def read_page(data, mime, mode):
             if code == 200:
                 rows = _json(text).get("rows")
                 if isinstance(rows, list):
-                    usage.charge("register_read", True, provider=p, model=model, ms=(time.time() - started) * 1000,
-                                 chars_out=len(str(text)))
+                    # kind must be one ai_usage accepts (db/71 CHECK); the feature says what it was
+                    usage.charge("photo_read", True, provider=p, model=model, ms=(time.time() - started) * 1000,
+                                 chars_out=len(str(text)), feature="register_read")
                     return rows[:MAX_ROWS], "%s:%s" % (p, model)
                 code = 0
         except (requests.RequestException, ValueError, KeyError, IndexError, TypeError):

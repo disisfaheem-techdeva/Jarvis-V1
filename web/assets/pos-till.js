@@ -787,25 +787,81 @@
       $("jvMic").setAttribute("aria-pressed", "true"); jvBusy(false);
     } catch (e) { JV.listening = false; }
   }
+  // When the server hears (app/speech.py, SPEECH_STT_PROVIDER), the till records the
+  // shopkeeper and sends the recording; that also works in browsers with no speech
+  // recognition of their own. Otherwise the browser's own hearing is used, as before.
+  var CAN_RECORD = !!(window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  function jvHearMode() { return JV.serverHears && CAN_RECORD ? "record" : SR ? "browser" : "none"; }
+  function jvRecord() {
+    if (JV.busy) return;
+    if (JV.rec && JV.rec.state === "recording") { JV.rec.stop(); return; }
+    jvStopVoice();
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      var chunks = [], rec;
+      try { rec = new MediaRecorder(stream); } catch (e) { stream.getTracks().forEach(function (t) { t.stop(); }); $("jvMsg").textContent = "This browser cannot record. Type it instead."; return; }
+      JV.rec = rec; JV.stream = stream; JV.listening = true;
+      $("jvMic").setAttribute("aria-pressed", "true"); jvBusy(false, "Recording… press to stop");
+      var stopAt = setTimeout(function () { if (rec.state === "recording") rec.stop(); }, 12000);
+      rec.ondataavailable = function (ev) { if (ev.data && ev.data.size) chunks.push(ev.data); };
+      rec.onstop = function () {
+        clearTimeout(stopAt); stream.getTracks().forEach(function (t) { t.stop(); });
+        JV.listening = false; $("jvMic").setAttribute("aria-pressed", "false");
+        var blob = new Blob(chunks, { type: (rec.mimeType || "audio/webm").split(";")[0] });
+        if (!blob.size) { jvBusy(false); $("jvMsg").textContent = "Nothing was recorded. Press Speak and try again."; return; }
+        jvBusy(true, "Hearing…");
+        var fr = new FileReader();
+        fr.onload = function () {
+          api("POST", "/jarvis/v1/transcribe", { audio: fr.result, lang: JV.lang }).then(function (r) {
+            jvBusy(false);
+            if (!guard(r)) return;
+            if (!r.ok) { $("jvMsg").textContent = jvErr(r); return; }
+            var text = (r.data && r.data.text) || "";
+            if (!text.trim()) { $("jvMsg").textContent = "I did not hear anything. Press Speak and try again."; return; }
+            jvSend(text, true);
+          });
+        };
+        fr.readAsDataURL(blob);
+      };
+      rec.start();
+    }, function () { $("jvMsg").textContent = "The microphone is blocked. Allow it from the lock icon in the address bar, then press Speak."; });
+  }
   function jvOpen() {
     $("jvLang").value = JV.lang; $("jvSpeak").checked = JV.speak;
-    $("jvMic").hidden = !SR;
-    $("jvMsg").textContent = SR ? "" : "This browser cannot listen. Type it, or use Chrome for speaking.";
+    var show = function () {
+      var mode = jvHearMode();
+      $("jvMic").hidden = mode === "none";
+      $("jvMsg").textContent = mode === "none" ? "This browser cannot listen. Type it, or use Chrome for speaking." : "";
+      if (mode !== "none") $("jvMic").focus(); else $("jvIn").focus();
+    };
     if (!$("jvDlg").open) $("jvDlg").showModal();
-    if (SR) $("jvMic").focus(); else $("jvIn").focus();
+    show();
+    if (JV.serverHears === undefined) {
+      // ask once whether this server hears recordings
+      api("GET", "/jarvis/v1").then(function (r) {
+        JV.serverHears = !!(r.ok && r.data && r.data.speech && r.data.speech.input === "server");
+        if ($("jvDlg").open) show();
+      });
+    }
   }
 
   // ---------------------------------------------------------------- wiring
   function wire() {
     $("jvBtn").onclick = jvOpen;
-    $("jvMic").onclick = jvListen;
+    $("jvMic").onclick = function () { if (jvHearMode() === "record") jvRecord(); else jvListen(); };
     $("jvForm").onsubmit = function (e) { e.preventDefault(); jvSend($("jvIn").value, false); };
     $("jvYes").onclick = jvYes;
     $("jvNo").onclick = jvNo;
     $("jvLang").onchange = function () { JV.lang = this.value === "en" ? "en" : "ur"; jvPref("lang", JV.lang); };
     $("jvSpeak").onchange = function () { JV.speak = this.checked; jvPref("speak", JV.speak ? "1" : "0"); if (!JV.speak) jvStopVoice(); };
     $("jvDlg").addEventListener("close", function () {
-      if (JV.listening && JV.rec) { try { JV.rec.abort(); } catch (e) { /* already stopped */ } }
+      if (JV.listening && JV.rec) {
+        // a speech recogniser aborts; a recorder is stopped with its result thrown away
+        try { if (JV.rec.abort) JV.rec.abort(); else { JV.rec.ondataavailable = null; JV.rec.onstop = function () {}; JV.rec.stop(); } }
+        catch (e) { /* already stopped */ }
+        JV.listening = false;
+      }
+      // the microphone is released, never left on behind a closed dialog
+      if (JV.stream) { JV.stream.getTracks().forEach(function (t) { t.stop(); }); JV.stream = null; }
       jvStopVoice();
     });
     $("grid").onclick = function (e) { var b = e.target.closest(".item"); if (b) add(b.dataset.id); };

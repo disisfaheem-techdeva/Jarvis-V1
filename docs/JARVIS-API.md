@@ -26,6 +26,7 @@ do by hand.
 | POST | `/jarvis/v1/messages` | One thing the person said or typed |
 | POST | `/jarvis/v1/confirmations` | The person's "yes" to a confirmation |
 | POST | `/jarvis/v1/speech` | Jarvis's voice for a reply (`audio/wav`) |
+| POST | `/jarvis/v1/transcribe` | What was said in a recording (`{"audio": data URL, "lang": "ur"\|"en"}` → `{"text"}`); 501 when the server does not hear |
 | GET | `/jarvis/v1/conversations` | This person's conversations, newest first (`?limit=`, max 100) |
 | GET | `/jarvis/v1/conversations/{id}` | One conversation with its messages |
 
@@ -101,7 +102,17 @@ platform from the shop's own price list and stock, never by the model. The
 confirmation carries the bill and a sale reference: a yes prices the bill again,
 stops if a price changed, and sells it once. Code: `app/jarvis_pos.py`.
 
+## Hearing and speaking
+
+`capabilities.speech.input` is `"server"` when this server hears recordings (send them
+to `/transcribe`, then the text to `/messages`), or `"client"` when the browser's own
+speech recognition is used. `capabilities.speech.output` is `null` when voice is off.
+Providers are settings, not code (`app/speech.py`): `SPEECH_STT_PROVIDER` browser (the
+default) | gemini | openai, `SPEECH_TTS_PROVIDER` gemini (the default) | openai | off.
+Server hearing writes Urdu speech in Roman Urdu, so product names match their other names.
+
 ## Not in v1 yet
 
-Speech-to-text on the server (clients send text; the dashboard and the till use the
-browser's), udhaar by voice.
+A till bill made on udhaar by voice (voice bills are cash; udhaar_add and
+udhaar_payment work anywhere); the dashboard's own Jarvis panel still uses the
+browser's hearing only.
