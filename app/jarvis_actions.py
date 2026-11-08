@@ -33,7 +33,8 @@ SECTIONS = ("overview", "leads", "customers", "appointments", "calendar", "daily
             "revenue", "invoices", "expenses", "dayclose", "pnl", "services", "products",
             "packages", "catalogue", "inventory", "integrations", "reports", "settings",
             "console", "posts", "billing", "team", "whatsapp", "inbox", "needshuman",
-            "marketing", "attendance", "hr", "hermes", "ai", "bizagent", "orders", "calls", "udhaar")
+            "marketing", "attendance", "hr", "hermes", "ai", "bizagent", "orders", "calls", "udhaar",
+            "purchases")
 
 # What needs a "yes" first.
 CONFIRM = {"add_expense", "cancel_appointment", "schedule_post", "publish_post",
@@ -59,6 +60,11 @@ UDHAAR = {"udhaar_add", "udhaar_payment", "customer_balance"}
 ACTIONS |= UDHAAR
 CONFIRM |= {"udhaar_add", "udhaar_payment"}
 SERVER_WORDED |= UDHAAR
+# Suppliers and purchases (app/jarvis_purchase.py): a purchase or a payment is asked first.
+PURCHASE = {"record_purchase", "supplier_payment", "supplier_balance"}
+ACTIONS |= PURCHASE
+CONFIRM |= {"record_purchase", "supplier_payment"}
+SERVER_WORDED |= PURCHASE
 _HHMM = re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -243,6 +249,9 @@ def describe(tid, role, action, args, founder=False, uid=None):
     if action in ("udhaar_add", "udhaar_payment"):
         from . import jarvis_udhaar
         return jarvis_udhaar.describe(tid, role, uid, action, args)
+    if action in ("record_purchase", "supplier_payment"):
+        from . import jarvis_purchase
+        return jarvis_purchase.describe(tid, role, uid, action, args)
     if action == "universal_caption":
         if founder or role not in ("owner", "techdeva_admin"):
             raise ActionError("only the business owner can change the caption that goes under every post")
@@ -313,6 +322,9 @@ def run(tid, role, uid, action, args, founder=False):
     if action in UDHAAR:
         from . import jarvis_udhaar
         return jarvis_udhaar.run(tid, role, uid, action, args)
+    if action in PURCHASE:
+        from . import jarvis_purchase
+        return jarvis_purchase.run(tid, role, uid, action, args)
     if action == "universal_caption":
         from fastapi import HTTPException as _H
         from .universal_caption import save, write_options

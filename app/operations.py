@@ -460,7 +460,13 @@ def make_operations_router():
                         "WHERE i2.voided_at IS NULL), 0) AS a "
                         "FROM invoices i WHERE i.voided_at IS NULL")
             outstanding = float(cur.fetchone()["a"] or 0)
-        return {"start": start, "end": end,
+            # Stock bought and paid to suppliers (db/95), shown BESIDE net, never inside
+            # it: whether stock purchases count against net is the owner's decision.
+            purchases = None
+            if not location_id:
+                from .purchases import summary as _purchases
+                purchases = _purchases(cur, start, end)
+        return {"start": start, "end": end, "purchases": purchases,
                 "collected": round(collected, 2), "payment_count": payment_count,
                 "refunded": round(sum(refunded.values()), 2),
                 "invoiced": round(invoiced, 2), "invoice_count": invoice_count,

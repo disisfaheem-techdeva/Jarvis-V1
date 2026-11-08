@@ -91,6 +91,9 @@ app.include_router(make_jarvis_api_router())
 # Udhaar ledger: credit that is not a till bill, and each customer's balance (db/94, ADR-004)
 from .ledger import make_ledger_router
 app.include_router(make_ledger_router(_console_identity))
+# Suppliers and purchases: stock in with its cost, and what the shop owes (db/95)
+from .purchases import make_purchases_router
+app.include_router(make_purchases_router(_console_identity))
 from .dashboard import make_dashboard_router
 app.include_router(make_dashboard_router(_console_identity))
 from .support_routes import make_support_router, make_founder_support_router

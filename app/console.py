@@ -99,7 +99,13 @@ Fields:
             udhaar_payment (a customer paid back udhaar: "Ahmed ne 1000
                 de diye"),
             customer_balance (how much one customer owes, or the total:
-                "Ahmed ka kitna baqi hai?", "total udhaar kitna hai?")
+                "Ahmed ka kitna baqi hai?", "total udhaar kitna hai?"),
+            record_purchase (stock bought from a supplier: "Bilal Traders se
+                50 kilo cheeni 160 rupay kilo li"),
+            supplier_payment (money paid to a supplier: "Bilal Traders ko
+                5000 de diye"),
+            supplier_balance (what the shop owes a supplier, or all of them:
+                "Bilal Traders ka kitna dena hai?")
   "args": if kind is action, an object:
             navigate: section (a section id from the list below)
             book_appointment: name, phone, date (YYYY-MM-DD), time (HH:MM
@@ -149,6 +155,17 @@ Fields:
             customer_balance: customer (name as said; empty for the total),
                 phone (if said). For all three never say a balance or amount
                 owed in reply: the platform answers from the ledger.
+            record_purchase: supplier (the wholesaler's name as said), items
+                (a list, each {"said": the item's words as spoken, "qty": a
+                number, "unit": kg, g, litre, ml, piece, dozen or pack if said,
+                "unit_cost": the price per that unit if said, e.g. "160 rupay
+                kilo" -> 160, "line_total": the total for that item if said
+                instead}), paid (an amount paid now, if said), method (cash,
+                bank, jazzcash, easypaisa, cheque, if said), supplier_ref (the
+                supplier's bill number, if said).
+            supplier_payment: supplier, amount, method, note.
+            supplier_balance: supplier (empty for all suppliers). For all
+                three never say a total or what is owed in reply.
           order_id must be the "id" of one of orders.recent_and_open in BUSINESS
           FACTS (match the customer's name, phone or order number). Questions
           about orders, sales or what is owed are kind "question", answered
