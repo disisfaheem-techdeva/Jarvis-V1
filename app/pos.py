@@ -70,15 +70,16 @@ def till_catalogue(cur):
     and services. Stock is derived from stock_movements, never stored."""
     cur.execute("""SELECT p.id::text, p.name, p.price, p.category, p.sku, 'product' AS kind,
                           (p.track_stock OR count(m.id) > 0) AS tracked,
-                          COALESCE(sum(m.quantity_delta), 0) AS on_hand
+                          COALESCE(sum(m.quantity_delta), 0) AS on_hand, p.unit, p.aliases
                      FROM products p LEFT JOIN stock_movements m ON m.product_id = p.id
                     WHERE p.active GROUP BY p.id
                    UNION ALL
-                   SELECT s.id::text, s.name, s.price, NULL, NULL, 'service', false, 0
+                   SELECT s.id::text, s.name, s.price, NULL, NULL, 'service', false, 0, NULL, '{}'::text[]
                      FROM services s WHERE s.active
                     ORDER BY 2""")
     return [{"id": r["id"], "name": r["name"], "kind": r["kind"], "category": r["category"] or None,
              "sku": r["sku"] or None, "price": _money(r["price"]) if r["price"] is not None else None,
+             "unit": r["unit"], "aliases": list(r["aliases"] or []),
              # null, not 0: an untracked product has no stock figure at all
              "on_hand": float(r["on_hand"]) if r["tracked"] else None} for r in cur.fetchall()]
 

@@ -80,6 +80,8 @@ PRESET_ON = {
     "academy": _BASE | _SERVICE,
     "restaurant": _BASE | _SERVICE | {"orders", "products", "inventory"},
     "shop": (_BASE - {"attendance", "hr"}) | {"orders", "products", "inventory"},
+    # a karyana is run from the counter: till orders, stock, and its staff's attendance
+    "karyana": (_BASE - {"hr"}) | {"orders", "products", "inventory"},
     "other": set(REGISTRY),
 }
 

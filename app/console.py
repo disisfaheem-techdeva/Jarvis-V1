@@ -607,7 +607,7 @@ def _facts_fresh(tid, role):
 # Every module Jarvis may answer from. Each part is read in its own session, so
 # one missing table cannot blank the rest; money stays owner-only as above.
 _MORE = (
-    ("products", """SELECT p.name, p.price, p.active, p.track_stock, p.low_stock_threshold,
+    ("products", """SELECT p.name, p.price, p.unit, p.aliases, p.active, p.track_stock, p.low_stock_threshold,
                            CASE WHEN p.track_stock THEN (SELECT COALESCE(sum(quantity_delta), 0) FROM stock_movements m
                                                           WHERE m.product_id = p.id) END AS in_stock
                       FROM products p ORDER BY p.active DESC, p.name LIMIT 60""", "rows"),

@@ -146,7 +146,7 @@ def make_operations_router():
         with tenant_session(tid, role) as cur:
             cur.execute(
                 "SELECT p.id, p.name, p.category, p.sku, p.price, p.currency, p.active, "
-                "p.track_stock, p.low_stock_threshold, "
+                "p.track_stock, p.low_stock_threshold, p.unit, p.aliases, "
                 "COALESCE(SUM(m.quantity_delta), 0) AS on_hand, "
                 "COUNT(m.id) AS movement_count, "
                 "MAX(m.occurred_at) AS last_movement "

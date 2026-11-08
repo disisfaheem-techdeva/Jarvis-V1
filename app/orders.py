@@ -76,21 +76,25 @@ def _event(cur, oid, actor, actor_type, event, detail=""):
 
 def catalogue(cur):
     """What can be ordered: active products and services with their list price."""
-    cur.execute("SELECT id::text, name, price, 'product' AS kind FROM products WHERE active "
-                "UNION ALL SELECT id::text, name, price, 'service' AS kind FROM services WHERE active")
+    cur.execute("SELECT id::text, name, price, 'product' AS kind, aliases FROM products WHERE active "
+                "UNION ALL SELECT id::text, name, price, 'service' AS kind, '{}'::text[] FROM services WHERE active")
     return [dict(r) for r in cur.fetchall()]
 
 
 def match_item(cat, name):
     """The catalogue entry this name means: exact (ignoring case and spaces) first,
+    then a product whose alias is exactly this name (db/93: "cheeni" for Sugar),
     then a single entry whose name contains it or is contained in it. Never a guess
-    between two."""
+    between two: an alias two products share matches neither."""
     n = _norm(name)
     if not n:
         return None
     exact = [c for c in cat if _norm(c["name"]) == n]
     if exact:
         return sorted(exact, key=lambda c: c["kind"] != "product")[0]
+    alias = [c for c in cat if any(_norm(a) == n for a in (c.get("aliases") or ()))]
+    if alias:
+        return alias[0] if len(alias) == 1 else None
     near = [c for c in cat if n in _norm(c["name"]) or _norm(c["name"]) in n]
     return near[0] if len(near) == 1 else None
 

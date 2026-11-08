@@ -5865,6 +5865,14 @@ VIEWS.inventory = function(){
       '<div><label>Warn when stock falls to</label><input class="fld" id="pe_low" type="number" min="0" value="' + esc(p.low_stock_threshold == null ? '' : p.low_stock_threshold) + '"></div>' +
       '<div><label style="margin-top:22px"><input type="checkbox" id="pe_track"' + (p.track_stock ? ' checked' : '') + '> Track stock</label></div>' +
       '<div><label style="margin-top:22px"><input type="checkbox" id="pe_active"' + (p.active === false ? '' : ' checked') + '> Active (can be sold)</label></div></div>' +
+      // db/93: how it is sold, and the other names people use for it (Jarvis and the till match them)
+      '<div class="fgrid"><div><label for="pe_unit">Sold by</label><select class="fld" id="pe_unit">' +
+        [['', 'Not set'], ['piece', 'Piece'], ['kg', 'Kilogram (kg)'], ['g', 'Gram (g)'], ['litre', 'Litre'], ['ml', 'Millilitre (ml)'],
+         ['dozen', 'Dozen'], ['pack', 'Pack']].map(function(u){
+          return '<option value="' + u[0] + '"' + ((p.unit || '') === u[0] ? ' selected' : '') + '>' + u[1] + '</option>'; }).join('') +
+      '</select></div>' +
+      '<div style="grid-column:1/-1"><label for="pe_alias">Other names, separated by commas</label>' +
+      '<input class="fld" id="pe_alias" maxlength="1000" placeholder="e.g. cheeni, chini, شکر" value="' + esc((p.aliases || []).join(', ')) + '"></div></div>' +
       '<div class="card-note">A new stock number is saved as an adjustment, so the history still shows what changed and when.</div>' +
       '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn primary" id="pe_save">Save changes</button><button class="btn" id="pe_cancel">Cancel</button></div>' +
       '<div id="pemsg" class="card-note" style="min-height:18px;margin-top:8px"></div></div>');
@@ -5893,9 +5901,13 @@ VIEWS.inventory = function(){
       if (!name) { msg('A product needs a name.', true); return; }
       if ([price, low].some(function(n){ return n !== null && (isNaN(n) || n < 0); })) { msg('Price and warn level cannot be negative.', true); return; }
       var track = g('pe_track').checked;
+      var seen = {}, aliases = (val('pe_alias') || '').split(/[,،]/).map(function(a){ return a.replace(/\s+/g, ' ').trim(); })
+        .filter(function(a){ var k = a.toLowerCase(); if (!a || seen[k]) return false; seen[k] = 1; return true; });
+      if (aliases.length > 20) { msg('Up to 20 other names per product.', true); return; }
       g('pe_save').disabled = true; msg('Saving…');
       api('/business/products/' + p.id, { method: 'PATCH', body: { name: name, sku: val('pe_sku') || null, category: val('pe_cat') || null,
-        price: price, low_stock_threshold: low, track_stock: track, active: g('pe_active').checked } }).then(function(r){
+        price: price, low_stock_threshold: low, track_stock: track, active: g('pe_active').checked,
+        unit: (g('pe_unit') && g('pe_unit').value) || null, aliases: aliases } }).then(function(r){
         if (!r.ok) { g('pe_save').disabled = false; msg((r.data && r.data.detail) || ('Not saved (' + r.status + ').'), true); return null; }
         var delta = track && stock !== null && !isNaN(stock) ? Math.round((stock - Number(p.on_hand || 0)) * 1000) / 1000 : 0;
         if (!delta) return r;
@@ -7988,7 +8000,7 @@ function ordWire(){
   VIEWS.overview = function(){
     var out = base.apply(this, arguments);
     var s = ORD.sum, t = BP.data && BP.data.business_type;
-    if (!s || !(s.counts.month > 0 || s.counts['new'] > 0 || s.counts.waiting_delivery > 0 || t === 'shop' || t === 'restaurant')) return out;
+    if (!s || !(s.counts.month > 0 || s.counts['new'] > 0 || s.counts.waiting_delivery > 0 || sellsProducts(t) || t === 'restaurant')) return out;
     var p = panel('🛒 Orders and sales', '<div style="padding:4px 0">' + ordTiles() + '</div>', '<a class="btn" href="#/orders">Open orders</a>');
     var i = out.indexOf('</p>');
     return i < 0 ? p + out : out.slice(0, i + 4) + p + out.slice(i + 4);
@@ -8419,10 +8431,13 @@ var TYPE_HIDE = {
   product: ['appointments', 'calendar', 'services', 'catalogue', 'packages', 'dailyentry'],
   service: ['orders']
 };
+/* Types that sell products, not services: the same list as
+   app/categories.PRODUCT_TYPES (karyana added 8 Nov 2026, db/93). */
+function sellsProducts(t){ return t === 'shop' || t === 'karyana'; }
 function bizMode(){
   var t = typeof BP !== 'undefined' && BP.data && BP.data.business_type;
   if (!t || t === 'restaurant') return null;
-  return t === 'shop' ? 'product' : 'service';
+  return sellsProducts(t) ? 'product' : 'service';
 }
 function typeHidden(id){
   // Calls: only where TechDeva set up a phone line (or calls were taken); unknown until the profile loads
@@ -9930,7 +9945,7 @@ function dvOrders(d){
   if (!o || o.hidden) return '';
   var c = o.counts || {}, t = typeof BP !== 'undefined' && BP.data && BP.data.business_type;
   // the same rule as before: a shop or restaurant, or any order activity
-  if (!(o.has_orders || c.month > 0 || c['new'] > 0 || c.waiting_delivery > 0 || t === 'shop' || t === 'restaurant')) return '';
+  if (!(o.has_orders || c.month > 0 || c['new'] > 0 || c.waiting_delivery > 0 || sellsProducts(t) || t === 'restaurant')) return '';
   var m = o.money, why = d.money_visible ? 'Not available' : 'Money figures are for the owner';
   var h = '<div class="dv-group"><h3 class="dv-sub">Orders</h3><div class="dv-grid">' +
     dvCard('New orders', c['new'], 'waiting for you to confirm', '#/orders?status=new', { attn: true }) +
@@ -11859,7 +11874,8 @@ function galConfirmApprove(){
   }
   function move(arr, from, to){ if (to < 0 || to >= arr.length) return; var x = arr.splice(from, 1)[0]; arr.splice(to, 0, x); }
   var PRESET_NAMES = { clinic: 'Clinic', salon: 'Salon / spa', gym: 'Gym', academy: 'Academy / school',
-                       restaurant: 'Restaurant / café', shop: 'Shop & products', other: 'Other (everything)' };
+                       restaurant: 'Restaurant / café', shop: 'Shop & products', karyana: 'Karyana / grocery',
+                       other: 'Other (everything)' };
 
   VIEWS.customize = function(){
     var out = '<h1>Customize Dashboard</h1><p class="sub">Choose which pages your team sees and in what order. Hiding a page never deletes anything.</p>';

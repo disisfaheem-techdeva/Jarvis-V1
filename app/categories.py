@@ -33,7 +33,13 @@ from .whatsapp import _identity, _rows, _pairctl_json
 
 PROTECTED = re.compile(r"irfan|clinic|salon|workspace")
 KINDS = ("faq", "policy", "not_offered", "info")
-ORDER_TYPES = ("shop", "restaurant")   # businesses that take orders even before products are listed
+# Business types that sell products (with stock) rather than services. A new
+# product-selling type (db/93: karyana) is added here, and every "is this a
+# shop?" check in app/ and web/dashboard.html reads it from here.
+PRODUCT_TYPES = ("shop", "karyana")
+ORDER_TYPES = PRODUCT_TYPES + ("restaurant",)   # businesses that take orders even before products are listed
+UNIT_WORDS = {"piece": "piece", "kg": "kg", "g": "gram", "litre": "litre", "ml": "ml", "dozen": "dozen",
+              "pack": "pack"}                     # products.unit (db/93) as the agent says it
 DAYS_LOWER = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
 DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 CAT_COLS = ("slug, name, blurb, icon, sort_order, labels, dashboard_widgets, pipeline_stages, "
@@ -67,7 +73,7 @@ def facts(cur, tid):
     cur.execute("""SELECT day_of_week, opens, closes, is_closed FROM business_hours
                     WHERE tenant_id = %s AND location_id IS NULL ORDER BY day_of_week""", (tid,))
     hours = [dict(r) for r in cur.fetchall()]
-    cur.execute("""SELECT name, description, category, price, currency FROM products
+    cur.execute("""SELECT name, description, category, price, currency, unit, aliases FROM products
                     WHERE tenant_id = %s AND active ORDER BY name LIMIT 300""", (tid,))
     products = [dict(r) for r in cur.fetchall()]
     cur.execute("""SELECT id::text AS id, kind, title, body FROM business_knowledge
@@ -191,6 +197,7 @@ def knowledge_block(f):
     kind = (cat or {}).get("name") or "service business"
     kind = {"restaurant": "restaurant or café", "clinic": "clinic", "salon": "salon, barber or spa",
             "gym": "gym or fitness studio", "academy": "academy or training centre", "shop": "shop",
+            "karyana": "karyana (grocery) store",
             "other": "business"}.get((cat or {}).get("slug"), kind)
     if t.get("business_type") == "other" and t.get("business_type_other"):
         kind = t["business_type_other"]
@@ -221,6 +228,12 @@ def knowledge_block(f):
         out += ["", "## Products for sale (the ONLY ones you may sell, price each)"]
         for p in f["products"]:
             line = "- %s: %s" % (p["name"], _price(p))
+            # db/93. Absent unit and aliases leave the line exactly as before, so an
+            # existing agent's text (and its hash) does not change.
+            if p.get("unit") and p.get("price") is not None:
+                line += " per " + UNIT_WORDS.get(p["unit"], p["unit"])
+            if p.get("aliases"):
+                line += " (customers may call it: %s)" % ", ".join(str(a) for a in p["aliases"][:20])
             if p.get("description"):
                 line += ". " + str(p["description"]).strip()[:200]
             out.append(line)
@@ -731,7 +744,7 @@ def make_categories_router():
         with tenant_session(tid, role) as cur:
             # a shop's items are products (with stock); everyone else's are services
             cur.execute("SELECT business_type FROM tenants WHERE id = %s", (tid,))
-            table = "products" if (cur.fetchone() or {}).get("business_type") == "shop" else "services"
+            table = "products" if (cur.fetchone() or {}).get("business_type") in PRODUCT_TYPES else "services"
             cur.execute("SELECT lower(btrim(name)) AS n FROM services WHERE tenant_id = %s "
                         "UNION SELECT lower(btrim(name)) FROM products WHERE tenant_id = %s", (tid, tid))   # incl. removed: names are unique
             have = {r["n"] for r in cur.fetchall()}

@@ -410,7 +410,8 @@ def summary(tid, role, uid, days, start, end):
         has_orders = int(cur.fetchone()["n"]) > 0
         cur.execute("SELECT business_type FROM tenants WHERE id = current_tenant()")
         btype = (cur.fetchone() or {}).get("business_type")
-        products = has_orders or btype in ("shop", "restaurant")
+        from .categories import ORDER_TYPES
+        products = has_orders or btype in ORDER_TYPES
 
         def kpi(key, label, metric, href, note, money=False):
             a, b = _series(cur, metric, tz, s, e), _series(cur, metric, tz, ps, pe)
