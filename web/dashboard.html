@@ -1416,6 +1416,15 @@ VIEWS.pnl = function(){
     metric('Still owed, all time', money(p.outstanding_all_time),
            'Invoiced and not yet paid') +
     '</div>';
+  // Stock bought from suppliers (db/95): shown beside Net, not taken out of it
+  var pu = p.purchases;
+  if (pu && (pu.purchase_bills || pu.paid_to_suppliers || pu.owed_to_suppliers)) {
+    out += '<div class="grid">' +
+      metric('Stock bought', money(pu.stock_bought), pu.purchase_bills + ' purchase bill' + (pu.purchase_bills === 1 ? '' : 's') + ' in this period') +
+      metric('Paid to suppliers', money(pu.paid_to_suppliers), 'In this period') +
+      metric('You owe suppliers', money(pu.owed_to_suppliers), 'All time, on Purchases') + '</div>' +
+      '<div class="card-note">Stock purchases are shown beside Net, not taken out of it.</div>';
+  }
 
   var bc = p.expenses_by_category || [];
   if (bc.length) {
@@ -3389,6 +3398,187 @@ VIEWS.udhaar = function(){
           if (r.data && r.data.customer) UD.sel = r.data.customer.customer_id;
           reload((body.kind === 'payment' ? 'Payment written.' : body.kind === 'opening' ? 'Opening balance written.' : 'Udhaar written.') +
                  (r.data && r.data.customer ? ' ' + r.data.customer.name + ' now owes ' + money(r.data.customer.balance) + '.' : ''));
+        });
+    };
+  }, 0);
+  return out;
+};
+
+/* --------------------------------------------------------------- Purchases
+   (9 Nov 2026; app/purchases.py, db/95) Stock bought from suppliers and what the
+   shop owes them. A bill's lines put the stock in at their cost; its total is owed
+   to the supplier (less anything paid at once). A bill is voided, never edited:
+   the stock goes back out and the amount comes off. Uses the udhaar page's
+   helpers (udField, udRef) and styles (ud-f). */
+var PU = { sel: null, ref: null, pref: null, lines: [{}], undo: null, voidB: null, flash: null };
+// below zero the supplier holds the shop's money (paid ahead, or a voided bill that was paid)
+function puOwe(v){ return Number(v) < 0 ? money(-v) + ' advance' : money(v); }
+function puKind(l){
+  return { opening: 'Opening balance', bill: 'Bill ' + (l.number || ''), payment: 'Payment', adjustment: l.amount > 0 ? 'Correction (+)' : 'Correction (−)' }[l.kind] || l.kind;
+}
+VIEWS.purchases = function(){
+  var out = '<h1>Purchases</h1><p class="sub">Stock bought from your suppliers, at its cost, and what you owe them.</p>';
+  if (!isOwner()) return out + panel('Purchases', empty('This page is for the owner', 'Ask the owner to record a purchase.'));
+  if (!need('purchases', '/purchases') | !need('products', '/business/products')) return out + panel('Purchases', loading('Loading suppliers and purchases...'));
+  if (S.purchases === null) return out + panel('Purchases', errState(S.purchases_detail || 'The purchases service did not respond.'));
+  var d = S.purchases, t = d.totals || {}, sups = d.suppliers || [], prods = items('products').filter(function(p){ return p.active !== false; });
+  if (!PU.ref) PU.ref = udRef();
+  if (!PU.pref) PU.pref = udRef();
+  out += '<div class="grid">' +
+    metric('You owe suppliers', money(t.owed), t.suppliers_owed ? t.suppliers_owed + ' supplier' + (t.suppliers_owed === 1 ? '' : 's') : 'Nothing owed') +
+    metric('Suppliers', String(sups.length), 'Wholesalers you buy from') + '</div>';
+  var opts = function(sel){ return '<option value="">Choose a product…</option>' + prods.map(function(p){
+    return '<option value="' + esc(p.id) + '"' + (sel === String(p.id) ? ' selected' : '') + '>' + esc(p.name) + (p.unit ? ' (' + esc(p.unit) + ')' : '') + '</option>'; }).join(''); };
+  var lineRows = PU.lines.map(function(l, i){
+    return '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin:6px 0">' +
+      '<label class="ud-f" style="flex:2;min-width:180px"><span>Product</span><select class="fld" data-pul="p" data-i="' + i + '">' + opts(l.p) + '</select></label>' +
+      '<label class="ud-f" style="flex:1;min-width:90px"><span>Quantity</span><input class="fld" type="number" min="0" step="any" inputmode="decimal" data-pul="q" data-i="' + i + '" value="' + esc(l.q || '') + '"></label>' +
+      '<label class="ud-f" style="flex:1;min-width:110px"><span>Cost each (Rs)</span><input class="fld" type="number" min="0" step="any" inputmode="decimal" data-pul="c" data-i="' + i + '" value="' + esc(l.c || '') + '"></label>' +
+      '<div class="ud-f" style="flex:1;min-width:100px"><span>Line total</span><strong class="td-num" id="pult_' + i + '">' + (l.q && l.c ? money(Math.round(l.q * l.c * 100) / 100) : '—') + '</strong></div>' +
+      (PU.lines.length > 1 ? '<button class="btn" data-pudel="' + i + '" aria-label="Remove this line">Remove</button>' : '') + '</div>';
+  }).join('');
+  var grand = PU.lines.reduce(function(a, l){ return a + (l.q && l.c ? Math.round(l.q * l.c * 100) / 100 : 0); }, 0);
+  out += panel('Record a purchase', '<div style="padding:12px 16px">' +
+    (prods.length ? '' : '<div class="card-note">Add your products under Business › Products first; a purchase puts stock into them.</div>') + row() +
+    '<label class="ud-f" style="flex:2;min-width:180px"><span>Supplier *</span><input class="fld" id="pusup" list="pusups" maxlength="120" autocomplete="off" value="' + esc(PU.sup || '') + '">' +
+      '<datalist id="pusups">' + sups.map(function(s){ return '<option value="' + esc(s.name) + '">'; }).join('') + '</datalist></label>' +
+    udField('pudate', 'Date', 'date', 150, ' value="' + esc(PU.date || todayISO()) + '" max="' + todayISO() + '"') +
+    udField('puref', 'Their bill number', 'text', 130, ' maxlength="60" value="' + esc(PU.sref || '') + '"') + '</div>' +
+    lineRows + '<button class="btn" id="puaddl">+ Add a line</button>' +
+    row() + '<div class="ud-f" style="flex:1;min-width:140px"><span>Bill total</span><strong class="td-num" id="pugrand" style="font-size:18px">' + money(grand) + '</strong></div>' +
+    udField('pupaid', 'Paid now (Rs)', 'number', 120, ' min="0" step="any" inputmode="decimal" value="' + esc(PU.paid || '') + '"') +
+    '<label class="ud-f" style="flex:1;min-width:120px"><span>Paid by</span><select class="fld" id="pumeth">' +
+      ['cash', 'bank', 'jazzcash', 'easypaisa', 'cheque', 'card', 'other'].map(function(m){ return '<option value="' + m + '">' + m.charAt(0).toUpperCase() + m.slice(1) + '</option>'; }).join('') +
+    '</select></label><button class="btn primary" id="pugo" style="align-self:flex-end">Record purchase</button></div>' +
+    '<div class="card-note">The stock comes in at these costs; what is not paid now is owed to the supplier. A new supplier is added by name.</div></div>' + actbar());
+  out += panel('Pay a supplier', '<div style="padding:12px 16px">' + row() +
+    '<label class="ud-f" style="flex:2;min-width:180px"><span>Supplier</span><select class="fld" id="paysup"><option value="">Choose…</option>' +
+      sups.filter(function(s){ return s.owed > 0; }).map(function(s){ return '<option value="' + esc(s.supplier_id) + '"' + (PU.sel === s.supplier_id ? ' selected' : '') + '>' + esc(s.name) + ' · owe ' + money(s.owed) + '</option>'; }).join('') + '</select></label>' +
+    udField('payamt', 'Amount (Rs) *', 'number', 120, ' min="1" step="any" inputmode="decimal"') +
+    '<label class="ud-f" style="flex:1;min-width:120px"><span>Paid by</span><select class="fld" id="paymeth">' +
+      ['cash', 'bank', 'jazzcash', 'easypaisa', 'cheque', 'card', 'other'].map(function(m){ return '<option value="' + m + '">' + m.charAt(0).toUpperCase() + m.slice(1) + '</option>'; }).join('') + '</select></label>' +
+    '<button class="btn primary" id="paygo" style="align-self:flex-end">Write payment</button></div></div>');
+  out += panel('Suppliers', !sups.length ? empty('No suppliers yet', 'Record your first purchase above; the supplier is added with it.')
+    : '<div class="tbl-wrap"><table><thead><tr><th>Supplier</th><th>Phone</th><th class="num">Bills</th><th class="num">Bought</th><th class="num">You owe</th><th></th></tr></thead><tbody>' +
+      sups.map(function(s){
+        return '<tr' + (PU.sel === s.supplier_id ? ' class="sel"' : '') + '><td>' + esc(s.name) + '</td><td>' + esc(s.phone || '—') + '</td><td class="num">' + s.bills + '</td>' +
+          '<td class="num">' + money(s.bought) + '</td><td class="num' + (s.owed > 0 ? ' bal-due' : '') + '"><strong>' + puOwe(s.owed) + '</strong></td>' +
+          '<td><button class="btn" data-pusel="' + esc(s.supplier_id) + '">Statement</button></td></tr>';
+      }).join('') + '</tbody></table></div>', '<span class="pill count">' + sups.length + '</span>');
+  if (PU.sel) {
+    var key = 'pust_' + PU.sel;
+    if (!need(key, '/purchases/suppliers/' + PU.sel)) out += panel('Statement', loading('Loading the statement...'));
+    else if (S[key] === null) out += panel('Statement', errState(S[key + '_detail'] || 'The statement did not load.'));
+    else {
+      var st = S[key], lines = (st.lines || []).slice().reverse();
+      out += panel('Statement: ' + st.supplier.name, !lines.length ? empty('Nothing yet', '')
+        : '<div class="tbl-wrap"><table><thead><tr><th>Date</th><th>What</th><th>Note</th><th class="num">Amount</th><th class="num">You owe</th><th></th></tr></thead><tbody>' +
+          lines.map(function(l){
+            var undo = !l.bill_id && !l.reverses && !l.reversed;
+            return '<tr' + (l.reversed ? ' class="muted"' : '') + '><td>' + esc(l.occurred_on || '') + '</td><td>' + esc(puKind(l)) + (l.method ? ' · ' + esc(l.method) : '') +
+              (l.source === 'jarvis' ? ' <span class="tag">Jarvis</span>' : '') + (l.reversed ? ' <span class="tag">undone</span>' : '') + '</td>' +
+              '<td>' + esc(l.note || '') + '</td><td class="num">' + money(l.amount) + '</td><td class="num">' + money(l.running) + '</td>' +
+              '<td>' + (undo ? '<button class="btn" data-puundo="' + esc(l.id) + '">Undo</button>' : '') + '</td></tr>' +
+              (PU.undo === l.id ? '<tr><td colspan="6"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">' +
+                udField('puwhy', 'Why is this being undone? *', 'text', 240, ' maxlength="250"') +
+                '<button class="btn primary" id="puundogo">Undo it</button><button class="btn" id="puundono">Keep it</button></div></td></tr>' : '');
+          }).join('') + '</tbody></table></div>', '<span class="tag">' + (st.supplier.owed < 0 ? 'They hold your ' + puOwe(st.supplier.owed) : 'You owe ' + money(st.supplier.owed)) + '</span>');
+    }
+  }
+  var bills = d.recent_bills || [];
+  out += panel('Recent purchase bills', !bills.length ? empty('No purchase bills yet', '')
+    : '<div class="tbl-wrap"><table><thead><tr><th>Bill</th><th>Supplier</th><th>Date</th><th class="num">Total</th><th></th></tr></thead><tbody>' +
+      bills.map(function(b){
+        return '<tr' + (b.voided_at ? ' class="muted"' : '') + '><td>' + esc(b.number) + (b.supplier_ref ? ' · ' + esc(b.supplier_ref) : '') + (b.voided_at ? ' <span class="tag">void</span>' : '') + '</td>' +
+          '<td>' + esc(b.supplier || '') + '</td><td>' + esc(b.bought_on || '') + '</td><td class="num">' + money(b.total) + '</td>' +
+          '<td>' + (b.voided_at ? '' : '<button class="btn" data-puvoid="' + esc(b.id) + '">Void</button>') + '</td></tr>' +
+          (PU.voidB === b.id ? '<tr><td colspan="5"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">' +
+            udField('puvwhy', 'Why is this bill being voided? The stock goes back out. *', 'text', 280, ' maxlength="250"') +
+            '<button class="btn primary" id="puvgo">Void the bill</button><button class="btn" id="puvno">Keep it</button></div></td></tr>' : '');
+      }).join('') + '</tbody></table></div>');
+  setTimeout(function(){
+    var g = function(id){ return document.getElementById(id); };
+    if (PU.flash && g('actmsg')) { g('actmsg').textContent = PU.flash; g('actmsg').style.color = 'var(--growth)'; }
+    var keep = function(){ PU.sup = val('pusup'); PU.date = val('pudate'); PU.sref = val('puref'); PU.paid = val('pupaid'); };
+    var reload = function(msg){
+      PU.flash = msg || null; setTimeout(function(){ PU.flash = null; }, 4000);
+      need('purchases', '/purchases', true);
+      if (PU.sel) need('pust_' + PU.sel, '/purchases/suppliers/' + PU.sel, true);
+    };
+    var total = function(){
+      var sum = 0;
+      PU.lines.forEach(function(l, i){
+        var lt = l.q && l.c ? Math.round(l.q * l.c * 100) / 100 : null;
+        if (g('pult_' + i)) g('pult_' + i).textContent = lt === null ? '—' : money(lt).replace(/&amp;/g, '&');
+        sum += lt || 0;
+      });
+      if (g('pugrand')) g('pugrand').textContent = money(Math.round(sum * 100) / 100);
+    };
+    document.querySelectorAll('[data-pul]').forEach(function(el){
+      var on = function(){
+        var l = PU.lines[+el.getAttribute('data-i')], k = el.getAttribute('data-pul');
+        if (k === 'p') l.p = el.value; else l[k] = el.value === '' ? null : Number(el.value);
+        total();
+      };
+      el.oninput = on; el.onchange = on;
+    });
+    if (g('puaddl')) g('puaddl').onclick = function(){ keep(); PU.lines.push({}); renderShell(); };
+    document.querySelectorAll('[data-pudel]').forEach(function(b){ b.onclick = function(){ keep(); PU.lines.splice(+b.getAttribute('data-pudel'), 1); renderShell(); }; });
+    document.querySelectorAll('[data-pusel]').forEach(function(b){ b.onclick = function(){ keep(); PU.sel = b.getAttribute('data-pusel'); PU.undo = null; need('pust_' + PU.sel, '/purchases/suppliers/' + PU.sel, true); }; });
+    document.querySelectorAll('[data-puundo]').forEach(function(b){ b.onclick = function(){ keep(); PU.undo = b.getAttribute('data-puundo'); renderShell(); setTimeout(function(){ if (g('puwhy')) g('puwhy').focus(); }, 0); }; });
+    document.querySelectorAll('[data-puvoid]').forEach(function(b){ b.onclick = function(){ keep(); PU.voidB = b.getAttribute('data-puvoid'); renderShell(); setTimeout(function(){ if (g('puvwhy')) g('puvwhy').focus(); }, 0); }; });
+    if (g('puundono')) g('puundono').onclick = function(){ keep(); PU.undo = null; renderShell(); };
+    if (g('puvno')) g('puvno').onclick = function(){ keep(); PU.voidB = null; renderShell(); };
+    if (g('puundogo')) g('puundogo').onclick = function(){
+      var why = val('puwhy'); if (!why) { say('Say why it is being undone.'); return; }
+      this.disabled = true;
+      act('/purchases/entries/' + PU.undo + '/reverse', { method: 'POST', body: { reason: why } }, 'Undone.')
+        .then(function(r){ if (r.ok) { PU.undo = null; reload('Undone. Both lines stay in the history.'); } else if (g('puundogo')) g('puundogo').disabled = false; });
+    };
+    if (g('puvgo')) g('puvgo').onclick = function(){
+      var why = val('puvwhy'); if (!why) { say('Say why the bill is being voided.'); return; }
+      this.disabled = true;
+      act('/purchases/bills/' + PU.voidB + '/void', { method: 'POST', body: { reason: why } }, 'Voided.')
+        .then(function(r){
+          if (!r.ok) { if (g('puvgo')) g('puvgo').disabled = false; return; }
+          PU.voidB = null; need('products', '/business/products', true); need('inventory', '/operations/inventory', true);
+          reload('Bill ' + r.data.bill.number + ' voided: its stock went back out and ' + money(r.data.bill.total) + ' came off what you owe.');
+        });
+    };
+    if (g('pugo')) g('pugo').onclick = function(){
+      keep();
+      var b = this, items = PU.lines.filter(function(l){ return l.p || l.q || l.c; });
+      if (!PU.sup) { say('Which supplier? Write their name.'); return; }
+      if (!items.length) { say('Add at least one product.'); return; }
+      for (var i = 0; i < items.length; i++) {
+        if (!items[i].p) { say('Choose the product on every line.'); return; }
+        if (!(items[i].q > 0)) { say('Every line needs a quantity above zero.'); return; }
+        if (items[i].c === null || items[i].c === undefined || items[i].c < 0) { say('Every line needs its cost.'); return; }
+      }
+      var body = { supplier_name: PU.sup, bought_on: PU.date || null, supplier_ref: PU.sref || null, client_ref: PU.ref,
+                   items: items.map(function(l){ return { product_id: l.p, quantity: l.q, unit_cost: l.c }; }) };
+      if (Number(PU.paid) > 0) body.paid_now = { amount: Number(PU.paid), method: val('pumeth') || 'cash' };
+      b.disabled = true;
+      act('/purchases/bills', { method: 'POST', body: body }, 'Recorded.').then(function(r){
+        b.disabled = false;
+        if (!r.ok) return;
+        var res = r.data;
+        PU.ref = udRef(); PU.lines = [{}]; PU.sup = ''; PU.sref = ''; PU.paid = ''; PU.sel = res.supplier.supplier_id;
+        need('products', '/business/products', true); need('inventory', '/operations/inventory', true);
+        reload('Bill ' + res.bill.number + ' for ' + money(res.bill.total) + ' recorded; the stock is in. You owe ' + res.supplier.name + ' ' + money(res.supplier.owed) + '.');
+      });
+    };
+    if (g('paygo')) g('paygo').onclick = function(){
+      var sid = val('paysup'), amt = numv('payamt'), b = this;
+      if (!sid) { say('Choose the supplier you paid.'); return; }
+      if (amt === null || isNaN(amt) || !(amt > 0)) { say('Write an amount above zero.'); return; }
+      b.disabled = true;
+      act('/purchases/payments', { method: 'POST', body: { supplier_id: sid, amount: amt, method: val('paymeth') || 'cash', client_ref: PU.pref } }, 'Payment written.')
+        .then(function(r){
+          b.disabled = false;
+          if (!r.ok) return;
+          PU.pref = udRef(); PU.sel = sid;
+          reload('Payment written. You now owe ' + r.data.supplier.name + ' ' + money(r.data.supplier.owed) + '.');
         });
     };
   }, 0);
@@ -8581,7 +8771,7 @@ function typeHidden(id){
   var m = bizMode();
   if (!m) return false;
   if (TYPE_HIDE[m].indexOf(id) !== -1) return true;
-  return m === 'service' && (id === 'products' || id === 'inventory') && !(BP.data.products_count > 0);
+  return m === 'service' && (id === 'products' || id === 'inventory' || id === 'purchases') && !(BP.data.products_count > 0);
 }
 (function(){
   // a shop's overview: no "upcoming appointments" tile
@@ -8608,7 +8798,7 @@ function typeHidden(id){
     { num:'03', name:'Chats',          icon:'chat',  ids:['inbox','socialinbox','calls'] },
     // Management (23 Oct 2026): the day-to-day pages sit together, Operations next to CRM and Team
     { num:'04', name:'CRM',            icon:'users', ids:['leads','sales','clientwork','customers','pipeline','appointments','calendar','followups','crmreports'], group:'Management' },
-    { num:'05', name:'Operations',     icon:'box',   ids:['orders','inventory','dailyentry'] },
+    { num:'05', name:'Operations',     icon:'box',   ids:['orders','inventory','purchases','dailyentry'] },
     { num:'06', name:'Team & HR',      icon:'badge', ids:['team','attendance','hr','roles'] },
     { num:'07', name:'Marketing',      icon:'mega',  ids:['marketing','posts','captions','autopilot','advisor','analytics','gallery'], sep:true },
     { num:'08', name:'Business',       icon:'store', ids:['services','products','packages','deals','reports','settings'] },
@@ -8617,7 +8807,7 @@ function typeHidden(id){
   ];
   // the pages added in this block (they are not in NAV)
   var NEW = { history:'Execution History', tools:'Agents', pipeline:'Pipeline',
-              analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer', usage:'AI usage', roles:'Roles', bizprofile:'Business Profile', followups:'Follow-ups', crmreports:'CRM Reports', gallery:'Autopilot Gallery', udhaar:'Udhaar' };
+              analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer', usage:'AI usage', roles:'Roles', bizprofile:'Business Profile', followups:'Follow-ups', crmreports:'CRM Reports', gallery:'Autopilot Gallery', udhaar:'Udhaar', purchases:'Purchases' };
   // tab names that follow the approved structure; everything else keeps its own name
   var LABEL = { overview:'Overview', console:'Jarvis Assistant', ai:'AI Agents', needshuman:'Approval Queue',
                 marketing:'Campaigns', posts:'Social Media Publisher', autopilot:'Content Calendar',
@@ -8651,7 +8841,7 @@ function typeHidden(id){
     }); });
     Object.keys(NEW).forEach(function(id){
       if (seen[id] || hidden.indexOf(id) !== -1) return;
-      if (!own && (id === 'permissions' || id === 'analytics' || id === 'captions' || id === 'usage' || id === 'roles' || id === 'udhaar')) return;
+      if (!own && (id === 'permissions' || id === 'analytics' || id === 'captions' || id === 'usage' || id === 'roles' || id === 'udhaar' || id === 'purchases')) return;
       if (typeHidden(id)) return;
       if (id === 'roles' && window.TD_ROLE && TD_ROLE.permissions) return;
       seen[id] = 1; list.push({ id: id, name: NEW[id] });

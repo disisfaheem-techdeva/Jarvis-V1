@@ -46,7 +46,8 @@ MODULES = [
     ("04", "CRM", [("leads", "Leads"), ("sales", "Sales"), ("clientwork", "Client work"), ("customers", "Customers"),
                    ("pipeline", "Pipeline"), ("appointments", "Appointments"), ("calendar", "Calendar"),
                    ("followups", "Follow-ups"), ("crmreports", "CRM Reports")]),
-    ("05", "Operations", [("orders", "Orders"), ("inventory", "Inventory"), ("dailyentry", "Daily Entry")]),
+    ("05", "Operations", [("orders", "Orders"), ("inventory", "Inventory"), ("purchases", "Purchases"),
+                          ("dailyentry", "Daily Entry")]),
     ("06", "Team & HR", [("team", "Team"), ("attendance", "Attendance"), ("hr", "HR"), ("roles", "Roles")]),
     ("07", "Marketing", [("marketing", "Campaigns"), ("posts", "Social Media Publisher"), ("captions", "Caption Writer"),
                          ("autopilot", "Content Calendar"), ("advisor", "Ads & Growth"), ("analytics", "Analytics"),
@@ -74,14 +75,14 @@ _BASE = {"overview", "console", "ai", "hermes", "bizagent", "needshuman", "histo
          "dayclose", "pnl", "integrations", "whatsapp", "billing", "usage", "permissions", "customize"}
 _SERVICE = {"appointments", "calendar", "services", "packages"}
 PRESET_ON = {
-    "clinic": _BASE | _SERVICE | {"dailyentry", "products", "inventory"},
-    "salon": _BASE | _SERVICE | {"dailyentry", "products", "inventory"},
+    "clinic": _BASE | _SERVICE | {"dailyentry", "products", "inventory", "purchases"},
+    "salon": _BASE | _SERVICE | {"dailyentry", "products", "inventory", "purchases"},
     "gym": _BASE | _SERVICE,
     "academy": _BASE | _SERVICE,
-    "restaurant": _BASE | _SERVICE | {"orders", "products", "inventory"},
-    "shop": (_BASE - {"attendance", "hr"}) | {"orders", "products", "inventory", "udhaar"},
-    # a karyana is run from the counter: till orders, stock, udhaar, and its staff's attendance
-    "karyana": (_BASE - {"hr"}) | {"orders", "products", "inventory", "udhaar"},
+    "restaurant": _BASE | _SERVICE | {"orders", "products", "inventory", "purchases"},
+    "shop": (_BASE - {"attendance", "hr"}) | {"orders", "products", "inventory", "udhaar", "purchases"},
+    # a karyana is run from the counter: till orders, stock and purchases, udhaar, and its staff's attendance
+    "karyana": (_BASE - {"hr"}) | {"orders", "products", "inventory", "udhaar", "purchases"},
     "other": set(REGISTRY),
 }
 

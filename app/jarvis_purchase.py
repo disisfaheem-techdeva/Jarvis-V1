@@ -146,4 +146,6 @@ def balance(tid, role, uid, args):
         return {"totals": o.get("totals")}, "Suppliers ko total %s dena hai: %s" % (
             _rs(sum(s["owed"] for s in owed)), ", ".join("%s %s" % (s["name"], _rs(s["owed"])) for s in owed[:4]))
     s, _ = _supplier(tid, role, uid, args, allow_new=False)
+    if s["owed"] < -0.009:      # paid ahead, or a voided bill that was paid: the supplier holds the shop's money
+        return {"supplier": s}, "%s ke paas aap ka %s advance hai" % (s["name"], _rs(-s["owed"]))
     return {"supplier": s}, "%s ko %s dena hai (%d bill%s)" % (s["name"], _rs(s["owed"]), s["bills"], "" if s["bills"] == 1 else "s")

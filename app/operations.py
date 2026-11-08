@@ -420,8 +420,13 @@ def make_operations_router():
         tid, role, uid = _identity(x_tenant_id, x_role, authorization, td_session)
         if role == "operator":
             raise HTTPException(status_code=403, detail="Financial reports are owner-only")
-        end = end or date.today().isoformat()
-        start = start or str(date.today().replace(day=1))
+        # "this month so far" in the shop's own day (Pakistan), not the server's UTC day:
+        # between midnight and 5 am in Lahore the UTC date is still yesterday
+        from datetime import datetime as _dtm
+        from zoneinfo import ZoneInfo as _Z
+        today = _dtm.now(_Z("Asia/Karachi")).date()
+        end = end or today.isoformat()
+        start = start or str(today.replace(day=1))
         loc_p = " AND location_id = %s" if location_id else ""
         extra = (location_id,) if location_id else ()
         with tenant_session(tid, role) as cur:

@@ -239,3 +239,13 @@ def test_jarvis_supplier_payment_and_balance(client, ai, loopback):
     assert "Suppliers ko total" in d["reply"] and "99999" not in d["reply"]
     d = _say(client, ai, "supplier_balance", {"supplier": "Bilal"}, h=CASHIER)
     assert "owner" in d["reply"].lower()
+
+
+def test_a_paid_bill_that_is_voided_leaves_an_advance(client, ai, loopback):
+    r = client.post("/purchases/bills", headers=OWNER, json={"supplier_name": "Advance Co", "paid_now": {"amount": 500},
+                                                           "items": [{"product_id": P["Soap"], "quantity": 10, "unit_cost": 50}]})
+    assert r.status_code == 200 and r.json()["supplier"]["owed"] == 0
+    client.post("/purchases/bills/%s/void" % r.json()["bill"]["id"], headers=OWNER, json={"reason": "returned"})
+    assert next(s for s in client.get("/purchases", headers=OWNER).json()["suppliers"] if s["name"] == "Advance Co")["owed"] == -500
+    d = _say(client, ai, "supplier_balance", {"supplier": "Advance Co"}, reply="99999.")
+    assert "Rs 500 advance" in d["reply"] and "-" not in d["reply"]
