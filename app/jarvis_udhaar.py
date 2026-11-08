@@ -97,6 +97,9 @@ def describe(tid, role, uid, action, args):
             _who(c), _rs(amt), _rs(c["balance"]), _rs(c["balance"] + amt))
     ledger, till = max(float(c["ledger"]), 0.0), float(c["till"])
     if amt - ledger > 0.009:
+        if till > 0 and ledger <= 0.009:
+            raise ja.ActionError("all of %s's udhaar (%s) is on till bills. Collect it on the till (Bills, Udhaar)" % (
+                _who(c), _rs(till)))
         if till > 0:
             raise ja.ActionError("%s owes %s on the ledger and %s on till bills. I can write at most %s here; "
                                  "collect the till bills on the till (Bills, Udhaar)" % (

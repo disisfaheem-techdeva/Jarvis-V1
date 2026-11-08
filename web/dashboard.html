@@ -114,7 +114,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=5af7551531">
+<link rel="stylesheet" href="/assets/td.css?v=af2ac0a8f1">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -3256,6 +3256,140 @@ VIEWS.expenses = function(){
       act('/business/expenses', {method:'POST', body:{ description: desc, amount: amt, category: val('excat') || 'general',
         spent_on: val('exdate') || todayISO(), method: val('exmeth') || null }}, 'Expense recorded.')
         .then(function(r){ b.disabled = false; if (r.ok) need('expenses', '/business/expenses', true); });
+    };
+  }, 0);
+  return out;
+};
+
+/* --------------------------------------------------------------- Udhaar
+   (8 Nov 2026; app/ledger.py, db/94) Who owes the shop. Each balance is the
+   ledger (opening balances, credit written down, payments) plus the till's own
+   udhaar bills, added up by the server. Entries are never edited: a mistake is
+   undone with a reversing entry and both stay in the statement. A payment here
+   settles only the ledger part; till bills are collected on the till. */
+var UD = { q: '', sel: null, ref: null, undo: null };
+function udRef(){ return 'ud' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12); }
+function udField(id, label, type, width, extra){
+  return '<label class="ud-f" style="flex:1;min-width:' + (width || 120) + 'px"><span>' + esc(label) + '</span>' +
+    '<input class="fld" id="' + id + '" type="' + (type || 'text') + '"' + (extra || '') + '></label>';
+}
+function udKind(k, amt){
+  if (k === 'till_bill') return 'Till bill';
+  return { opening: 'Opening balance', credit: 'Udhaar', payment: 'Payment', adjustment: amt > 0 ? 'Correction (+)' : 'Correction (−)' }[k] || k;
+}
+VIEWS.udhaar = function(){
+  var out = '<h1>Udhaar</h1><p class="sub">Who owes the shop: what is written in the ledger plus the till’s udhaar bills.</p>';
+  if (!isOwner()) return out + panel('Udhaar', empty('This page is for the owner', 'Ask the owner to write udhaar or a payment.'));
+  var path = '/ledger' + (UD.q ? '?q=' + encodeURIComponent(UD.q) : '');
+  if (!need('udhaar', path)) return out + panel('Udhaar', loading('Loading who owes what...'));
+  if (S.udhaar === null) return out + panel('Udhaar', errState(S.udhaar_detail || 'The udhaar ledger did not respond.'));
+  var d = S.udhaar, t = d.totals || {}, list = d.customers || [];
+  out += '<div class="grid">' +
+    metric('Total udhaar', money(t.owed), t.customers_owing ? t.customers_owing + ' customer' + (t.customers_owing === 1 ? '' : 's') + ' owe' : 'Nobody owes the shop') +
+    metric('In the ledger', money(t.ledger), 'Opening balances, credit and payments written here') +
+    metric('On till bills', money(t.till), 'Udhaar bills made at the till, collected there') + '</div>';
+  if (!UD.ref) UD.ref = udRef();
+  var selC = UD.sel && S['udst_' + UD.sel] && S['udst_' + UD.sel].customer;
+  var who = selC ? '<div class="card-note" style="margin:4px 0 0">For <strong>' + esc(selC.name) + '</strong>' + (selC.phone ? ' · ' + esc(selC.phone) : '') +
+      ' · owes ' + money(selC.balance) + ' <button class="btn" id="udnew">Someone else</button></div>'
+    : row() + udField('udname', 'Customer name *', 'text', 180, ' maxlength="120" autocomplete="off"') +
+      udField('udphone', 'Phone (needed for a new customer)', 'tel', 170, ' maxlength="40" inputmode="tel"') + '</div>';
+  out += panel('Write it down', '<div style="padding:12px 16px">' + who + row() +
+    '<label class="ud-f" style="flex:1;min-width:150px"><span>What</span><select class="fld" id="udkind">' +
+      '<option value="credit">Udhaar (they took goods)</option><option value="payment">Payment (they paid back)</option>' +
+      '<option value="opening">Opening balance (old register)</option></select></label>' +
+    udField('udamt', 'Amount (Rs) *', 'number', 120, ' min="1" step="any" inputmode="decimal"') +
+    udField('uddate', 'Date', 'date', 150, ' value="' + todayISO() + '" max="' + todayISO() + '"') +
+    '<label class="ud-f" id="udmethw" style="flex:1;min-width:130px" hidden><span>Paid by</span><select class="fld" id="udmeth">' +
+      '<option value="cash">Cash</option><option value="jazzcash">JazzCash</option><option value="easypaisa">EasyPaisa</option>' +
+      '<option value="bank">Bank</option><option value="card">Card</option><option value="other">Other</option></select></label></div>' +
+    row() + udField('udnote', 'Note (e.g. atta, ghee, register page 4)', 'text', 260, ' maxlength="300"') +
+    '<button class="btn primary" id="udadd" style="align-self:flex-end">Write it down</button></div>' +
+    '<div class="card-note">A mistake is not edited: open the customer and press Undo on that line. Both lines stay in the history.</div></div>' + actbar());
+  var head = '<div style="display:flex;gap:8px;align-items:center"><label class="td-sr-only" for="udq">Search customers</label>' +
+    '<input class="fld" id="udq" type="search" placeholder="Name or phone" value="' + esc(UD.q) + '" style="width:200px">' +
+    '<span class="pill count">' + list.length + '</span></div>';
+  out += panel('Customers', !list.length ? empty(UD.q ? 'Nobody matches "' + UD.q + '"' : 'No udhaar yet', UD.q ? '' : 'Write the first one above, or sell on udhaar at the till.')
+    : '<div class="tbl-wrap"><table><thead><tr><th>Customer</th><th>Phone</th><th class="num">Ledger</th><th class="num">Till bills</th><th class="num">Owes</th><th>Last</th><th></th></tr></thead><tbody>' +
+      list.map(function(c){
+        return '<tr' + (UD.sel === c.customer_id ? ' class="sel"' : '') + '><td>' + esc(c.name) + '</td><td>' + esc(c.phone || '—') + '</td>' +
+          '<td class="num">' + money(c.ledger) + '</td><td class="num">' + (c.till_bills ? money(c.till) + ' (' + c.till_bills + ')' : '—') + '</td>' +
+          '<td class="num' + (c.balance > 0 ? ' bal-due' : '') + '"><strong>' + money(c.balance) + '</strong></td><td>' + (c.last_activity ? when(c.last_activity) : '—') + '</td>' +
+          '<td><button class="btn" data-udsel="' + esc(c.customer_id) + '">Statement</button></td></tr>';
+      }).join('') + '</tbody></table></div>', head);
+  if (UD.sel) {
+    var key = 'udst_' + UD.sel;
+    if (!need(key, '/ledger/customers/' + UD.sel)) out += panel('Statement', loading('Loading the statement...'));
+    else if (S[key] === null) out += panel('Statement', errState(S[key + '_detail'] || 'The statement did not load.'));
+    else {
+      var st = S[key], lines = (st.lines || []).slice().reverse();
+      out += panel('Statement: ' + st.customer.name, !lines.length ? empty('Nothing yet', 'Nothing has been written for this customer.')
+        : '<div class="tbl-wrap"><table><thead><tr><th>Date</th><th>What</th><th>Note</th><th class="num">Amount</th><th class="num">Balance</th><th></th></tr></thead><tbody>' +
+          lines.map(function(l){
+            var undo = l.type === 'entry' && !l.reverses && !l.reversed;
+            return '<tr' + (l.reversed ? ' class="muted"' : '') + '><td>' + esc(l.on || '') + '</td><td>' + esc(udKind(l.type === 'till_bill' ? 'till_bill' : l.kind, l.amount)) +
+              (l.type === 'till_bill' ? ' ' + esc(l.number) : '') + (l.method ? ' · ' + esc(l.method) : '') + (l.source === 'jarvis' ? ' <span class="tag">Jarvis</span>' : '') +
+              (l.reversed ? ' <span class="tag">undone</span>' : '') + '</td><td>' + esc(l.note || (l.type === 'till_bill' ? 'Collect on the till' : '')) + '</td>' +
+              '<td class="num">' + money(l.amount) + '</td><td class="num">' + money(l.running) + '</td>' +
+              '<td>' + (undo ? '<button class="btn" data-udundo="' + esc(l.id) + '">Undo</button>' : '') + '</td></tr>' +
+              (UD.undo === l.id ? '<tr><td colspan="6"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">' +
+                udField('udwhy', 'Why is this being undone? *', 'text', 240, ' maxlength="250"') +
+                '<button class="btn primary" id="udundogo">Undo it</button><button class="btn" id="udundono">Keep it</button></div></td></tr>' : '');
+          }).join('') + '</tbody></table></div>',
+        '<span class="tag">Owes ' + money(st.customer.balance) + '</span>');
+    }
+  }
+  setTimeout(function(){
+    var g = function(id){ return document.getElementById(id); };
+    // a success message survives the redraw that reloading the figures causes
+    if (UD.flash && g('actmsg')) { g('actmsg').textContent = UD.flash; g('actmsg').style.color = 'var(--growth)'; }
+    var reload = function(msg){
+      UD.flash = msg || null;
+      setTimeout(function(){ UD.flash = null; }, 4000);
+      need('udhaar', '/ledger' + (UD.q ? '?q=' + encodeURIComponent(UD.q) : ''), true);
+      if (UD.sel) need('udst_' + UD.sel, '/ledger/customers/' + UD.sel, true);
+    };
+    if (g('udkind')) g('udkind').onchange = function(){ g('udmethw').hidden = this.value !== 'payment'; };
+    if (g('udq')) g('udq').oninput = function(){
+      var v = this.value.trim(); clearTimeout(UD.qT);
+      UD.qT = setTimeout(function(){ UD.q = v; need('udhaar', '/ledger' + (v ? '?q=' + encodeURIComponent(v) : ''), true); }, 350);
+    };
+    if (g('udnew')) g('udnew').onclick = function(){ UD.sel = null; UD.undo = null; renderShell(); };
+    document.querySelectorAll('[data-udsel]').forEach(function(b){
+      b.onclick = function(){ UD.sel = b.getAttribute('data-udsel'); UD.undo = null; need('udst_' + UD.sel, '/ledger/customers/' + UD.sel, true); };
+    });
+    document.querySelectorAll('[data-udundo]').forEach(function(b){
+      b.onclick = function(){ UD.undo = b.getAttribute('data-udundo'); renderShell(); setTimeout(function(){ if (g('udwhy')) g('udwhy').focus(); }, 0); };
+    });
+    if (g('udundono')) g('udundono').onclick = function(){ UD.undo = null; renderShell(); };
+    if (g('udundogo')) g('udundogo').onclick = function(){
+      var why = val('udwhy');
+      if (!why) { say('Say why it is being undone.'); return; }
+      this.disabled = true;
+      act('/ledger/entries/' + UD.undo + '/reverse', { method: 'POST', body: { reason: why } }, 'Undone. Both lines stay in the history.')
+        .then(function(r){ if (r.ok) { UD.undo = null; reload('Undone. Both lines stay in the history.'); } else if (g('udundogo')) g('udundogo').disabled = false; });
+    };
+    if (g('udadd')) g('udadd').onclick = function(){
+      var amt = numv('udamt'), b = this;
+      if (amt === null || isNaN(amt) || !(amt > 0)) { say('Write an amount above zero.'); return; }
+      var body = { kind: val('udkind'), amount: amt, note: val('udnote') || null, occurred_on: val('uddate') || null, client_ref: UD.ref };
+      if (body.kind === 'payment') body.method = val('udmeth') || 'cash';
+      if (UD.sel) body.customer_id = UD.sel;
+      else {
+        body.customer_name = val('udname'); body.customer_phone = val('udphone') || null;
+        if (!body.customer_name) { say('Whose account? Write the customer’s name.'); return; }
+      }
+      b.disabled = true;
+      act('/ledger/entries', { method: 'POST', body: body },
+          body.kind === 'payment' ? 'Payment written.' : body.kind === 'opening' ? 'Opening balance written.' : 'Udhaar written.')
+        .then(function(r){
+          b.disabled = false;
+          if (!r.ok) return;
+          UD.ref = udRef();                                   // the next entry is a new one; a resend of this one was safe
+          if (r.data && r.data.customer) UD.sel = r.data.customer.customer_id;
+          reload((body.kind === 'payment' ? 'Payment written.' : body.kind === 'opening' ? 'Opening balance written.' : 'Udhaar written.') +
+                 (r.data && r.data.customer ? ' ' + r.data.customer.name + ' now owes ' + money(r.data.customer.balance) + '.' : ''));
+        });
     };
   }, 0);
   return out;
@@ -8429,7 +8563,7 @@ function apWire(){
    Business & agent; sections hidden there (hidden_sections) still apply. */
 var TYPE_HIDE = {
   product: ['appointments', 'calendar', 'services', 'catalogue', 'packages', 'dailyentry'],
-  service: ['orders']
+  service: ['orders', 'udhaar']
 };
 /* Types that sell products, not services: the same list as
    app/categories.PRODUCT_TYPES (karyana added 8 Nov 2026, db/93). */
@@ -8478,12 +8612,12 @@ function typeHidden(id){
     { num:'06', name:'Team & HR',      icon:'badge', ids:['team','attendance','hr','roles'] },
     { num:'07', name:'Marketing',      icon:'mega',  ids:['marketing','posts','captions','autopilot','advisor','analytics','gallery'], sep:true },
     { num:'08', name:'Business',       icon:'store', ids:['services','products','packages','deals','reports','settings'] },
-    { num:'09', name:'Finance',        icon:'wallet',ids:['revenue','invoices','expenses','dayclose','pnl'] },
+    { num:'09', name:'Finance',        icon:'wallet',ids:['revenue','invoices','expenses','udhaar','dayclose','pnl'] },
     { num:'10', name:'Administration', icon:'shield',ids:['integrations','whatsapp','billing','usage','permissions'], sep:true }
   ];
   // the pages added in this block (they are not in NAV)
   var NEW = { history:'Execution History', tools:'Agents', pipeline:'Pipeline',
-              analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer', usage:'AI usage', roles:'Roles', bizprofile:'Business Profile', followups:'Follow-ups', crmreports:'CRM Reports', gallery:'Autopilot Gallery' };
+              analytics:'Analytics', deals:'Deals', permissions:'Permissions', captions:'Caption Writer', usage:'AI usage', roles:'Roles', bizprofile:'Business Profile', followups:'Follow-ups', crmreports:'CRM Reports', gallery:'Autopilot Gallery', udhaar:'Udhaar' };
   // tab names that follow the approved structure; everything else keeps its own name
   var LABEL = { overview:'Overview', console:'Jarvis Assistant', ai:'AI Agents', needshuman:'Approval Queue',
                 marketing:'Campaigns', posts:'Social Media Publisher', autopilot:'Content Calendar',
@@ -8517,7 +8651,8 @@ function typeHidden(id){
     }); });
     Object.keys(NEW).forEach(function(id){
       if (seen[id] || hidden.indexOf(id) !== -1) return;
-      if (!own && (id === 'permissions' || id === 'analytics' || id === 'captions' || id === 'usage' || id === 'roles')) return;
+      if (!own && (id === 'permissions' || id === 'analytics' || id === 'captions' || id === 'usage' || id === 'roles' || id === 'udhaar')) return;
+      if (typeHidden(id)) return;
       if (id === 'roles' && window.TD_ROLE && TD_ROLE.permissions) return;
       seen[id] = 1; list.push({ id: id, name: NEW[id] });
     });

@@ -191,6 +191,10 @@ def add_entry(cur, body, *, actor, source="manual"):
     c = balance(cur, c["customer_id"])
     if kind == "payment":
         if amt - max(c["ledger"], 0) > 0.009:
+            bills = "%d till bill%s" % (c["till_bills"], "" if c["till_bills"] == 1 else "s")
+            if c["till"] > 0 and c["ledger"] <= 0.009:
+                raise LedgerError(409, "All of %s's udhaar (%s) is on %s. Collect it on the till (Bills, Udhaar): "
+                                       "a payment here settles only the ledger." % (c["name"], _rs(c["till"]), bills))
             if c["till"] > 0:
                 raise LedgerError(409, (
                     "%s owes %s on the ledger and %s on %d till bill%s. A payment here settles only the ledger, so the "

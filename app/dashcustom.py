@@ -54,7 +54,7 @@ MODULES = [
     ("08", "Business", [("services", "Services"), ("products", "Products"), ("packages", "Packages"), ("deals", "Deals"),
                         ("reports", "Reports"), ("settings", "Business Settings")]),
     ("09", "Finance", [("revenue", "Revenue"), ("invoices", "Invoices"), ("expenses", "Expenses"),
-                       ("dayclose", "Day Close"), ("pnl", "Profit & Loss")]),
+                       ("udhaar", "Udhaar"), ("dayclose", "Day Close"), ("pnl", "Profit & Loss")]),
     ("10", "Administration", [("integrations", "Integrations"), ("whatsapp", "WhatsApp Connection"),
                               ("billing", "Plan & Billing"), ("usage", "AI usage"), ("permissions", "Permissions"),
                               ("customize", "Customize Dashboard")]),
@@ -79,9 +79,9 @@ PRESET_ON = {
     "gym": _BASE | _SERVICE,
     "academy": _BASE | _SERVICE,
     "restaurant": _BASE | _SERVICE | {"orders", "products", "inventory"},
-    "shop": (_BASE - {"attendance", "hr"}) | {"orders", "products", "inventory"},
-    # a karyana is run from the counter: till orders, stock, and its staff's attendance
-    "karyana": (_BASE - {"hr"}) | {"orders", "products", "inventory"},
+    "shop": (_BASE - {"attendance", "hr"}) | {"orders", "products", "inventory", "udhaar"},
+    # a karyana is run from the counter: till orders, stock, udhaar, and its staff's attendance
+    "karyana": (_BASE - {"hr"}) | {"orders", "products", "inventory", "udhaar"},
     "other": set(REGISTRY),
 }
 

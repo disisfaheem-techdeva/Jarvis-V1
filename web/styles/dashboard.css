@@ -533,4 +533,10 @@
   & .gal-chip.failed { @apply bg-danger-tint; }
   & .gal-dlg { @apply w-[min(32rem,calc(100vw-2rem))] rounded-[var(--card-radius)] border border-line-strong bg-bg-elevated p-5 text-fg backdrop:bg-black/60; }
   & .gal-dlg h2 { @apply mt-0 mb-2 font-display text-lg font-semibold; }
+  /* Udhaar (db/94): labelled fields, money right-aligned, the open customer marked, undone lines quiet */
+  & .ud-f { @apply flex flex-col gap-1 text-xs text-fg-muted; }
+  & .ud-f .fld { @apply w-full; }
+  & td.num, & th.num { @apply text-right tabular-nums; }
+  & tr.sel td { @apply bg-accent-tint; }
+  & tr.muted td { @apply text-fg-subtle; }
 }
