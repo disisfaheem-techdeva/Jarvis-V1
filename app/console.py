@@ -107,7 +107,12 @@ Fields:
             supplier_balance (what the shop owes a supplier, or all of them:
                 "Bilal Traders ka kitna dena hai?"),
             shop_report (the shop's figures: "aaj dukaan ka kya haal hai?",
-                "aaj kitna profit hua?", "kya kam hai?", "kya mangwana hai?")
+                "aaj kitna profit hua?", "kya kam hai?", "kya mangwana hai?"),
+            describe_business (the owner is telling you ABOUT their business
+                to set it up: what they sell and the rates, hours, where it
+                is, delivery, payments: "meri dukaan Gulberg mein hai, cheeni
+                180 rupay kilo..."; also the answer to a setup question you
+                just asked. Not for one product change: that is kind business)
   "args": if kind is action, an object:
             navigate: section (a section id from the list below)
             book_appointment: name, phone, date (YYYY-MM-DD), time (HH:MM
@@ -171,6 +176,8 @@ Fields:
             shop_report: topic (summary, profit, best_sellers, low_stock,
                 reorder or stock_value), period (today, week or month, if
                 said). Never say a figure in reply: the platform answers.
+            describe_business: nothing (the platform reads the owner's own
+                words, exactly as said, and asks the next question itself).
           order_id must be the "id" of one of orders.recent_and_open in BUSINESS
           FACTS (match the customer's name, phone or order number). Questions
           about orders, sales or what is owed are kind "question", answered
@@ -964,8 +971,10 @@ def _do_action(tid, role, uid, action, args, founder, reply):
         reply = _done_text(action, args)
     if action in ja.SERVER_WORDED:
         # money and stock: only what the platform found is said
-        return dict(result, kind="action", action=action, ok=True,
-                    reply=(note.rstrip(".") + ".") if note else _done_text(action, args))
+        if note:
+            note = note.strip()
+            note = note if note.endswith(("?", "؟", "!", ".")) else note + "."
+        return dict(result, kind="action", action=action, ok=True, reply=note or _done_text(action, args))
     if action == "publish_post":
         # only what Facebook / Instagram confirmed: a post id back means it is out
         reply = _published_text(result.get("post_status"), result.get("post_results") or {})
@@ -1090,6 +1099,10 @@ def make_console_router():
                     args.pop(k, None)
             if action == "pos_bill" and not args.get("register") and body.get("till_register"):
                 args["register"] = str(body["till_register"])[:40]       # said at a till: that till's shift
+            if action == "describe_business":
+                # the owner's own words, never the model's retelling: the setup reader keeps only
+                # items and prices that appear in the text it is given
+                args["_said"] = (body.get("message") or "").strip()
             if action == "write_campaign":
                 args["image_urls"] = attached
             if action == "schedule_post":

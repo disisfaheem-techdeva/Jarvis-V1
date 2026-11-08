@@ -68,6 +68,10 @@ SERVER_WORDED |= PURCHASE
 # The shop's figures (app/jarvis_shop.py): read only, answered at once, worded from the records.
 ACTIONS |= {"shop_report"}
 SERVER_WORDED |= {"shop_report"}
+# Setting up the business by talking (app/setup_talk.py): saves nothing (the owner reviews
+# and saves on Business & agent), so it runs at once; the words read are the owner's own.
+ACTIONS |= {"describe_business"}
+SERVER_WORDED |= {"describe_business"}
 _HHMM = re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -331,6 +335,13 @@ def run(tid, role, uid, action, args, founder=False):
     if action == "shop_report":
         from . import jarvis_shop
         return jarvis_shop.run(tid, role, uid, args)
+    if action == "describe_business":
+        said = str(args.get("_said") or "").strip()
+        if not said:
+            raise ActionError("tell me about your business: what you sell and at what price, your hours, where you are")
+        out = _call(tid, role, uid, "POST", "/business-profile/setup/describe", {"text": said})
+        return {"navigate": "bizagent", "refresh": ["bizprofile"], "setup": {
+            "suggestion_id": out.get("suggestion_id"), "missing": out.get("missing")}}, out.get("reply")
     if action == "universal_caption":
         from fastapi import HTTPException as _H
         from .universal_caption import save, write_options

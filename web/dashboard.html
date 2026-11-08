@@ -8093,6 +8093,10 @@ function jsLoadSuggestion(){
 }
 function jsFromText(){
   if (!JS.from || !JS.from.length) return '';
+  // what the owner told Jarvis (app/setup_talk.py) is not a page Jarvis read
+  if (JS.from.some(function(s){ return s.kind === 'told'; }))
+    return '<div style="padding:10px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px"><b>What you told Jarvis</b>' +
+      '<div class="card-note">This is what Jarvis understood. Nothing is saved until you press Save. Anything you did not mention is not here: tell Jarvis more, or add it below.</div></div>';
   return '<div style="padding:10px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px"><b>Jarvis read ' +
     JS.from.map(function(s){ return (s.kind === 'facebook' ? 'your Facebook page ' : s.kind === 'photo' ? 'your ' : 'your website ') + esc(s.ref); }).join(' and ') +
     '</b><div class="card-note">This is what it found there. Nothing is saved until you press Save. Prices are often not on a page: paste or photograph your price list below to add them.</div></div>';
@@ -8181,8 +8185,9 @@ function jsPanel(){
     var what = [sg.business_type ? 'your business type' : '', sg.services ? sg.services + ' item' + (sg.services === 1 ? '' : 's') : '',
                 sg.hours ? 'opening hours' : '', sg.knowledge ? sg.knowledge + ' fact' + (sg.knowledge === 1 ? '' : 's') : ''].filter(Boolean).join(', ');
     var from = (sg.sources || []).map(function(s){ return s.kind === 'facebook' ? 'Facebook page' : s.kind === 'photo' ? 'menu photo' : 'website'; }).join(' and ');
+    var told = (sg.sources || []).some(function(s){ return s.kind === 'told'; });
     var bn = '<div class="panel" style="padding:14px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;border:1px solid var(--accent,#6C8CFF)">' +
-      '<div><b>🤖 Jarvis read your ' + esc(from || 'page') + '</b><div class="card-note">It found ' + esc(what || 'details') + ' to set up your dashboard and WhatsApp agent. Check it and press Save.</div></div>' +
+      '<div><b>' + (told ? '🤖 Jarvis wrote down what you told it' : '🤖 Jarvis read your ' + esc(from || 'page')) + '</b><div class="card-note">' + (told ? 'You told it ' : 'It found ') + esc(what || 'details') + ' to set up your dashboard and WhatsApp agent. Check it and press Save.</div></div>' +
       '<a class="btn primary" href="#/bizagent">Review</a></div>';
     var i = out.indexOf('</p>');
     return i < 0 ? bn + out : out.slice(0, i + 4) + bn + out.slice(i + 4);
