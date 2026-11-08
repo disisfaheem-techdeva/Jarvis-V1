@@ -33,7 +33,7 @@ SECTIONS = ("overview", "leads", "customers", "appointments", "calendar", "daily
             "revenue", "invoices", "expenses", "dayclose", "pnl", "services", "products",
             "packages", "catalogue", "inventory", "integrations", "reports", "settings",
             "console", "posts", "billing", "team", "whatsapp", "inbox", "needshuman",
-            "marketing", "attendance", "hr", "hermes", "ai", "bizagent", "orders", "calls")
+            "marketing", "attendance", "hr", "hermes", "ai", "bizagent", "orders", "calls", "udhaar")
 
 # What needs a "yes" first.
 CONFIRM = {"add_expense", "cancel_appointment", "schedule_post", "publish_post",
@@ -54,6 +54,11 @@ CONFIRM |= {"pos_bill"}
 # Worded by the platform from what it found, never by the model: a model that
 # says a total or a stock figure could be wrong, and money and stock are not.
 SERVER_WORDED = {"pos_bill", "stock_check"}
+# The udhaar ledger (app/jarvis_udhaar.py): writing credit or a payment is asked first.
+UDHAAR = {"udhaar_add", "udhaar_payment", "customer_balance"}
+ACTIONS |= UDHAAR
+CONFIRM |= {"udhaar_add", "udhaar_payment"}
+SERVER_WORDED |= UDHAAR
 _HHMM = re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -235,6 +240,9 @@ def describe(tid, role, action, args, founder=False, uid=None):
     if action == "pos_bill":
         from .jarvis_pos import describe_bill
         return describe_bill(tid, role, uid, args)
+    if action in ("udhaar_add", "udhaar_payment"):
+        from . import jarvis_udhaar
+        return jarvis_udhaar.describe(tid, role, uid, action, args)
     if action == "universal_caption":
         if founder or role not in ("owner", "techdeva_admin"):
             raise ActionError("only the business owner can change the caption that goes under every post")
@@ -302,6 +310,9 @@ def run(tid, role, uid, action, args, founder=False):
     if action in ("pos_bill", "stock_check"):
         from . import jarvis_pos
         return (jarvis_pos.sell if action == "pos_bill" else jarvis_pos.stock)(tid, role, uid, args)
+    if action in UDHAAR:
+        from . import jarvis_udhaar
+        return jarvis_udhaar.run(tid, role, uid, action, args)
     if action == "universal_caption":
         from fastapi import HTTPException as _H
         from .universal_caption import save, write_options

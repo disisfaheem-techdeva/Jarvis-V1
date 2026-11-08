@@ -88,6 +88,9 @@ app.include_router(make_jarvis_memory_router(_console_identity))
 # Jarvis API v1: the versioned contract over the same Jarvis (ADR-003, docs/JARVIS-API.md)
 from .jarvis_api import make_jarvis_api_router
 app.include_router(make_jarvis_api_router())
+# Udhaar ledger: credit that is not a till bill, and each customer's balance (db/94, ADR-004)
+from .ledger import make_ledger_router
+app.include_router(make_ledger_router(_console_identity))
 from .dashboard import make_dashboard_router
 app.include_router(make_dashboard_router(_console_identity))
 from .support_routes import make_support_router, make_founder_support_router

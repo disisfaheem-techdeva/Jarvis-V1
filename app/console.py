@@ -93,7 +93,13 @@ Fields:
             pos_bill (make a till bill for a customer at the counter now:
                 "do kilo cheeni aur ek sabun ka bill bana do"),
             stock_check (how much of one product is left: "kitni cheeni
-                baqi hai?")
+                baqi hai?"),
+            udhaar_add (write credit on a customer's account with no bill:
+                "Ahmed ke account mein 1500 udhaar likh do"),
+            udhaar_payment (a customer paid back udhaar: "Ahmed ne 1000
+                de diye"),
+            customer_balance (how much one customer owes, or the total:
+                "Ahmed ka kitna baqi hai?", "total udhaar kitna hai?")
   "args": if kind is action, an object:
             navigate: section (a section id from the list below)
             book_appointment: name, phone, date (YYYY-MM-DD), time (HH:MM
@@ -136,6 +142,13 @@ Fields:
                 bill back from the shop's own list.
             stock_check: item (the product's words exactly as said). Never
                 say a stock figure in reply: the platform answers from stock.
+            udhaar_add / udhaar_payment: customer (the name exactly as said),
+                phone (if said; or the last digits, e.g. "1234 wala" -> "1234"),
+                amount (number, PKR), note (what it was for, if said),
+                method (payment only: cash, bank, jazzcash, easypaisa, if said).
+            customer_balance: customer (name as said; empty for the total),
+                phone (if said). For all three never say a balance or amount
+                owed in reply: the platform answers from the ledger.
           order_id must be the "id" of one of orders.recent_and_open in BUSINESS
           FACTS (match the customer's name, phone or order number). Questions
           about orders, sales or what is owed are kind "question", answered

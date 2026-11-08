@@ -111,6 +111,7 @@ SECTION_BY_PATH = [
     ("/operations/invoices", "finance"), ("/business/invoices", "finance"), ("/business/payments", "finance"),
     ("/business/expenses", "finance"), ("/operations/closing", "finance"), ("/operations/pnl", "finance"),
     ("/revenue", "finance"), ("/business/executions", "jarvis"),
+    ("/ledger", "finance"),                     # udhaar ledger (app/ledger.py, db/94)
     # administration
     ("/integrations", "admin"), ("/oauth", "admin"), ("/connect", "admin"), ("/disconnect", "admin"),
     ("/billing", "admin"), ("/plan", "admin"), ("/usage", "admin"),
@@ -123,8 +124,10 @@ ALWAYS_EXACT = {"/me", "/console/prefs", "/business-profile", "/categories", "/b
                 # talking to Jarvis: open to every login; what Jarvis shows and does is
                 # limited to the person's role inside it (console._facts_for, _role_may,
                 # and its actions go through this same check)
-                "/console", "/console/speak"}
-ALWAYS_PREFIX = ("/auth/", "/public/", "/media/", "/assets/", "/console/conversations")
+                "/console", "/console/speak",
+                # the same Jarvis through its v1 contract (app/jarvis_api.py), same rule
+                "/jarvis/v1"}
+ALWAYS_PREFIX = ("/auth/", "/public/", "/media/", "/assets/", "/console/conversations", "/jarvis/v1/")
 PAGES = ("/", "/dashboard", "/login", "/pin", "/reset", "/portal", "/onboarding", "/techdeva", "/signup",
          "/orders-view", "/storefront-view", "/plans", "/pos")
 APPROVE_WORDS = ("approve", "reject", "publish", "launch", "resume", "pause", "approve-week", "void", "dismiss", "apply")
