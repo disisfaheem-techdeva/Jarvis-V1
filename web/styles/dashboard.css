@@ -539,4 +539,6 @@
   & td.num, & th.num { @apply text-right tabular-nums; }
   & tr.sel td { @apply bg-accent-tint; }
   & tr.muted td { @apply text-fg-subtle; }
+  /* bring the old register: a line that needs a look */
+  & .tag.rg-warn { @apply bg-warning-tint text-warning; }
 }

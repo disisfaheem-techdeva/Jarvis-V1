@@ -114,7 +114,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <!-- @td-fonts:end -->
 <!-- @td-css:start -->
-<link rel="stylesheet" href="/assets/td.css?v=af2ac0a8f1">
+<link rel="stylesheet" href="/assets/td.css?v=68e64eb405">
 <!-- @td-css:end -->
 </head>
 <body class="td td-grain page-dashboard min-h-screen bg-bg text-fg">
@@ -3403,6 +3403,165 @@ VIEWS.udhaar = function(){
   }, 0);
   return out;
 };
+
+/* ---------------------------------------- Udhaar: bring the old register
+   (9 Nov 2026; app/register_import.py, db/96) Photos of the register's pages are
+   read by the AI into rows to CHECK. Nothing reaches the ledger until the owner
+   approves rows and presses Import. Flagged rows are approved one by one. */
+var RG = { id: null, busy: null, msg: null, open: false };
+var RG_FLAG = { no_name: 'Whose line?', no_amount: 'No amount', ambiguous_customer: 'Which customer?', low_confidence: 'Unclear writing',
+                possible_duplicate: 'Maybe a duplicate', no_date: 'No date', new_customer: 'New customer' };
+var RG_STATUS = { needs_check: 'Check', ready: 'Looks right', approved: 'Approved', rejected: 'Rejected', imported: 'In the ledger' };
+function rgFile(file){
+  // a photo is made smaller first (long side 2000 px, JPEG): enough to read handwriting, far under the 8 MB limit
+  return new Promise(function(ok, bad){
+    var fr = new FileReader();
+    fr.onerror = function(){ bad(new Error('That file could not be opened.')); };
+    fr.onload = function(){
+      if (file.type === 'application/pdf') return ok(fr.result);
+      var img = new Image();
+      img.onerror = function(){ bad(new Error(file.name + ' is not a picture this browser can open.')); };
+      img.onload = function(){
+        var k = Math.min(1, 2000 / Math.max(img.width, img.height)), c = document.createElement('canvas');
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        ok(c.toDataURL('image/jpeg', 0.85));
+      };
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+function rgHTML(){
+  var head = '<div class="card-note" style="margin:0 0 8px">Photograph each page of the old udhaar register. Jarvis reads them; you check every line before anything is written.</div>';
+  if (!need('rglist', '/ledger/imports')) return panel('Bring your old register', loading('Loading...'));
+  var open = ((S.rglist && S.rglist.imports) || []).filter(function(i){ return i.status === 'open'; });
+  if (!RG.id && open.length) RG.id = open[0].id;
+  if (!RG.id) {
+    return panel('Bring your old register', '<div style="padding:12px 16px">' + head + row() +
+      '<label class="ud-f" style="flex:2;min-width:220px"><span>What the pages hold</span><select class="fld" id="rgmode">' +
+        '<option value="balances">What each customer owes now (one line per customer)</option>' +
+        '<option value="transactions">Day-by-day udhaar and payments</option></select></label>' +
+      '<label class="ud-f" style="flex:2;min-width:220px"><span>Photos or PDF of the pages</span><input class="fld" id="rgfiles" type="file" accept="image/jpeg,image/png,application/pdf" multiple></label>' +
+      '<button class="btn primary" id="rggo" style="align-self:flex-end"' + (RG.busy ? ' disabled' : '') + '>Upload and read</button></div>' +
+      '<div class="card-note" id="rgmsg" role="status">' + esc(RG.busy || RG.msg || '') + '</div></div>');
+  }
+  var key = 'rg_' + RG.id;
+  if (!need(key, '/ledger/imports/' + RG.id)) return panel('Bring your old register', loading('Loading the pages...'));
+  var d = S[key];
+  if (d === null) { RG.id = null; return panel('Bring your old register', errState(S[key + '_detail'] || 'That import could not be opened.')); }
+  var c = d.counts, a = d.accuracy, trans = d.import.mode === 'transactions';
+  var pages = d.pages.map(function(p){
+    return '<a class="tag" target="_blank" rel="noopener" href="/ledger/imports/' + esc(d.import.id) + '/pages/' + esc(p.id) + '/image">Page ' + p.page_no +
+      (p.status === 'failed' ? ' · not read' : p.status === 'waiting' ? ' · waiting' : '') + '</a>' +
+      (p.status !== 'read' ? ' <button class="btn" data-rgread="' + esc(p.id) + '">Read' + (p.status === 'failed' ? ' again' : '') + '</button>' : '');
+  }).join(' ');
+  var rows = d.rows.map(function(r){
+    var lock = r.status === 'imported', fl = (r.flags || []).map(function(f){ return '<span class="tag' + (f === 'new_customer' ? '' : ' rg-warn') + '">' + esc(RG_FLAG[f] || f) + '</span>'; }).join(' ');
+    var inp = function(f, v, type, w){ return '<input class="fld" data-rgf="' + f + '" data-rgr="' + esc(r.id) + '" type="' + (type || 'text') + '" value="' + esc(v == null ? '' : v) + '" style="width:' + (w || 120) + 'px"' + (lock ? ' disabled' : '') + ' aria-label="' + f + '">'; };
+    return '<tr' + (r.status === 'rejected' ? ' class="muted"' : '') + '><td>' + r.page_no + '.' + r.row_no + '</td>' +
+      '<td style="white-space:normal;min-width:160px">' + esc(r.read_text || '') + (r.confidence != null ? '<div class="card-note" style="margin:2px 0 0">Sure: ' + Math.round(r.confidence * 100) + '%</div>' : '') + '</td>' +
+      '<td>' + inp('name', r.name, 'text', 140) + '</td><td>' + inp('phone', r.phone, 'tel', 120) + '</td><td>' + inp('amount', r.amount, 'number', 100) + '</td>' +
+      (trans ? '<td>' + inp('entry_date', r.entry_date, 'date', 140) + '</td><td><select class="fld" data-rgf="kind" data-rgr="' + esc(r.id) + '"' + (lock ? ' disabled' : '') + ' aria-label="kind">' +
+        ['credit', 'payment'].map(function(k){ return '<option value="' + k + '"' + (r.kind === k ? ' selected' : '') + '>' + (k === 'credit' ? 'Udhaar' : 'Payment') + '</option>'; }).join('') + '</select></td>' : '') +
+      '<td style="white-space:normal">' + fl + (r.import_error ? '<div class="bal-due" style="font-size:12px">' + esc(r.import_error) + '</div>' : '') + '</td>' +
+      '<td><span class="tag">' + esc(RG_STATUS[r.status] || r.status) + '</span></td>' +
+      '<td>' + (lock ? '' : '<button class="btn" data-rgsave="' + esc(r.id) + '">Save</button> ' +
+        (r.status !== 'approved' ? '<button class="btn primary" data-rgok="' + esc(r.id) + '">Approve</button> ' : '') +
+        (r.status !== 'rejected' ? '<button class="btn" data-rgno="' + esc(r.id) + '">Reject</button>' : '')) + '</td></tr>';
+  }).join('');
+  var acc = a.kept ? 'Of ' + a.kept + ' line' + (a.kept === 1 ? '' : 's') + ' kept, ' + a.kept_as_read + ' were read right (' + Math.round(a.accuracy * 100) + '%); ' + a.rejected + ' thrown away.' : '';
+  var body = '<div style="padding:12px 16px">' + head +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:4px 0 10px">' + pages + '</div>' +
+    '<div class="card-note">' + c.needs_check + ' to check · ' + c.ready + ' look right · ' + c.approved + ' approved · ' + c.rejected + ' rejected · ' + c.imported + ' in the ledger' + (acc ? ' · ' + acc : '') + '</div>' +
+    (d.rows.length ? '<div class="tbl-wrap" style="margin-top:8px"><table><thead><tr><th>Line</th><th>As written</th><th>Name</th><th>Phone</th><th>Rs</th>' +
+      (trans ? '<th>Date</th><th>What</th>' : '') + '<th>Check</th><th>Status</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+      : empty('No lines yet', 'Read the pages above.')) +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">' +
+      (c.ready ? '<button class="btn" id="rgall">Approve the ' + c.ready + ' line' + (c.ready === 1 ? '' : 's') + ' that look right</button>' : '') +
+      (c.approved ? '<button class="btn primary" id="rgcommit">Put ' + c.approved + ' approved line' + (c.approved === 1 ? '' : 's') + ' into the ledger</button>' : '') +
+      (!c.imported ? '<button class="btn" id="rgdiscard">Throw this import away</button>' : '') +
+      (d.import.status !== 'open' ? '<button class="btn" id="rgnew">Bring more pages</button>' : '') + '</div>' +
+    '<div class="card-note">Lines marked “Unclear writing” or “Maybe a duplicate” are approved one at a time, after you look at the page.</div>' +
+    '<div class="card-note" id="rgmsg" role="status">' + esc(RG.busy || RG.msg || '') + '</div></div>';
+  return panel('Bring your old register' + (d.import.title ? ': ' + d.import.title : ''), body,
+    '<span class="tag">' + (trans ? 'Udhaar and payments' : 'What each customer owes') + '</span>');
+}
+function rgWire(){
+  var g = function(id){ return document.getElementById(id); };
+  var say2 = function(m){ RG.msg = m; if (g('rgmsg')) g('rgmsg').textContent = m || ''; };
+  var reload = function(){ if (RG.id) need('rg_' + RG.id, '/ledger/imports/' + RG.id, true); need('rglist', '/ledger/imports', true); need('udhaar', '/ledger', true); };
+  var post = function(path, body){ return api(path, { method: 'POST', body: body || {} }); };
+  var readAll = function(iid, ids){
+    var i = 0;
+    var next = function(){
+      if (i >= ids.length) { RG.busy = null; say2('Read ' + ids.length + ' page' + (ids.length === 1 ? '' : 's') + '. Check each line below.'); reload(); return; }
+      RG.busy = 'Reading page ' + (i + 1) + ' of ' + ids.length + '… (each page takes up to a minute)'; say2(RG.busy);
+      post('/ledger/imports/' + iid + '/pages/' + ids[i] + '/read').then(function(r){
+        if (!r.ok) say2('Page ' + (i + 1) + ': ' + ((r.data && r.data.detail) || 'not read') + ' You can press Read again on it.');
+        i++; next();
+      });
+    };
+    next();
+  };
+  if (g('rggo')) g('rggo').onclick = function(){
+    var files = g('rgfiles').files, b = this;
+    if (!files || !files.length) { say2('Choose the photos of the pages first.'); return; }
+    b.disabled = true; RG.busy = 'Preparing ' + files.length + ' page' + (files.length === 1 ? '' : 's') + '…'; say2(RG.busy);
+    post('/ledger/imports', { mode: g('rgmode').value }).then(function(r){
+      if (!r.ok) { RG.busy = null; b.disabled = false; say2((r.data && r.data.detail) || 'Could not start.'); return; }
+      var iid = r.data.import.id, ids = [], list = Array.prototype.slice.call(files), k = 0;
+      RG.id = iid;
+      var up = function(){
+        if (k >= list.length) return readAll(iid, ids);
+        RG.busy = 'Uploading page ' + (k + 1) + ' of ' + list.length + '…'; say2(RG.busy);
+        rgFile(list[k]).then(function(data){ return post('/ledger/imports/' + iid + '/pages', { image: data }); })
+          .then(function(pr){ if (pr.ok) ids.push(pr.data.page.id); else say2(list[k].name + ': ' + ((pr.data && pr.data.detail) || 'not uploaded')); k++; up(); },
+                function(e){ say2(e.message); k++; up(); });
+      };
+      up();
+    });
+  };
+  document.querySelectorAll('[data-rgread]').forEach(function(b){ b.onclick = function(){ readAll(RG.id, [b.getAttribute('data-rgread')]); }; });
+  var fields = function(id){
+    var o = {};
+    document.querySelectorAll('[data-rgr="' + id + '"]').forEach(function(el){ o[el.getAttribute('data-rgf')] = el.value === '' ? null : el.value; });
+    if (o.amount != null) o.amount = Number(o.amount);
+    return o;
+  };
+  var act2 = function(p, method, body, ok){ return api(p, { method: method, body: body }).then(function(r){ if (!r.ok) say2((r.data && r.data.detail) || 'That did not work.'); else { say2(ok); reload(); } return r; }); };
+  document.querySelectorAll('[data-rgsave]').forEach(function(b){ b.onclick = function(){ var id = b.getAttribute('data-rgsave'); act2('/ledger/imports/' + RG.id + '/rows/' + id, 'PATCH', fields(id), 'Saved. Check the line again, then approve it.'); }; });
+  document.querySelectorAll('[data-rgok]').forEach(function(b){ b.onclick = function(){
+    var id = b.getAttribute('data-rgok');
+    // what is typed in the line is saved first, so an approval is of what you see
+    api('/ledger/imports/' + RG.id + '/rows/' + id, { method: 'PATCH', body: fields(id) }).then(function(r){
+      if (!r.ok) { say2((r.data && r.data.detail) || 'Not saved.'); return; }
+      act2('/ledger/imports/' + RG.id + '/rows/' + id + '/decide', 'POST', { decision: 'approve' }, 'Approved.');
+    });
+  }; });
+  document.querySelectorAll('[data-rgno]').forEach(function(b){ b.onclick = function(){ act2('/ledger/imports/' + RG.id + '/rows/' + b.getAttribute('data-rgno') + '/decide', 'POST', { decision: 'reject' }, 'Rejected.'); }; });
+  if (g('rgall')) g('rgall').onclick = function(){ act2('/ledger/imports/' + RG.id + '/approve-ready', 'POST', {}, 'Approved the lines that look right.'); };
+  if (g('rgcommit')) g('rgcommit').onclick = function(){
+    this.disabled = true;
+    api('/ledger/imports/' + RG.id + '/commit', { method: 'POST', body: {} }).then(function(r){
+      if (!r.ok) { say2((r.data && r.data.detail) || 'Nothing was imported.'); reload(); return; }
+      say2(r.data.imported_now + ' line' + (r.data.imported_now === 1 ? '' : 's') + ' put into the ledger' +
+           (r.data.failed_now ? '; ' + r.data.failed_now + ' could not go in (the reason is on the line)' : '') + '.');
+      reload();
+    });
+  };
+  if (g('rgdiscard')) g('rgdiscard').onclick = function(){ act2('/ledger/imports/' + RG.id + '/discard', 'POST', {}, 'Thrown away. Nothing was written.').then(function(r){ if (r.ok) RG.id = null; }); };
+  if (g('rgnew')) g('rgnew').onclick = function(){ RG.id = null; RG.msg = null; renderShell(); };
+}
+(function(){
+  var base = VIEWS.udhaar;
+  VIEWS.udhaar = function(){
+    var out = base.apply(this, arguments);
+    if (!isOwner() || !S.udhaar) return out;
+    setTimeout(rgWire, 0);
+    return out + rgHTML();
+  };
+})();
 
 /* --------------------------------------------------------------- Purchases
    (9 Nov 2026; app/purchases.py, db/95) Stock bought from suppliers and what the
