@@ -9400,9 +9400,41 @@ function typeHidden(id){
       '<label>Currency<input name="currency" value="' + esc(cur) + '" maxlength="3" pattern="[A-Za-z]{3}" required></label>' +
       '<label>Language<select name="language"><option value="en"' + (lang === 'en' ? ' selected' : '') + '>English</option><option value="ur"' + (lang === 'ur' ? ' selected' : '') + '>Urdu</option></select></label>' +
       '<div class="wide"><button class="btn primary" type="submit">Save workspace</button><span id="tdm-wsmsg" class="card-note" style="margin-left:10px"></span></div></form></div>';
+    /* Country (db/97): choosing one fills the currency and time zone above. Tax is not set per country yet. */
+    need('countries', '/countries'); need('bizcountry', '/business-profile/country');
+    var cl = (S.countries && S.countries.countries) || [], bc = S.bizcountry || {};
+    if (cl.length) {
+      var cc = bc.country || '', pick = null;
+      cl.forEach(function(k){ if (k.code === (cc || 'PK')) pick = k; });
+      ws = '<div class="panel" style="margin-bottom:14px"><div class="panel-head"><div class="panel-title">Country</div></div>' +
+        '<form id="tdm-cty" class="tdm-form">' +
+        '<label>Country<select name="country">' + cl.map(function(k){ return '<option value="' + esc(k.code) + '"' + (k.code === (cc || 'PK') ? ' selected' : '') + '>' + esc(k.name) + ' (' + esc(k.currency) + ')</option>'; }).join('') + '</select></label>' +
+        '<label>Time zone<select name="timezone">' + ((pick && pick.timezones) || []).map(function(z){ return '<option' + (z === tz ? ' selected' : '') + '>' + esc(z) + '</option>'; }).join('') + '</select></label>' +
+        '<div class="wide card-note">' + (bc.assumed ? 'No country chosen yet: Pakistan is assumed. ' : '') +
+          'Choosing a country sets the currency and time zone. Tax rates are not set by country yet; your own tax setting is unchanged.</div>' +
+        '<div class="wide"><button class="btn primary" type="submit">Save country</button><span id="tdm-ctymsg" class="card-note" style="margin-left:10px"></span></div></form></div>' + ws;
+    }
     var prev = TDM.after;
     TDM.after = function(){
       if (typeof prev === 'function') prev();
+      var cf = document.getElementById('tdm-cty'), cm = document.getElementById('tdm-ctymsg');
+      if (cf) {
+        cf.elements.country.onchange = function(){
+          var k = null; cl.forEach(function(x){ if (x.code === cf.elements.country.value) k = x; });
+          cf.elements.timezone.innerHTML = ((k && k.timezones) || []).map(function(z){ return '<option>' + esc(z) + '</option>'; }).join('');
+        };
+        cf.onsubmit = function(e){
+          e.preventDefault();
+          cm.textContent = 'Saving...'; cm.style.color = '';
+          api('/business-profile/country', {method:'PUT', body:{country:cf.elements.country.value, timezone:cf.elements.timezone.value}}).then(function(r){
+            if (!r.ok) { cm.style.color = 'var(--danger)'; cm.textContent = (r.data && typeof r.data.detail === 'string') ? r.data.detail : 'That did not save.'; return; }
+            S.bizcountry = r.data;
+            if (S.config && S.config.config) { S.config.config.timezone = r.data.timezone; S.config.config.currency = r.data.currency; S.config.config.language = r.data.language; }
+            renderShell();
+            setTimeout(function(){ var n = document.getElementById('tdm-ctymsg'); if (n) { n.textContent = 'Saved.'; n.style.color = 'var(--growth)'; } }, 0);
+          });
+        };
+      }
       var f = document.getElementById('tdm-ws'), m = document.getElementById('tdm-wsmsg');
       if (f) f.onsubmit = function(e){
         e.preventDefault();

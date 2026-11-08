@@ -206,7 +206,7 @@ def add_entry(cur, body, *, actor, source="manual"):
         amt = -amt
     cur.execute("""INSERT INTO customer_ledger_entries (tenant_id, customer_id, kind, amount, method, note, occurred_on,
                                                         source, client_ref, created_by)
-                   VALUES (current_tenant(), %s, %s, %s, %s, %s, COALESCE(%s, (now() AT TIME ZONE 'Asia/Karachi')::date),
+                   VALUES (current_tenant(), %s, %s, %s, %s, %s, COALESCE(%s, td_local_today()),
                            %s, %s, %s) RETURNING id::text""",
                 (c["customer_id"], kind, amt, method, note, on, source, ref or None, actor))
     eid = cur.fetchone()["id"]

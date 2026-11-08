@@ -102,6 +102,9 @@ app.include_router(make_shop_router(_console_identity))
 # Set up the business by talking to Jarvis (Phase 9): what the owner says becomes the setup suggestion
 from .setup_talk import make_setup_talk_router
 app.include_router(make_setup_talk_router(_console_identity))
+# Countries (Phase 10 foundation, db/97): a business's country fills its currency and time zone
+from .countries import make_countries_router
+app.include_router(make_countries_router(_console_identity))
 from .dashboard import make_dashboard_router
 app.include_router(make_dashboard_router(_console_identity))
 from .support_routes import make_support_router, make_founder_support_router

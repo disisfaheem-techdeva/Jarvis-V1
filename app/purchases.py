@@ -232,7 +232,7 @@ def add_bill(cur, body, *, actor, source="manual"):
     number = _next_number(cur)
     cur.execute("""INSERT INTO purchase_bills (tenant_id, supplier_id, number, supplier_ref, bought_on, total, note,
                                                source, client_ref, created_by)
-                   VALUES (current_tenant(), %s, %s, %s, COALESCE(%s, (now() AT TIME ZONE 'Asia/Karachi')::date),
+                   VALUES (current_tenant(), %s, %s, %s, COALESCE(%s, td_local_today()),
                            %s, %s, %s, %s, %s) RETURNING id::text, bought_on""",
                 (s["supplier_id"], number, _clean(body.get("supplier_ref"), 60) or None, on, total,
                  _clean(body.get("note"), 300) or None, source, ref, actor))
@@ -334,7 +334,7 @@ def pay(cur, body, *, actor, source="manual"):
     cur.execute("""INSERT INTO supplier_ledger_entries (tenant_id, supplier_id, kind, amount, method, note, occurred_on,
                                                         source, client_ref, created_by)
                    VALUES (current_tenant(), %s, 'payment', %s, %s, %s,
-                           COALESCE(%s, (now() AT TIME ZONE 'Asia/Karachi')::date), %s, %s, %s) RETURNING id::text""",
+                           COALESCE(%s, td_local_today()), %s, %s, %s) RETURNING id::text""",
                 (s["supplier_id"], -amt, method, _clean(body.get("note"), 300) or None, _date(body.get("occurred_on")),
                  source, ref, actor))
     eid = cur.fetchone()["id"]
@@ -352,7 +352,7 @@ def opening(cur, body, *, actor):
         raise PurchaseError(400, "The amount must be more than zero.")
     s = _which_supplier(cur, body, actor)
     cur.execute("""INSERT INTO supplier_ledger_entries (tenant_id, supplier_id, kind, amount, note, occurred_on, created_by)
-                   VALUES (current_tenant(), %s, 'opening', %s, %s, COALESCE(%s, (now() AT TIME ZONE 'Asia/Karachi')::date), %s)
+                   VALUES (current_tenant(), %s, 'opening', %s, %s, COALESCE(%s, td_local_today()), %s)
                    RETURNING id::text""",
                 (s["supplier_id"], amt, _clean(body.get("note"), 300) or None, _date(body.get("occurred_on")), actor))
     eid = cur.fetchone()["id"]

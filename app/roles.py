@@ -128,7 +128,9 @@ ALWAYS_EXACT = {"/me", "/console/prefs", "/business-profile", "/categories", "/b
                 # and its actions go through this same check)
                 "/console", "/console/speak",
                 # the same Jarvis through its v1 contract (app/jarvis_api.py), same rule
-                "/jarvis/v1"}
+                "/jarvis/v1",
+                # the list of countries: reference data, no business's records (db/97)
+                "/countries"}
 ALWAYS_PREFIX = ("/auth/", "/public/", "/media/", "/assets/", "/console/conversations", "/jarvis/v1/")
 PAGES = ("/", "/dashboard", "/login", "/pin", "/reset", "/portal", "/onboarding", "/techdeva", "/signup",
          "/orders-view", "/storefront-view", "/plans", "/pos")
