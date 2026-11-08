@@ -53,6 +53,43 @@ _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 _USED = {}   # signature -> expiry of confirmations already used (one API process)
+_REDIS = None
+
+
+def _redis():
+    """Redis for the used-confirmation list, so a "yes" stays used across a restart
+    and across processes. None when Redis cannot be reached: the in-process list
+    above still works, exactly as before this was added (8 Nov 2026)."""
+    global _REDIS
+    if _REDIS is None:
+        try:
+            import redis
+            _REDIS = redis.from_url(os.environ.get("REDIS_URL", "redis://redis:6379/0"),
+                                    socket_timeout=1, socket_connect_timeout=1)
+        except Exception:  # noqa: BLE001 -- no Redis client: in-process list only
+            return None
+    return _REDIS
+
+
+def _claim(sig, expires):
+    """True the first time this confirmation is used, False on any later use."""
+    now = time.time()
+    for k in [k for k, e in _USED.items() if e < now]:
+        _USED.pop(k, None)
+    if sig in _USED:
+        return False
+    r = _redis()
+    if r is not None:
+        try:
+            # SET NX: only the first caller anywhere gets True. It expires when
+            # the seal would have expired anyway, so the set never grows.
+            if not r.set("jarvis:used:" + sig, "1", nx=True, exat=int(expires) + 1):
+                _USED[sig] = expires
+                return False
+        except Exception:  # noqa: BLE001 -- Redis down: fall back to this process's list
+            pass
+    _USED[sig] = expires
+    return True
 
 
 class ActionError(Exception):
@@ -84,12 +121,10 @@ def unseal(token, tid, uid, role):
     now = time.time()
     if d.get("e", 0) < now:
         raise HTTPException(410, "That took too long, so I did not do it. Ask me again.")
-    # One "yes" does one thing: a double click must not record an expense twice.
-    for k in [k for k, e in _USED.items() if e < now]:
-        _USED.pop(k, None)
-    if s in _USED:
+    # One "yes" does one thing: a double click must not record an expense twice,
+    # and neither must the same "yes" sent again after the API restarts.
+    if not _claim(s, d["e"]):
         raise HTTPException(409, "That is already done.")
-    _USED[s] = d["e"]
     return d["a"], d.get("g") or {}
 
 
