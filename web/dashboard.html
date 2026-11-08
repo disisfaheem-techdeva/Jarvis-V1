@@ -10564,6 +10564,56 @@ function dvInsights(){
     return '<div class="dv">' + out + '</div>';
   };
 })();
+/* Today at the shop (9 Nov 2026; app/shopintel.py): for a business that sells
+   products, the owner sees the day in one block after the key figures. Every
+   estimate says it is one, with what it covers; figures are reloaded when they
+   are more than a minute old. */
+(function(){
+  var base = VIEWS.overview;
+  function shopToday(){
+    // at most one reload a minute: the time is set before the request, so a finished
+    // load never looks stale and asks again
+    var stale = !S.shoptoday_req || (Date.now() - S.shoptoday_req > 60000);
+    if (stale) S.shoptoday_req = Date.now();
+    if (!need('shoptoday', '/shop/summary?period=today', stale && S.shoptoday !== undefined))
+      return '<div class="dv-sec-head"><h2>Today at the shop</h2></div>' + panel('Today at the shop', loading('Adding up today…'));
+    var d = S.shoptoday;
+    if (d === null) return '<div class="dv-sec-head"><h2>Today at the shop</h2></div>' + panel('Today at the shop', errState(S.shoptoday_detail || 'The shop figures did not load.'));
+    var p = d.profit || {}, cov = p.coverage == null ? null : Math.round(p.coverage * 100);
+    var profitNote = p.gross == null ? (d.sales.count ? 'No purchase costs recorded for what sold' : 'No sales yet today')
+      : 'Estimate' + (cov < 100 ? ', on ' + cov + '% of sales with a known cost' : '') + '; after expenses ' + money(p.after_expenses);
+    var cards = '<div class="grid">' +
+      metric('Sales today', money(d.sales.total), d.sales.count + ' paid bill' + (d.sales.count === 1 ? '' : 's')) +
+      metric('Profit today', p.gross == null ? null : money(p.gross), profitNote) +
+      metric('Udhaar given today', money(d.udhaar_given.total), 'Till bills and the ledger') +
+      metric('Expenses today', money(d.expenses)) + '</div>' +
+      '<div class="grid">' +
+      metric('Stock value', d.stock.products_valued ? money(d.stock.value) : null,
+             d.stock.products_valued ? 'Estimate, at purchase cost' + (d.stock.products_without_cost ? '; ' + d.stock.products_without_cost + ' without a cost left out' : '') : 'No purchase costs recorded yet') +
+      metric('Customers owe you', money(d.udhaar.total), d.udhaar.customers + ' customer' + (d.udhaar.customers === 1 ? '' : 's')) +
+      metric('You owe suppliers', money(d.owed_to_suppliers.total), d.owed_to_suppliers.suppliers + ' supplier' + (d.owed_to_suppliers.suppliers === 1 ? '' : 's')) + '</div>';
+    var low = (d.stock.low || []).slice(0, 6), re = (d.reorder.items || []).slice(0, 6);
+    var lists = '<div class="dv-two">' +
+      panel('Low on stock', !low.length ? empty('Nothing is low', 'Every tracked product is above its warning level.')
+        : '<div class="tbl-wrap"><table><thead><tr><th>Product</th><th class="num">Left</th></tr></thead><tbody>' + low.map(function(x){
+            return '<tr><td>' + esc(x.name) + '</td><td class="num' + (x.out ? ' bal-due' : '') + '">' + (x.out ? 'Out' : esc(x.on_hand) + (x.unit && x.unit !== 'piece' ? ' ' + esc(x.unit) : '')) + '</td></tr>';
+          }).join('') + '</tbody></table></div>', '<a class="btn" href="#/inventory">Inventory</a>') +
+      panel('Order soon', !re.length ? empty('Nothing runs out this week', 'At the last ' + d.reorder.pace_days + ' days’ pace.')
+        : '<div class="tbl-wrap"><table><thead><tr><th>Product</th><th class="num">Days left</th><th class="num">Order</th></tr></thead><tbody>' + re.map(function(x){
+            return '<tr><td>' + esc(x.name) + '</td><td class="num">' + esc(x.days_left) + '</td><td class="num">' + esc(x.suggest) + (x.unit && x.unit !== 'piece' ? ' ' + esc(x.unit) : '') + '</td></tr>';
+          }).join('') + '</tbody></table></div><div class="card-note" style="padding:0 16px 12px">A suggestion from the last ' + d.reorder.pace_days + ' days’ sales, to cover ' + d.reorder.cover_days + ' days.</div>',
+        '<a class="btn" href="#/purchases">Purchases</a>') + '</div>';
+    return '<div class="dv-sec-head"><h2>Today at the shop</h2></div>' + cards + lists;
+  }
+  VIEWS.overview = function(){
+    var out = base.apply(this, arguments);
+    var t = typeof BP !== 'undefined' && BP.data && BP.data.business_type;
+    if (!sellsProducts(t) || !isOwner()) return out;
+    var at = out.indexOf('<div class="dv-two">');
+    if (at < 0) return out;
+    return out.slice(0, at) + shopToday() + out.slice(at);
+  };
+})();
 function dvWire(){
   var g = function(id){ return document.getElementById(id); };
   if (g('dv-refresh')) g('dv-refresh').onclick = function(){
